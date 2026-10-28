@@ -88,6 +88,9 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 .pending.bad{background:var(--bad-bg);border-color:var(--bad)}
 .camWrap{display:flex;flex-direction:column;gap:8px}
 .camTarget{font:700 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:6px;background:var(--accent);color:var(--accent-ink)}
+.contarCard{max-width:720px;width:100%;margin:0 auto}
+.nextUbic{justify-content:center;font-size:16px;padding:12px;border:2px solid var(--accent);color:var(--ink)}
+.done{background:var(--ok-bg)!important;border-color:var(--ok)!important}
 .lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .last{border-radius:10px;padding:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px;transition:background .2s}
 .last.flash-ok{background:var(--ok-bg);border-color:var(--ok)}
@@ -203,8 +206,7 @@ body.op .supOnly{display:none!important}
 <!-- ============ 2 CONTAR ============ -->
 <section class="view" id="v-contar" hidden>
   <div id="conteoBanner"></div>
-  <div class="grid2">
-    <div class="card">
+  <div class="card contarCard">
       <div id="camWrap" class="camWrap" hidden>
         <div class="row" style="justify-content:space-between">
           <span class="camTarget" id="camTarget"></span>
@@ -223,7 +225,6 @@ body.op .supOnly{display:none!important}
           <button class="btn accent" id="camUbic" aria-label="Leer ubicación con cámara">Cámara</button>
         </div>
         <datalist id="ubicList"></datalist>
-        <button class="btn" id="btnNextUbic">Siguiente ubicación →</button>
       </div>
 
       <div class="step">
@@ -240,7 +241,7 @@ body.op .supOnly{display:none!important}
         <div class="eyebrow">3 · Cantidad</div>
         <div class="scanbox">
           <input id="qty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off">
-          <button class="btn primary" id="btnAdd" style="padding-inline:22px;font-size:17px">Sumar</button>
+          <button class="btn primary" id="btnAdd" style="padding-inline:26px;font-size:18px;min-width:84px;justify-content:center">OK</button>
         </div>
       </div>
 
@@ -259,26 +260,26 @@ body.op .supOnly{display:none!important}
         <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="keepQty"> Mantener cantidad</label>
         <label class="small supOnly" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="blind" checked> Conteo ciego (no mostrar stock)</label>
       </div>
+      <div class="step">
+        <div class="eyebrow">4 · Terminar ubicación</div>
+        <div class="small muted" id="sessInfo"></div>
+        <button class="btn nextUbic" id="btnNextUbic">Siguiente ubicación →</button>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="eyebrow">Último registro</div>
-      <div class="last" id="last"><div class="d muted">Todavía no hay lecturas</div><div class="c">Escanea un código para empezar</div></div>
-      <div class="row small muted"><span id="sessInfo"></span></div>
-    </div>
+  <div id="last" hidden></div>
+
+  <div class="card">
+    <h2>Lecturas recientes</h2>
+    <div class="tbl"><table id="recent"></table></div>
   </div>
 
   <div class="card">
-    <div class="row"><h2>Lecturas recientes</h2><span class="sep"></span>
-      <button class="btn sm primary" id="btnExpScans">Exportar mis conteos (.xlsx)</button>
-      <button class="btn sm danger" id="btnClearScans">Borrar lecturas…</button>
-    </div>
+    <div class="eyebrow">Al terminar el conteo</div>
+    <p class="small">Exporta tus conteos y envía el archivo al supervisor. Después borra las lecturas para dejar el celular listo para el próximo conteo.</p>
+    <button class="btn primary" id="btnExpScans" style="justify-content:center;font-size:16px;padding:12px">Exportar mis conteos (.xlsx)</button>
+    <button class="btn danger" id="btnClearScans" style="justify-content:center">Borrar lecturas…</button>
     <div id="confirmScans"></div>
-    <p class="small">Al terminar, exporta y envía el archivo al supervisor. Después borra las lecturas para dejar el celular listo para el próximo conteo.</p>
-    <div class="tbl"><table id="recent"></table></div>
-  </div>
-  <div class="row small muted" style="justify-content:center">
-    <button class="btn sm" id="btnMode">Opciones de supervisor</button>
   </div>
 </section>
 
@@ -606,10 +607,10 @@ $("#ubic").addEventListener("change",e=>setUbic(e.target.value,true));
 $("#ubic").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();setUbic(e.target.value);
   if(camOpen()){setCamTarget("sku");e.target.blur()}else focusSel($("#scan"))}});
 $("#btnNextUbic").onclick=()=>{
-  if(unsaved&&$("#scan").value.trim()&&Date.now()>nextArmed){nextArmed=Date.now()+5000;toast("Tienes un producto leído sin sumar. Toca otra vez para pasar igual.");return}
+  if(unsaved&&$("#scan").value.trim()&&Date.now()>nextArmed){nextArmed=Date.now()+5000;toast("Tienes un producto leído sin confirmar con OK. Toca otra vez para pasar igual.");return}
   const u=cfg.ubic, here=scans.filter(s=>(s.ubic||"")===(u||""));
   const prods=new Set(here.map(s=>key(s.code))).size, units=here.reduce((a,s)=>a+ +s.qty,0);
-  $("#last").className="last";
+  if(u)toast(`${u} cerrada: ${fmt(prods)} productos · ${fmt2(units)} unidades`);
   $("#last").innerHTML=u?`<div class="eyebrow">Ubicación cerrada</div><div class="d">${esc(u)}</div><div class="c">${fmt(prods)} productos distintos · ${fmt2(units)} unidades · ${fmt(here.length)} lecturas</div>`:`<div class="d muted">Escanea la siguiente ubicación</div>`;
   setUbic("",true);clearProduct();unsaved=false;resetQty();
   if(camOpen())setCamTarget("ubic");else $("#ubic").focus();
@@ -638,7 +639,7 @@ function productRead(raw,src){
   const it=showPending(v);
   if(cfg.mode==="uno"){addScan(v,qtyVal(),src);if(!camOpen())focusSel($("#scan"));return}
   audio.beep(!!it||!erp); unsaved=true;
-  if(camOpen()){camHold=true;$("#camMsg").textContent="Leído. Digita la cantidad y toca Sumar."}
+  if(camOpen()){camHold=true;$("#camMsg").textContent="Leído. Digita la cantidad y toca OK."}
   focusSel($("#qty"));
 }
 function nameSearch(v){
@@ -675,6 +676,7 @@ function addScan(code,qty,src){
   const it=erp?findItem(code):null;
   showLast(s,it);audio.beep(!!it||!erp);
   resetQty();showPending(code);
+  const pe=$("#pending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado +${fmt2(qty)}${s.ubic?" en "+esc(s.ubic):""}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
   renderRecent();renderSess();
 }
 function totalFor(code){const k=key(code);let a=0,u=0;for(const s of scans)if(key(s.code)===k){a+=+s.qty;if((s.ubic||"")===(cfg.ubic||""))u+=+s.qty}return [a,u]}
@@ -727,7 +729,7 @@ function applyKbd(){
   if(KBD[k][1])el.setAttribute("pattern",KBD[k][1]);else el.removeAttribute("pattern");
   $("#ubic").setAttribute("inputmode",k==="none"?"none":"text");
   el.placeholder=k==="txt"?"Escanea, escribe código o nombre":"Escanea o digita el código";
-  $("#kbdHint").textContent=KBD[k][2]+(cfg.mode==="uno"?" Modo uno por uno: cada lectura suma sola.":" Modo con cantidad: lees el producto, digitas la cantidad y tocas Sumar.");
+  $("#kbdHint").textContent=KBD[k][2]+(cfg.mode==="uno"?" Modo uno por uno: cada lectura suma sola.":" Modo con cantidad: lees el producto, digitas la cantidad y tocas OK.");
   $$("#kbd button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===k));
 }
 $$("#kbd button").forEach(b=>b.onclick=()=>{cfg.kbd=b.dataset.k;store.set("inv_cfg",cfg);applyKbd();$("#scan").blur();setTimeout(()=>focusSel($("#scan")),60)});
@@ -984,7 +986,7 @@ $("#btnCrear").onclick=async()=>{
     conteos.unshift(c);store.set("inv_conteos",conteos);
     // en el PC queda cargado el stock completo para cruzar después
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
-    cfg.operator=false;store.set("inv_cfg",cfg);applyMode();updStatus();
+    cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
     showCreated(c);renderConteos();$("#crearMsg").textContent="";
   }catch(e){$("#crearMsg").textContent="";toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":e.message)}
   finally{$("#btnCrear").disabled=false}
@@ -1063,14 +1065,13 @@ async function loadMaestro(){
     setMaestro(m);
   }catch(e){}
 }
-const isOp=()=>cfg.operator==null?!!(erp&&erp.maestro):cfg.operator;
+if((location.hash||"")==="#panel"){cfg.sup=true;store.set("inv_cfg",cfg)}
+const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.login);
 function applyMode(){
   const op=isOp();
   document.body.classList.toggle("op",op);
-  $("#btnMode").textContent=op?"Opciones de supervisor":"Volver a modo operario (solo contar)";
   if(op&&$("#v-contar").hidden)show("contar");
 }
-$("#btnMode").onclick=()=>{cfg.operator=!isOp();store.set("inv_cfg",cfg);applyMode();if(!isOp())toast("Menú completo activado")};
 $("#user").value=cfg.user||"";
 $("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.value=cfg.user;store.set("inv_cfg",cfg)};
 $("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas")},"#confirmScans");
