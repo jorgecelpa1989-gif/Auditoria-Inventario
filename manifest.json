@@ -1,0 +1,16 @@
+{
+  "name": "Conteo de Bodega",
+  "short_name": "Conteo",
+  "description": "Inventario con pistola o cámara y cruce contra el ERP en Excel",
+  "start_url": "./index.html#contar",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f5f7",
+  "theme_color": "#18212b",
+  "lang": "es-CL",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
