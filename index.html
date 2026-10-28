@@ -1,36 +1,25 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style><link rel="manifest" href="manifest.json"><meta name="theme-color" content="#084f70"><link rel="apple-touch-icon" href="icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"></head><body><title>Conteo de Bodega · Grupo Vector</title>
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style><link rel="manifest" href="manifest.json"><meta name="theme-color" content="#e9f2f7"><link rel="apple-touch-icon" href="icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"></head><body><title>Conteo de Bodega · Grupo Vector</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <style>
 /* Layout: barra de pestañas fija arriba (Stock ERP · Contar · Importar · Resultado), una columna en celular, paneles de trabajo en PC */
 :root{
-  /* Paleta Grupo Vector: azul petróleo #084F70, azul medio #2B82AB, celeste #6AAEC6 */
-  --bg:#f1f5f8; --panel:#ffffff; --ink:#0d2a3b; --muted:#557083; --line:#d2dfe7;
-  --accent:#1f78a3; --accent-ink:#ffffff; --primary:#084f70; --primary-ink:#ffffff;
-  --ok:#1d7a47; --warn:#9a5f00; --bad:#b3261e; --info:#1f78a3;
-  --ok-bg:#e2f3e8; --warn-bg:#fcefd9; --bad-bg:#fbe5e3; --info-bg:#e4f0f6; --chip:#e7eff4;
-  --brand3:#6aaec6; --logo-plate:transparent; --hdr:#ffffff;
+  /* Paleta calma Grupo Vector: celestes y azules pastel, un solo tema claro (no cambia con el modo oscuro del celular) */
+  --bg:#e9f2f7; --panel:#f8fbfd; --ink:#26465c; --muted:#6b8799; --line:#d3e3ec;
+  --accent:#9ccae0; --accent-ink:#1f4258; --primary:#4a7fa0; --primary-ink:#ffffff;
+  --ok:#3d8661; --warn:#9c7330; --bad:#b0564e; --info:#4a7fa0;
+  --ok-bg:#e4f2ea; --warn-bg:#f7eedc; --bad-bg:#f7e5e2; --info-bg:#e3f0f7; --chip:#e0edf4;
+  --brand3:#a9d0e0; --logo-plate:transparent; --hdr:#f8fbfd;
   --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  color-scheme:light;
 }
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0a1923; --panel:#10232f; --ink:#e2edf3; --muted:#8eaabb; --line:#22404f;
-  --accent:#2b82ab; --accent-ink:#ffffff; --primary:#6aaec6; --primary-ink:#04202e;
-  --ok:#5cc58a; --warn:#f0b257; --bad:#f2827a; --info:#6aaec6;
-  --ok-bg:#14301f; --warn-bg:#33270f; --bad-bg:#3a1a18; --info-bg:#11303f; --chip:#16303d;
-  --brand3:#6aaec6; --logo-plate:#ffffff; --hdr:#10232f; color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#0a1923; --panel:#10232f; --ink:#e2edf3; --muted:#8eaabb; --line:#22404f;
-  --accent:#2b82ab; --accent-ink:#ffffff; --primary:#6aaec6; --primary-ink:#04202e;
-  --ok:#5cc58a; --warn:#f0b257; --bad:#f2827a; --info:#6aaec6;
-  --ok-bg:#14301f; --warn-bg:#33270f; --bad-bg:#3a1a18; --info-bg:#11303f; --chip:#16303d;
-  --brand3:#6aaec6; --logo-plate:#ffffff; --hdr:#10232f; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;margin:0}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--hdr)}
 .wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 48px}
-header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--hdr);border-bottom:3px solid var(--primary)}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--hdr);border-bottom:2px solid var(--accent)}
 header.top .in{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px 0;display:flex;flex-direction:column;gap:8px}
 .brand{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}
 .brand h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.01em;display:flex;align-items:center;gap:8px}
@@ -94,6 +83,7 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 .camWrap{display:flex;flex-direction:column;gap:8px}
 .camTarget{font:700 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:6px;background:var(--accent);color:var(--accent-ink)}
 .contarCard{max-width:720px;width:100%;margin:0 auto}
+body.expired .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}
 .nextUbic{justify-content:center;font-size:16px;padding:12px;border:2px solid var(--accent);color:var(--ink)}
 .done{background:var(--ok-bg)!important;border-color:var(--ok)!important}
 .lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -110,7 +100,7 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 #reader{width:100%;max-width:520px;border-radius:10px;overflow:hidden;background:#000}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:16px;padding:5px 11px;font:600 12.5px var(--font);cursor:pointer}
-.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
 .confirm{border:1px solid var(--bad);background:var(--bad-bg);border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .muted{color:var(--muted)}
@@ -120,7 +110,7 @@ details summary{cursor:pointer;font-weight:600}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{border:0;background:var(--panel);color:var(--ink);font:600 14px var(--font);padding:7px 14px;cursor:pointer;border-right:1px solid var(--line)}
 .seg button:last-child{border-right:0}
-.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.seg button[aria-pressed="true"]{background:var(--primary);color:var(--primary-ink)}
 .notice{border:1px solid var(--info);background:var(--info-bg);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13.5px}
 body.op nav.tabs{display:none}
 body.op .supOnly{display:none!important}
@@ -176,6 +166,9 @@ body.op .supOnly{display:none!important}
     <p>Se crea un link con la lista de productos (código, código de barras, descripción y unidad). <b>No lleva stock ni costos</b>: el contador cuenta a ciegas. Lo mandas por WhatsApp y al abrirlo el celular queda listo para contar.</p>
     <div class="row">
       <label class="f" style="flex:1 1 260px">Nombre del conteo<input id="cNombre" placeholder="Ej: Bodega Central · Pasillos 1 a 5"></label>
+      <label class="f" style="flex:0 1 200px">Vigencia del link<select id="cVence">
+        <option value="2">2 horas</option><option value="4">4 horas</option><option value="8" selected>8 horas (un turno)</option><option value="12">12 horas</option><option value="hoy">Hasta hoy 23:59</option>
+      </select></label>
     </div>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
@@ -414,7 +407,7 @@ function saveScans(){store.set("inv_scans",scans);updStatus()}
 function updStatus(){
   $("#nScans").textContent=fmt(scans.length);
   const tot=scans.reduce((a,s)=>a+(+s.qty||0),0);
-  $("#status").innerHTML=(erp&&erp.conteo?`<span>Conteo: <b>${esc(erp.conteo.nombre)}</b></span>`:"")+(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
+  $("#status").innerHTML=(erp&&erp.conteo?`<span>Conteo: <b>${esc(erp.conteo.nombre)}</b></span>`+(erp.conteo.vence?`<span>Vence: <b>${new Date(erp.conteo.vence).toLocaleString("es-CL",{weekday:"short",hour:"2-digit",minute:"2-digit"})}</b></span>`:""):"")+(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
 }
 
 /* ================= pestañas ================= */
@@ -629,6 +622,7 @@ function showPending(code){
 }
 /* lee un producto (pistola, cámara, teclado o búsqueda). En "Con cantidad" espera la cantidad; en "Uno por uno" suma al tiro */
 function productRead(raw,src){
+  if(checkExpiry())return;
   let v=norm(raw); if(!v)return;
   const m=v.match(/^(\d+(?:[.,]\d+)?)\s*[*xX]\s*(\S+)$/); if(m){$("#qty").value=String(num(m[1]));v=m[2]}
   const it0=erp&&findItem(v);
@@ -654,6 +648,7 @@ $("#scan").addEventListener("input",()=>{unsaved=false;$("#pending").hidden=true
 
 /* ---- sumar ---- */
 function doSum(){
+  if(checkExpiry())return;
   const v=norm($("#scan").value);
   if(!v){toast("Primero escanea o digita un producto");focusSel($("#scan"));return}
   const q=num($("#qty").value);
@@ -710,7 +705,7 @@ $("#btnExpScans").onclick=()=>{
   if(!scans.length)return toast("No hay lecturas para exportar");
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Descripción":(erp&&findItem(s.code)||{}).desc||"","Cantidad":s.qty,"Ubicación":s.ubic,"Contador":s.user||"","Conteo":s.conteo||"","Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
-  saveWb(wb,"Conteos_"+(erp&&erp.conteo?erp.conteo.nombre.replace(/[^\wÁÉÍÓÚÑáéíóúñ-]+/g,"_").slice(0,40)+"_":"")+(cfg.user?cfg.user.replace(/[^\w-]+/g,"_")+"_":"")+stamp()+".xlsx");
+  saveWb(wb,"Conteos_"+(erp&&erp.conteo?erp.conteo.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w-]+/g,"_").slice(0,40)+"_":"")+(cfg.user?cfg.user.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w-]+/g,"_")+"_":"")+stamp()+".xlsx");
 };
 
 /* ---- modo y teclado ---- */
@@ -971,7 +966,9 @@ $("#btnCrear").onclick=async()=>{
   if(d.map.cod==null)return toast("Falta elegir la columna de código");
   if(!gh.token){$("#ghCard").scrollIntoView({behavior:"smooth"});return toast("Falta conectar GitHub (una sola vez, más abajo)")}
   const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
-  const m={app:"conteo-bodega",v:2,nombre,creado:new Date().toISOString(),origen:d.file,productos:d.items.length,items:d.items.map(i=>[i.cod,i.ean,i.desc,i.um])};
+  const vv=$("#cVence").value, ahora=new Date();
+  const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+  const m={app:"conteo-bodega",v:2,nombre,vence,creado:ahora.toISOString(),origen:d.file,productos:d.items.length,items:d.items.map(i=>[i.cod,i.ean,i.desc,i.um])};
   $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
   try{
     const r=await fetch(GH+"/gists",{method:"POST",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json","Content-Type":"application/json"},
@@ -981,7 +978,7 @@ $("#btnCrear").onclick=async()=>{
     const g=await r.json(), raw=g.files["conteo.json"].raw_url;
     const mm=raw.match(/^https:\/\/gist\.githubusercontent\.com\/([\w-]+)\/([0-9a-f]+)\/raw\/([0-9a-f]+)\/conteo\.json$/);
     if(!mm)throw new Error("Respuesta inesperada de GitHub");
-    const c={id:g.id,nombre,creado:m.creado,productos:m.productos,link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
+    const c={id:g.id,nombre,vence,creado:m.creado,productos:m.productos,link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
     conteos.unshift(c);store.set("inv_conteos",conteos);
     // en el PC queda cargado el stock completo para cruzar después
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
@@ -990,24 +987,43 @@ $("#btnCrear").onclick=async()=>{
   }catch(e){$("#crearMsg").textContent="";toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":e.message)}
   finally{$("#btnCrear").disabled=false}
 };
+async function closeLink(c){
+  if(!gh.token)return toast("Falta conectar GitHub");
+  try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});
+    if(!r.ok&&r.status!==404)throw new Error(r.status);
+    c.cerrado=new Date().toISOString();store.set("inv_conteos",conteos);renderConteos();
+    if($("#crearRes").dataset.id===c.id)showCreated(c);
+    toast("Link cerrado: ya no abre en ningún celular nuevo");
+  }catch(e){toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":"No se pudo cerrar el link ("+e.message+"). Intenta de nuevo.")}
+}
 function showCreated(c){
-  const box=$("#crearRes");
+  const box=$("#crearRes");box.dataset.id=c.id;
+  if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
-    <div class="small muted">${fmt(c.productos)} productos. Manda este link al contador:</div>
+    <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
-    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div></div>`;
+    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div>
+    <div class="small" style="border-top:1px solid var(--line);padding-top:8px">Cuando el contador te confirme que <b>ya lo abrió</b>, cierra el link para que no se pueda abrir en otro celular.</div>
+    <div class="row"><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`;
   $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));
+  $("#btnCloseLink").onclick=()=>closeLink(c);
   $("#linkOut").onclick=e=>e.target.select();
 }
-function renderConteos(){
-  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th class="num">Productos</th><th></th></tr></thead><tbody>`+
-   (conteos.length?conteos.map((c,i)=>`<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td class="num">${fmt(c.productos)}</td>
-    <td><div class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-rm="${i}">Eliminar</button></div></td></tr>`).join("")
-   :`<tr><td colspan="4" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>";
+const isVenc=v=>!!v&&Date.now()>Date.parse(v);
+let autoClosing=false;
+async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
+function renderConteos(){renderConteosOnly();autoCloseExpired()}
+function renderConteosOnly(){
+  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Link</th><th></th></tr></thead><tbody>`+
+   (conteos.length?conteos.map((c,i)=>`<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
+    <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>
+    <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`).join("")
+   :`<tr><td colspan="6" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>";
   $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
+  $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
   $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
-    confirmBox(`Eliminar "${esc(c.nombre)}": el link deja de funcionar para quien no lo haya abierto.`,async()=>{
-      try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo borrar en GitHub; se quitó solo de la lista")}
+    confirmBox(`Quitar "${esc(c.nombre)}" de la lista${c.cerrado?"":" y cerrar su link"}.`,async()=>{
+      if(!c.cerrado){try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo cerrar en GitHub; se quitó solo de la lista")}}
       conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#crearRes")});
 }
 
@@ -1018,9 +1034,11 @@ function checkConteoLink(){
   try{history.replaceState(null,"",location.pathname+"#contar")}catch(e){}
   if(!/^[\w-]+\/[0-9a-f]{20,}\/[0-9a-f]{20,}$/.test(c)){toast("El link del conteo está incompleto. Pide que te lo reenvíen.");return false}
   const [u,id,sha]=c.split("/");
+  if(cfg.conteoId===id&&erp&&erp.conteo){toast("Conteo "+erp.conteo.nombre);return true}
   $("#conteoBanner").innerHTML=`<div class="notice">Descargando el conteo…</div>`;
   fetch(RAW+u+"/"+id+"/raw/"+sha+"/conteo.json").then(r=>{if(!r.ok)throw new Error(r.status===404?"gone":"net");return r.json()}).then(m=>{
     if(!m||m.app!=="conteo-bodega"||!Array.isArray(m.items))throw new Error("bad");
+    if(isVenc(m.vence)){$("#conteoBanner").innerHTML=`<div class="confirm"><span>Este link venció (${fmtDT(m.vence)}). Pide uno nuevo al supervisor.</span></div>`;return}
     if(cfg.conteoId===id&&erp&&erp.conteo){$("#conteoBanner").innerHTML="";toast("Conteo "+m.nombre+" ya estaba abierto");return}
     if(scans.length){
       $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch">
@@ -1033,12 +1051,13 @@ function checkConteoLink(){
     }
     applyConteo(m,id);
   }).catch(e=>{
-    $("#conteoBanner").innerHTML=`<div class="confirm"><span>${e.message==="gone"?"Este conteo fue eliminado. Pide un link nuevo al supervisor.":"No se pudo descargar el conteo. Revisa la señal y vuelve a abrir el link."}</span></div>`;
+    $("#conteoBanner").innerHTML=`<div class="confirm"><span>${e.message==="gone"?"Este link ya fue cerrado por el supervisor. Si eres el contador asignado, pídele uno nuevo.":"No se pudo descargar el conteo. Revisa la señal y vuelve a abrir el link."}</span></div>`;
   });
   return true;
 }
 function applyConteo(m,id){
-  erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado},
+  delete $("#conteoBanner").dataset.exp;
+  erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null},
     items:m.items.map(([cod,ean,desc,um])=>({cod,ean:ean||"",desc:desc||"",um:um||"",stock:null,costo:null,ubic:""}))};
   store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";store.set("inv_cfg",cfg);
   buildIndex();updStatus();applyMode();setUbic("",true);clearProduct();renderRecent();renderSess();
@@ -1073,9 +1092,21 @@ function applyMode(){
 }
 $("#user").value=cfg.user||"";
 $("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.value=cfg.user;store.set("inv_cfg",cfg)};
-$("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas")},"#confirmScans");
+$("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>'}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas")},"#confirmScans");
 applyKbd();
-updStatus();renderSess();applyMode();renderGh();renderConteos();
+function checkExpiry(){
+  const v=erp&&erp.conteo&&erp.conteo.vence, exp=isVenc(v);
+  document.body.classList.toggle("expired",exp);
+  if(exp){
+    if(!$("#conteoBanner").dataset.exp){$("#conteoBanner").dataset.exp="1";
+      $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch"><b>El conteo venció el ${fmtDT(v)}</b><span class="small">Ya no se pueden registrar lecturas. Exporta tus conteos (abajo) y envíalos al supervisor.</span></div>`;}
+    if(typeof stopCam==="function"&&cam)stopCam();
+    if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+  }
+  return exp;
+}
+setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
+updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();
 if(!checkConteoLink())loadMaestro();
 const h=(location.hash||"").slice(1);
 show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
