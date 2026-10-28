@@ -48,6 +48,7 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .btn{font:600 14px var(--font);border-radius:8px;padding:9px 14px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .btn:hover{border-color:var(--muted)}
+a.btn{text-decoration:none}
 .btn.primary{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
 .btn.accent{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.danger{color:var(--bad);border-color:var(--bad)}
@@ -76,7 +77,18 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 /* Contar */
 .scanbox{display:flex;gap:8px}
 .scanbox input{flex:1;font:600 20px var(--mono);padding:14px 12px;border:2px solid var(--primary)}
-.qty{width:84px;text-align:center;font:600 18px var(--mono)}
+.qty{width:auto;flex:1;min-width:0;text-align:center;font:600 22px var(--mono)!important}
+.step{display:flex;flex-direction:column;gap:8px;padding-top:4px}
+.step .scanbox .btn{flex:0 0 auto}
+#ubic{flex:1;min-width:0;font:600 18px var(--mono);padding:12px;border:2px solid var(--accent)}
+#ubic.set{background:var(--warn-bg)}
+.scanbox input{min-width:0}
+.pending{border-radius:8px;padding:10px 12px;background:var(--info-bg);border:1px solid var(--info);display:flex;flex-direction:column;gap:2px}
+.pending .d{font-weight:600;font-size:16px}
+.pending.bad{background:var(--bad-bg);border-color:var(--bad)}
+.camWrap{display:flex;flex-direction:column;gap:8px}
+.camTarget{font:700 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:6px;background:var(--accent);color:var(--accent-ink)}
+.lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .last{border-radius:10px;padding:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px;transition:background .2s}
 .last.flash-ok{background:var(--ok-bg);border-color:var(--ok)}
 .last.flash-bad{background:var(--bad-bg);border-color:var(--bad)}
@@ -113,7 +125,7 @@ body.op .supOnly{display:none!important}
     <div class="status" id="status"></div>
   </div>
   <nav class="tabs" role="tablist">
-    <button role="tab" data-v="erp" aria-selected="true">1 · Stock ERP</button>
+    <button role="tab" data-v="erp" aria-selected="true">1 · Panel</button>
     <button role="tab" data-v="contar" aria-selected="false">2 · Contar<span class="n" id="nScans">0</span></button>
     <button role="tab" data-v="importar" aria-selected="false">3 · Importar conteos</button>
     <button role="tab" data-v="resultado" aria-selected="false">4 · Resultado</button>
@@ -151,47 +163,106 @@ body.op .supOnly{display:none!important}
   </div>
 
   <div class="card" id="maestroCard" hidden>
-    <div class="eyebrow">Para los celulares de los operarios</div>
-    <h2>Generar maestro de productos</h2>
-    <p>Crea <b>maestro.json</b> con código, código de barras, descripción y unidad. <b>No incluye stock ni costos</b> (el conteo es ciego y el archivo queda en internet). Súbelo a tu repositorio de GitHub junto a index.html: cada celular lo carga solo al abrir la app.</p>
-    <div class="row"><button class="btn accent" id="btnMaestro">Descargar maestro.json</button></div>
+    <div class="eyebrow">Paso 2 · Para los contadores</div>
+    <h2>Crear conteo y compartir el link</h2>
+    <p>Se crea un link con la lista de productos (código, código de barras, descripción y unidad). <b>No lleva stock ni costos</b>: el contador cuenta a ciegas. Lo mandas por WhatsApp y al abrirlo el celular queda listo para contar.</p>
+    <div class="row">
+      <label class="f" style="flex:1 1 260px">Nombre del conteo<input id="cNombre" placeholder="Ej: Bodega Central · Pasillos 1 a 5"></label>
+    </div>
+    <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
+    <div id="crearRes"></div>
+  </div>
+
+  <div class="card" id="ghCard">
+    <div class="row"><div class="eyebrow">Configuración (una sola vez)</div><span class="sep"></span><span class="pill" id="ghState"></span></div>
+    <h2>Conexión con GitHub</h2>
+    <p>Los conteos se guardan como <b>Gist secreto</b> en tu cuenta de GitHub: no aparece en tu perfil ni en búsquedas, solo lo abre quien tiene el link. Para crearlos, la app necesita una llave (token) de tu cuenta.</p>
+    <details id="ghHelp">
+      <summary>Cómo obtener la llave</summary>
+      <ol class="small" style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
+        <li>Abre <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Conteo%20de%20Bodega" target="_blank" rel="noopener">este enlace de GitHub</a> (ya viene marcado el permiso <b>gist</b>, que es el único necesario).</li>
+        <li>En <b>Vencimiento</b> (Expiration) elige 1 año o "Sin vencimiento".</li>
+        <li>Baja hasta el final y toca <b>Generar token</b>.</li>
+        <li>Copia el código que empieza con <code>ghp_</code> y pégalo aquí abajo.</li>
+      </ol>
+    </details>
+    <div class="row">
+      <label class="f" style="flex:1 1 260px">Llave de GitHub (token)<input id="ghToken" type="password" autocomplete="off" placeholder="ghp_…"></label>
+      <button class="btn" id="btnGhSave" style="margin-top:16px">Guardar y probar</button>
+    </div>
+    <label class="f">Dirección de tu app<input id="appUrl" placeholder="https://usuario.github.io/repositorio/"></label>
+    <p class="small">La llave queda guardada solo en este computador. No la compartas ni la mandes por WhatsApp.</p>
+  </div>
+
+  <div class="card">
+    <h2>Conteos creados</h2>
+    <div class="tbl"><table id="conteosTbl"></table></div>
   </div>
 </section>
 
 <!-- ============ 2 CONTAR ============ -->
 <section class="view" id="v-contar" hidden>
+  <div id="conteoBanner"></div>
   <div class="grid2">
     <div class="card">
-      <div class="row">
-        <label class="f" style="flex:1 1 120px">Contador<input id="user" placeholder="Tu nombre" autocapitalize="characters"></label>
-        <label class="f" style="flex:2 1 160px">Ubicación que estás contando<input id="ubic" list="ubicList" placeholder="Ej: B1-P03-R2" autocapitalize="characters"></label>
+      <div id="camWrap" class="camWrap" hidden>
+        <div class="row" style="justify-content:space-between">
+          <span class="camTarget" id="camTarget"></span>
+          <div class="seg" id="camSeg"><button data-t="ubic" aria-pressed="false">Ubicación</button><button data-t="sku" aria-pressed="true">Producto</button></div>
+        </div>
+        <div id="reader"></div>
+        <div class="row"><span class="small muted" id="camMsg" style="flex:1;min-width:0"></span><button class="btn sm" id="btnCamStop">Cerrar cámara</button></div>
+      </div>
+
+      <label class="f">Contador<input id="user" placeholder="Tu nombre" autocapitalize="characters"></label>
+
+      <div class="step">
+        <div class="eyebrow">1 · Ubicación</div>
+        <div class="scanbox">
+          <input id="ubic" list="ubicList" placeholder="Escanea o escribe la ubicación" autocapitalize="characters" autocomplete="off" enterkeyhint="next">
+          <button class="btn accent" id="camUbic" aria-label="Leer ubicación con cámara">Cámara</button>
+        </div>
         <datalist id="ubicList"></datalist>
-        <label class="f">Cantidad<input id="qty" class="qty" type="text" inputmode="decimal" enterkeyhint="next" value="1"></label>
+        <button class="btn" id="btnNextUbic">Siguiente ubicación →</button>
+      </div>
+
+      <div class="step">
+        <div class="eyebrow">2 · Producto</div>
+        <div class="scanbox">
+          <input id="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea o digita el código">
+          <button class="btn accent" id="camSku" aria-label="Leer producto con cámara">Cámara</button>
+        </div>
+        <div class="pending" id="pending" hidden></div>
+        <div class="sugg" id="sugg" hidden></div>
+      </div>
+
+      <div class="step" id="stepQty">
+        <div class="eyebrow">3 · Cantidad</div>
+        <div class="scanbox">
+          <input id="qty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off">
+          <button class="btn primary" id="btnAdd" style="padding-inline:22px;font-size:17px">Sumar</button>
+        </div>
+      </div>
+
+      <div class="row" style="gap:8px">
+        <span class="small muted" style="width:62px">Modo</span>
+        <div class="seg" id="modeSeg"><button data-m="cant" aria-pressed="true">Con cantidad</button><button data-m="uno" aria-pressed="false">Uno por uno</button></div>
       </div>
       <div class="row" style="gap:8px">
-        <span class="small muted">Teclado:</span>
+        <span class="small muted" style="width:62px">Teclado</span>
         <div class="seg" id="kbd" role="group" aria-label="Tipo de teclado">
           <button data-k="num" aria-pressed="true">123</button><button data-k="txt" aria-pressed="false">ABC</button><button data-k="none" aria-pressed="false">Pistola</button>
         </div>
       </div>
-      <div class="scanbox">
-        <input id="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="Escanea o digita el código">
-        <button class="btn primary" id="btnAdd" style="padding-inline:18px;font-size:16px">Sumar</button>
-      </div>
-      <div class="row small muted">
-        <span id="kbdHint">Pistola en modo teclado: apunta y dispara, se suma solo. Atajo: <code>12*780123</code> suma 12.</span>
-      </div>
+      <div class="small muted" id="kbdHint"></div>
       <div class="row">
-        <button class="btn accent" id="btnCam">Escanear con cámara</button>
         <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="keepQty"> Mantener cantidad</label>
         <label class="small supOnly" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="blind" checked> Conteo ciego (no mostrar stock)</label>
       </div>
-      <div id="camWrap" hidden><div id="reader"></div><div class="row" style="margin-top:8px"><button class="btn sm" id="btnCamStop">Cerrar cámara</button><span class="small muted" id="camMsg"></span></div></div>
-      <div class="sugg" id="sugg" hidden></div>
     </div>
 
     <div class="card">
-      <div class="eyebrow">Último escaneo</div>
+      <div class="eyebrow">Último registro</div>
       <div class="last" id="last"><div class="d muted">Todavía no hay lecturas</div><div class="c">Escanea un código para empezar</div></div>
       <div class="row small muted"><span id="sessInfo"></span></div>
     </div>
@@ -229,7 +300,7 @@ body.op .supOnly{display:none!important}
 
 <!-- ============ 4 RESULTADO ============ -->
 <section class="view" id="v-resultado" hidden>
-  <div class="notice" id="resNote" hidden>Este equipo tiene cargada la lista de productos del maestro, que no trae stock. Para ver diferencias, carga el informe del ERP en <b>1 · Stock ERP</b>.</div>
+  <div class="notice" id="resNote" hidden>Este equipo tiene cargada la lista de productos del maestro, que no trae stock. Para ver diferencias, carga el informe del ERP en <b>1 · Panel</b>.</div>
   <div class="kpis" id="kpis"></div>
   <div class="card">
     <div class="row">
@@ -342,14 +413,14 @@ function saveScans(){store.set("inv_scans",scans);updStatus()}
 function updStatus(){
   $("#nScans").textContent=fmt(scans.length);
   const tot=scans.reduce((a,s)=>a+(+s.qty||0),0);
-  $("#status").innerHTML=(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
+  $("#status").innerHTML=(erp&&erp.conteo?`<span>Conteo: <b>${esc(erp.conteo.nombre)}</b></span>`:"")+(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
 }
 
 /* ================= pestañas ================= */
 function show(v){
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
-  if(v==="contar"){renderRecent();setTimeout(()=>$("#scan").focus(),50)}
+  if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
   if(v==="resultado")renderResult();
   if(v==="importar")renderImpDone();
   if(v!=="contar")stopCam();
@@ -516,89 +587,192 @@ $("#btnDemo").onclick=()=>{
 /* ================= CONTAR ================= */
 const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||window.webkitAudioContext)();const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.frequency.value=ok?1600:320;o.type=ok?"sine":"square";g.gain.value=.08;o.connect(g);g.connect(this.ctx.destination);o.start();o.stop(this.ctx.currentTime+(ok?.08:.28))}catch(e){}
   try{navigator.vibrate&&navigator.vibrate(ok?40:[80,60,80])}catch(e){}}};
-$("#ubic").value=cfg.ubic||"";$("#blind").checked=cfg.blind;$("#keepQty").checked=cfg.keepQty;
-$("#ubic").onchange=e=>{cfg.ubic=norm(e.target.value).toUpperCase();e.target.value=cfg.ubic;store.set("inv_cfg",cfg);renderSess()};
+if(!cfg.mode)cfg.mode="cant";
+let lastSrc="teclado", unsaved=false, nextArmed=0;
+const camOpen=()=>!!cam;
+$("#blind").checked=cfg.blind;$("#keepQty").checked=cfg.keepQty;
 $("#blind").onchange=e=>{cfg.blind=e.target.checked;store.set("inv_cfg",cfg);renderRecent()};
 $("#keepQty").onchange=e=>{cfg.keepQty=e.target.checked;store.set("inv_cfg",cfg)};
+
+/* ---- ubicación: queda fija hasta tocar "Siguiente ubicación" ---- */
+function setUbic(v,silent){
+  cfg.ubic=norm(v).toUpperCase();store.set("inv_cfg",cfg);
+  $("#ubic").value=cfg.ubic;$("#ubic").classList.toggle("set",!!cfg.ubic);
+  renderSess();
+  if(cfg.ubic&&!silent){audio.beep(true);toast("Ubicación "+cfg.ubic)}
+}
+$("#ubic").value=cfg.ubic||"";$("#ubic").classList.toggle("set",!!cfg.ubic);
+$("#ubic").addEventListener("change",e=>setUbic(e.target.value,true));
+$("#ubic").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();setUbic(e.target.value);
+  if(camOpen()){setCamTarget("sku");e.target.blur()}else focusSel($("#scan"))}});
+$("#btnNextUbic").onclick=()=>{
+  if(unsaved&&$("#scan").value.trim()&&Date.now()>nextArmed){nextArmed=Date.now()+5000;toast("Tienes un producto leído sin sumar. Toca otra vez para pasar igual.");return}
+  const u=cfg.ubic, here=scans.filter(s=>(s.ubic||"")===(u||""));
+  const prods=new Set(here.map(s=>key(s.code))).size, units=here.reduce((a,s)=>a+ +s.qty,0);
+  $("#last").className="last";
+  $("#last").innerHTML=u?`<div class="eyebrow">Ubicación cerrada</div><div class="d">${esc(u)}</div><div class="c">${fmt(prods)} productos distintos · ${fmt2(units)} unidades · ${fmt(here.length)} lecturas</div>`:`<div class="d muted">Escanea la siguiente ubicación</div>`;
+  setUbic("",true);clearProduct();unsaved=false;resetQty();
+  if(camOpen())setCamTarget("ubic");else $("#ubic").focus();
+};
+
+/* ---- producto: el código queda visible hasta leer otro ---- */
+function clearProduct(){$("#scan").value="";$("#pending").hidden=true;$("#sugg").hidden=true}
+function focusSel(el){el.focus();setTimeout(()=>{try{el.select()}catch(e){}},0)}
+function resetQty(){if(!cfg.keepQty)$("#qty").value=cfg.mode==="uno"?"1":""}
+function showPending(code){
+  const it=erp?findItem(code):null, p=$("#pending");
+  p.hidden=false;p.className="pending"+((it||!erp)?"":" bad");
+  const [tot,here]=totalFor(code);
+  p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):(erp?"Este código NO existe en la lista de productos":"Código leído")}</div>
+    <div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${cfg.ubic?"":" · <b style=\"color:var(--warn)\">sin ubicación</b>"}${tot?` · ya contado: ${fmt2(here)} aquí${cfg.ubic?`, ${fmt2(tot)} en total`:""}`:""}</div>`;
+  return it;
+}
+/* lee un producto (pistola, cámara, teclado o búsqueda). En "Con cantidad" espera la cantidad; en "Uno por uno" suma al tiro */
+function productRead(raw,src){
+  let v=norm(raw); if(!v)return;
+  const m=v.match(/^(\d+(?:[.,]\d+)?)\s*[*xX]\s*(\S+)$/); if(m){$("#qty").value=String(num(m[1]));v=m[2]}
+  const it0=erp&&findItem(v);
+  if(!it0&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){nameSearch(v);return}
+  $("#sugg").hidden=true;
+  v=codeStr(v); $("#scan").value=v; lastSrc=src;
+  const it=showPending(v);
+  if(cfg.mode==="uno"){addScan(v,qtyVal(),src);if(!camOpen())focusSel($("#scan"));return}
+  audio.beep(!!it||!erp); unsaved=true;
+  if(camOpen()){camHold=true;$("#camMsg").textContent="Leído. Digita la cantidad y toca Sumar."}
+  focusSel($("#qty"));
+}
+function nameSearch(v){
+  const words=deacc(v).split(" ").filter(Boolean);
+  const res=(erp?erp.items:[]).filter(i=>{const d=deacc(i.desc+" "+i.cod);return words.every(w=>d.includes(w))}).slice(0,12);
+  const box=$("#sugg");box.hidden=false;
+  if(!res.length){box.innerHTML=`<button><span>No encontré "${esc(v)}" por nombre. ¿Usarlo como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;productRead(v.replace(/\s+/g,""),"teclado")};return}
+  box.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
+  $$("#sugg button").forEach(b=>b.onclick=()=>{box.hidden=true;productRead(res[+b.dataset.n].cod,"búsqueda")});
+}
+$("#scan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();productRead(e.target.value,"teclado")}});
+$("#scan").addEventListener("input",()=>{unsaved=false;$("#pending").hidden=true});
+
+/* ---- sumar ---- */
+function doSum(){
+  const v=norm($("#scan").value);
+  if(!v){toast("Primero escanea o digita un producto");focusSel($("#scan"));return}
+  const q=num($("#qty").value);
+  if(q==null){toast("Digita la cantidad");focusSel($("#qty"));return}
+  addScan(v,q,lastSrc);
+  unsaved=false;camHold=false;
+  if(camOpen()){$("#camMsg").textContent="Listo. Apunta al siguiente producto.";document.activeElement&&document.activeElement.blur()}
+  else focusSel($("#scan"));
+}
+$("#btnAdd").onclick=doSum;
+$("#qty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();doSum()}});
+$("#qty").addEventListener("focus",e=>setTimeout(()=>{try{e.target.select()}catch(x){}},0));
+
 function addScan(code,qty,src){
   code=codeStr(code); if(!code)return;
   qty=+qty; if(!isFinite(qty))qty=1;
-  const s={code,qty,ubic:cfg.ubic||"",user:cfg.user||"",t:new Date().toISOString(),src};
+  const s={code,qty,ubic:cfg.ubic||"",user:cfg.user||"",t:new Date().toISOString(),src,conteo:erp&&erp.conteo?erp.conteo.nombre:""};
   scans.push(s);saveScans();
   const it=erp?findItem(code):null;
   showLast(s,it);audio.beep(!!it||!erp);
-  if(!cfg.keepQty)$("#qty").value=1;
+  resetQty();showPending(code);
   renderRecent();renderSess();
 }
-function totalFor(code){const k=key(code);let a=0,u=0;for(const s of scans)if(key(s.code)===k){a+=+s.qty;if(s.ubic===(cfg.ubic||""))u+=+s.qty}return [a,u]}
+function totalFor(code){const k=key(code);let a=0,u=0;for(const s of scans)if(key(s.code)===k){a+=+s.qty;if((s.ubic||"")===(cfg.ubic||""))u+=+s.qty}return [a,u]}
 function showLast(s,it){
   const [tot,here]=totalFor(s.code);
   const el=$("#last");
   el.className="last "+((it||!erp)?"flash-ok":"flash-bad");
   setTimeout(()=>el.className="last",700);
-  el.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):(erp?"Código NO existe en el ERP":"Lectura registrada")}</div>
-   <div class="c">${esc(s.code)}${it&&it.cod!==s.code?" → "+esc(it.cod):""} · +${fmt2(s.qty)} ${s.ubic?"en "+esc(s.ubic):""}</div>
-   <div class="row" style="align-items:flex-end;gap:18px"><div><div class="eyebrow">${s.ubic?"En esta ubicación":"Contado"}</div><div class="big">${fmt2(s.ubic?here:tot)}</div></div>
-   ${s.ubic?`<div><div class="eyebrow">Total todas</div><div class="big" style="font-size:22px">${fmt2(tot)}</div></div>`:""}
-   ${it&&it.stock!=null&&!cfg.blind&&!isOp()?`<div><div class="eyebrow">Sistema</div><div class="big" style="font-size:22px">${fmt2(it.stock)}</div></div>`:""}
-   <span class="sep"></span><button class="btn sm" id="undoLast">Deshacer</button></div>`;
-  $("#undoLast").onclick=()=>{const i=scans.lastIndexOf(s);if(i>=0){scans.splice(i,1);saveScans();renderRecent();renderSess();el.innerHTML=`<div class="d muted">Lectura deshecha</div>`}};
+  el.innerHTML=`<div class="eyebrow">Sumado</div><div class="d">${it?esc(it.desc||"(sin descripción)"):(erp?"Código NO existe en la lista":"Código "+esc(s.code))}</div>
+   <div class="c">${esc(s.code)} · ${s.ubic?esc(s.ubic):"sin ubicación"}</div>
+   <div class="lastgrid">
+     <div><div class="eyebrow">Esta lectura</div><div class="big">+${fmt2(s.qty)}</div></div>
+     <div><div class="eyebrow">${s.ubic?"En esta ubicación":"Sin ubicación"}</div><div class="big" style="font-size:24px">${fmt2(here)}</div></div>
+     <div><div class="eyebrow">Total producto</div><div class="big" style="font-size:24px">${fmt2(tot)}</div></div>
+   </div>
+   <div class="row">${it&&it.stock!=null&&!cfg.blind&&!isOp()?`<span class="small muted">Sistema: <b>${fmt2(it.stock)}</b></span>`:""}<span class="sep"></span><button class="btn sm" id="undoLast">Deshacer</button></div>`;
+  $("#undoLast").onclick=()=>{const i=scans.lastIndexOf(s);if(i>=0){scans.splice(i,1);saveScans();renderRecent();renderSess();el.innerHTML=`<div class="d muted">Lectura deshecha</div>`;if($("#scan").value)showPending($("#scan").value)}};
 }
 function renderSess(){const u=cfg.ubic||"";const here=scans.filter(s=>(s.ubic||"")===u);
-  $("#sessInfo").textContent=`${u?"Ubicación "+u:"Sin ubicación"}: ${fmt(here.length)} lecturas · ${fmt2(here.reduce((a,s)=>a+ +s.qty,0))} unidades`;
+  $("#sessInfo").textContent=`${u?"Ubicación "+u:"Sin ubicación"}: ${fmt(new Set(here.map(s=>key(s.code))).size)} productos · ${fmt2(here.reduce((a,s)=>a+ +s.qty,0))} unidades`;
   const ub=[...new Set(scans.map(s=>s.ubic).filter(Boolean))];$("#ubicList").innerHTML=ub.map(u=>`<option value="${esc(u)}">`).join("")}
 function renderRecent(){
   const rows=scans.slice(-40).reverse();
   $("#recent").innerHTML=`<thead><tr><th>Hora</th><th>Código</th><th>Descripción</th><th>Ubicación</th><th class="num">Cant.</th><th></th></tr></thead><tbody>`+
-   (rows.length?rows.map(s=>{const it=erp&&findItem(s.code);const i=scans.indexOf(s);return `<tr><td>${new Date(s.t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</td><td class="code">${esc(s.code)}</td><td class="desc">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está en ERP</span>':"")}</td><td>${esc(s.ubic)}</td>
-   <td class="num"><input type="number" step="any" value="${s.qty}" data-i="${i}" class="eq" style="width:80px;padding:4px 6px;text-align:right" aria-label="Cantidad"></td><td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="6" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
-  $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=+x.value||0;saveScans();renderSess()}});
+   (rows.length?rows.map(s=>{const it=erp&&findItem(s.code);const i=scans.indexOf(s);return `<tr><td>${new Date(s.t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</td><td class="code">${esc(s.code)}</td><td class="desc">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está en la lista</span>':"")}</td><td>${esc(s.ubic)}</td>
+   <td class="num"><input type="text" inputmode="decimal" value="${s.qty}" data-i="${i}" class="eq" style="width:80px;padding:4px 6px;text-align:right" aria-label="Cantidad"></td><td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="6" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
+  $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=num(x.value)??0;saveScans();renderSess()}});
   $$("#recent [data-del]").forEach(b=>b.onclick=()=>{scans.splice(+b.dataset.del,1);saveScans();renderRecent();renderSess()});
   updStatus();
 }
-function handleInput(raw){
-  let v=norm(raw); if(!v)return;
-  let q=qtyVal();
-  const m=v.match(/^(\d+(?:[.,]\d+)?)\s*[*xX]\s*(\S+)$/); if(m){q=num(m[1]);v=m[2]}
-  const it=erp&&findItem(v);
-  if(it||!/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){ $("#sugg").hidden=true; addScan(v,q,"teclado"); return }
-  // búsqueda por nombre
-  const words=deacc(v).split(" ").filter(Boolean);
-  const res=(erp?erp.items:[]).filter(i=>{const d=deacc(i.desc+" "+i.cod);return words.every(w=>d.includes(w))}).slice(0,12);
-  const box=$("#sugg");
-  if(!res.length){box.hidden=false;box.innerHTML=`<button data-raw="1"><span>No encontré "${esc(v)}" por nombre. ¿Registrar como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;addScan(v,q,"teclado")};return}
-  box.hidden=false;
-  box.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
-  $$("#sugg button").forEach(b=>b.onclick=()=>{box.hidden=true;addScan(res[+b.dataset.n].cod,q,"búsqueda");$("#scan").focus()});
-}
-$("#scan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();const v=e.target.value;e.target.value="";handleInput(v)}});
 $("#btnExpScans").onclick=()=>{
   if(!scans.length)return toast("No hay lecturas para exportar");
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Descripción":(erp&&findItem(s.code)||{}).desc||"","Cantidad":s.qty,"Ubicación":s.ubic,"Contador":s.user||"","Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
-  saveWb(wb,"Conteos_"+(cfg.user?cfg.user.replace(/[^\w-]+/g,"_")+"_":"")+stamp()+".xlsx");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Descripción":(erp&&findItem(s.code)||{}).desc||"","Cantidad":s.qty,"Ubicación":s.ubic,"Contador":s.user||"","Conteo":s.conteo||"","Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
+  saveWb(wb,"Conteos_"+(erp&&erp.conteo?erp.conteo.nombre.replace(/[^\wÁÉÍÓÚÑáéíóúñ-]+/g,"_").slice(0,40)+"_":"")+(cfg.user?cfg.user.replace(/[^\w-]+/g,"_")+"_":"")+stamp()+".xlsx");
 };
 
-/* cámara */
-let cam=null,lastCam={c:"",t:0};
-$("#btnCam").onclick=async()=>{
+/* ---- modo y teclado ---- */
+function applyModeSeg(){
+  $$("#modeSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.m===cfg.mode));
+  $("#stepQty .eyebrow").textContent=cfg.mode==="uno"?"3 · Cantidad por lectura":"3 · Cantidad";
+  if(cfg.mode==="uno"&&!$("#qty").value)$("#qty").value="1";
+  applyKbd();
+}
+$$("#modeSeg button").forEach(b=>b.onclick=()=>{cfg.mode=b.dataset.m;store.set("inv_cfg",cfg);resetQty();applyModeSeg()});
+const KBD={num:["numeric","[0-9]*","Teclado numérico. Si el código tiene letras, cambia a ABC."],txt:["text","","Puedes escribir el código o parte del nombre del producto."],none:["none","","Modo pistola: no aparece el teclado del celular al escanear. Dispara la pistola Bluetooth."]};
+function applyKbd(){
+  const k=KBD[cfg.kbd]?cfg.kbd:"num", el=$("#scan");
+  el.setAttribute("inputmode",KBD[k][0]);
+  if(KBD[k][1])el.setAttribute("pattern",KBD[k][1]);else el.removeAttribute("pattern");
+  $("#ubic").setAttribute("inputmode",k==="none"?"none":"text");
+  el.placeholder=k==="txt"?"Escanea, escribe código o nombre":"Escanea o digita el código";
+  $("#kbdHint").textContent=KBD[k][2]+(cfg.mode==="uno"?" Modo uno por uno: cada lectura suma sola.":" Modo con cantidad: lees el producto, digitas la cantidad y tocas Sumar.");
+  $$("#kbd button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===k));
+}
+$$("#kbd button").forEach(b=>b.onclick=()=>{cfg.kbd=b.dataset.k;store.set("inv_cfg",cfg);applyKbd();$("#scan").blur();setTimeout(()=>focusSel($("#scan")),60)});
+
+/* ---- cámara: lee ubicación o producto, nunca repite sola el mismo código ---- */
+let cam=null,camTarget="sku",camHold=false,lastCam={c:"",miss:99};
+function setCamTarget(t){
+  camTarget=t;camHold=false;lastCam.miss=99;
+  $$("#camSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.t===t));
+  $("#camTarget").textContent=t==="ubic"?"Leyendo ubicación":"Leyendo producto";
+  $("#camMsg").textContent=t==="ubic"?"Apunta a la etiqueta de la ubicación.":"Apunta al código del producto.";
+}
+$$("#camSeg button").forEach(b=>b.onclick=()=>setCamTarget(b.dataset.t));
+function onCamCode(txt){
+  txt=norm(txt); if(!txt||camHold)return;
+  if(txt===lastCam.c&&lastCam.miss<10)return;   // el mismo código sigue frente a la cámara: no se repite
+  lastCam={c:txt,miss:0};
+  if(camTarget==="ubic"){setUbic(txt);setCamTarget("sku");lastCam={c:txt,miss:0};return}
+  if(cfg.ubic&&codeStr(txt)===cfg.ubic)return;   // es la etiqueta de la ubicación, no un producto
+  productRead(txt,"cámara");
+}
+async function openCam(target){
   if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
+  setCamTarget(target);
+  if(cam){$("#camWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
   $("#camWrap").hidden=false;$("#camMsg").textContent="Pidiendo permiso de cámara…";
+  document.activeElement&&document.activeElement.blur();
   try{
     const F=Html5QrcodeSupportedFormats;
     cam=new Html5Qrcode("reader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.CODE_93,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
-    await cam.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.45,160)})},txt=>{
-      const now=Date.now(); if(txt===lastCam.c&&now-lastCam.t<1800)return; lastCam={c:txt,t:now};
-      addScan(txt,qtyVal(),"cámara");
-    },()=>{});
-    $("#camMsg").textContent="Apunta al código. Cada código distinto se suma; el mismo se vuelve a sumar a los 2 segundos.";
+    await cam.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.5,180)})},onCamCode,()=>{lastCam.miss++});
+    setCamTarget(target);
+    $("#camWrap").scrollIntoView({block:"start",behavior:"smooth"});
   }catch(e){
-    $("#camMsg").textContent="";stopCam();
-    toast("No se pudo abrir la cámara aquí. Usa el archivo descargado en el celular (abierto en Chrome) o la pistola.");
+    cam=null;$("#camWrap").hidden=true;
+    toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.");
   }
-};
-async function stopCam(){if(cam){try{await cam.stop();cam.clear()}catch(e){}cam=null}$("#camWrap").hidden=true}
+}
+async function stopCam(){if(cam){try{await cam.stop();cam.clear()}catch(e){}cam=null}camHold=false;$("#camWrap").hidden=true}
+$("#camUbic").onclick=()=>openCam("ubic");
+$("#camSku").onclick=()=>openCam("sku");
 $("#btnCamStop").onclick=stopCam;
+document.addEventListener("keydown",e=>{if($("#v-contar").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#scan"))},true);
+applyModeSeg();
+
 
 /* ================= IMPORTAR ================= */
 dropZone($("#dropImp"),$("#fileImp"),files=>files.forEach(importFile));
@@ -755,11 +929,123 @@ async function saveData(name,blob,fallback){
 /* ================= inicio ================= */
 
 /* ================= maestro, modo operario, teclado ================= */
-$("#btnMaestro").onclick=()=>{
-  const d=erpDraft; if(!d||!d.items.length)return;
-  const m={app:"conteo-bodega",version:new Date().toISOString(),origen:d.file,productos:d.items.length,items:d.items.map(i=>[i.cod,i.ean,i.desc,i.um])};
-  saveData("maestro.json",new Blob([JSON.stringify(m)],{type:"application/json"}));
+/* ================= PANEL: crear conteo y compartir link ================= */
+const GH="https://api.github.com", RAW="https://gist.githubusercontent.com/";
+const DEFAULT_APP="https://jorgecelpa1989-gif.github.io/Conteo--Bodega/";
+let gh=store.get("inv_gh",{token:"",login:""});
+let conteos=store.get("inv_conteos",[]);
+const appUrl=()=>{let u=norm(cfg.appUrl||"");
+  if(!u){u=(/^https:$/.test(location.protocol)&&!/claude\.ai|claudeusercontent/.test(location.hostname))?location.origin+location.pathname.replace(/index\.html$/,""):DEFAULT_APP}
+  if(!/\/$/.test(u)&&!/\.html$/.test(u))u+="/"; return u};
+function renderGh(){
+  $("#appUrl").value=appUrl();
+  $("#ghToken").value="";$("#ghToken").placeholder=gh.token?"Guardada ("+gh.token.slice(0,7)+"…). Pega otra para cambiarla":"ghp_…";
+  const st=$("#ghState");
+  st.className="pill "+(gh.login?"p-ok":"p-warn");st.textContent=gh.login?"Conectado como "+gh.login:"Sin conectar";
+  $("#ghHelp").open=!gh.login;
+}
+$("#appUrl").onchange=e=>{cfg.appUrl=norm(e.target.value);store.set("inv_cfg",cfg);renderGh()};
+$("#btnGhSave").onclick=async()=>{
+  const t=norm($("#ghToken").value)||gh.token;
+  if(!t)return toast("Pega la llave de GitHub primero");
+  $("#btnGhSave").disabled=true;
+  try{
+    const r=await fetch(GH+"/user",{headers:{Authorization:"Bearer "+t,Accept:"application/vnd.github+json"}});
+    if(r.status===401)throw new Error("La llave no es válida o venció.");
+    if(!r.ok)throw new Error("GitHub respondió "+r.status);
+    const u=await r.json(), scopes=r.headers.get("x-oauth-scopes");
+    if(scopes!=null&&scopes!==""&&!/\bgist\b/.test(scopes))throw new Error("La llave no tiene el permiso gist. Crea otra con el enlace de las instrucciones.");
+    gh={token:t,login:u.login};store.set("inv_gh",gh);renderGh();toast("Conectado como "+u.login);
+  }catch(e){toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":e.message)}
+  finally{$("#btnGhSave").disabled=false}
 };
+
+function conteoMsg(c){return `Conteo: ${c.nombre}\nAbre este link en el celular para empezar a contar:\n${c.link}`}
+const waHref=c=>"https://wa.me/?text="+encodeURIComponent(conteoMsg(c));
+async function copyText(t,inp){try{await navigator.clipboard.writeText(t);toast("Link copiado")}catch(e){if(inp){inp.focus();inp.select()}toast("Selecciona el link y cópialo")}}
+
+$("#btnCrear").onclick=async()=>{
+  const d=erpDraft;
+  if(!d||!d.items.length)return toast("Primero carga el inventario del ERP");
+  if(d.map.cod==null)return toast("Falta elegir la columna de código");
+  if(!gh.token){$("#ghCard").scrollIntoView({behavior:"smooth"});return toast("Falta conectar GitHub (una sola vez, más abajo)")}
+  const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
+  const m={app:"conteo-bodega",v:2,nombre,creado:new Date().toISOString(),origen:d.file,productos:d.items.length,items:d.items.map(i=>[i.cod,i.ean,i.desc,i.um])};
+  $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
+  try{
+    const r=await fetch(GH+"/gists",{method:"POST",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json","Content-Type":"application/json"},
+      body:JSON.stringify({description:"Conteo de Bodega · "+nombre,public:false,files:{"conteo.json":{content:JSON.stringify(m)}}})});
+    if(r.status===401)throw new Error("La llave de GitHub no es válida o venció. Pega una nueva abajo.");
+    if(!r.ok)throw new Error("GitHub respondió "+r.status+". Intenta de nuevo.");
+    const g=await r.json(), raw=g.files["conteo.json"].raw_url;
+    const mm=raw.match(/^https:\/\/gist\.githubusercontent\.com\/([\w-]+)\/([0-9a-f]+)\/raw\/([0-9a-f]+)\/conteo\.json$/);
+    if(!mm)throw new Error("Respuesta inesperada de GitHub");
+    const c={id:g.id,nombre,creado:m.creado,productos:m.productos,link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
+    conteos.unshift(c);store.set("inv_conteos",conteos);
+    // en el PC queda cargado el stock completo para cruzar después
+    erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
+    cfg.operator=false;store.set("inv_cfg",cfg);applyMode();updStatus();
+    showCreated(c);renderConteos();$("#crearMsg").textContent="";
+  }catch(e){$("#crearMsg").textContent="";toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":e.message)}
+  finally{$("#btnCrear").disabled=false}
+};
+function showCreated(c){
+  const box=$("#crearRes");
+  box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
+    <div class="small muted">${fmt(c.productos)} productos. Manda este link al contador:</div>
+    <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
+    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div></div>`;
+  $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));
+  $("#linkOut").onclick=e=>e.target.select();
+}
+function renderConteos(){
+  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th class="num">Productos</th><th></th></tr></thead><tbody>`+
+   (conteos.length?conteos.map((c,i)=>`<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td class="num">${fmt(c.productos)}</td>
+    <td><div class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-rm="${i}">Eliminar</button></div></td></tr>`).join("")
+   :`<tr><td colspan="4" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>";
+  $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
+  $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
+    confirmBox(`Eliminar "${esc(c.nombre)}": el link deja de funcionar para quien no lo haya abierto.`,async()=>{
+      try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo borrar en GitHub; se quitó solo de la lista")}
+      conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#crearRes")});
+}
+
+/* ================= CELULAR: abrir conteo desde el link ================= */
+function checkConteoLink(){
+  let c=null;try{c=new URLSearchParams(location.search).get("c")}catch(e){}
+  if(!c)return false;
+  try{history.replaceState(null,"",location.pathname+"#contar")}catch(e){}
+  if(!/^[\w-]+\/[0-9a-f]{20,}\/[0-9a-f]{20,}$/.test(c)){toast("El link del conteo está incompleto. Pide que te lo reenvíen.");return false}
+  const [u,id,sha]=c.split("/");
+  $("#conteoBanner").innerHTML=`<div class="notice">Descargando el conteo…</div>`;
+  fetch(RAW+u+"/"+id+"/raw/"+sha+"/conteo.json").then(r=>{if(!r.ok)throw new Error(r.status===404?"gone":"net");return r.json()}).then(m=>{
+    if(!m||m.app!=="conteo-bodega"||!Array.isArray(m.items))throw new Error("bad");
+    if(cfg.conteoId===id&&erp&&erp.conteo){$("#conteoBanner").innerHTML="";toast("Conteo "+m.nombre+" ya estaba abierto");return}
+    if(scans.length){
+      $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch">
+        <b>Llegó un conteo nuevo: ${esc(m.nombre)}</b>
+        <span class="small">Este celular tiene ${fmt(scans.length)} lecturas de un conteo anterior${erp&&erp.conteo?" ("+esc(erp.conteo.nombre)+")":""}. Expórtalas antes de empezar, o se borrarán.</span>
+        <div class="row"><button class="btn primary" id="cbExp">Exportar lecturas anteriores</button><button class="btn danger" id="cbNew">Empezar conteo nuevo</button></div></div>`;
+      $("#cbExp").onclick=()=>$("#btnExpScans").click();
+      $("#cbNew").onclick=()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);applyConteo(m,id)};
+      return;
+    }
+    applyConteo(m,id);
+  }).catch(e=>{
+    $("#conteoBanner").innerHTML=`<div class="confirm"><span>${e.message==="gone"?"Este conteo fue eliminado. Pide un link nuevo al supervisor.":"No se pudo descargar el conteo. Revisa la señal y vuelve a abrir el link."}</span></div>`;
+  });
+  return true;
+}
+function applyConteo(m,id){
+  erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado},
+    items:m.items.map(([cod,ean,desc,um])=>({cod,ean:ean||"",desc:desc||"",um:um||"",stock:null,costo:null,ubic:""}))};
+  store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";store.set("inv_cfg",cfg);
+  buildIndex();updStatus();applyMode();setUbic("",true);clearProduct();renderRecent();renderSess();
+  $("#last").innerHTML=`<div class="d">Listo para contar</div><div class="c">${esc(m.nombre)} · ${fmt(erp.items.length)} productos</div>`;
+  $("#conteoBanner").innerHTML=`<div class="notice"><b>${esc(m.nombre)}</b> · ${fmt(erp.items.length)} productos. Escribe tu nombre, escanea la primera ubicación y empieza.</div>`;
+  show("contar");
+}
+
 function setMaestro(m,silent){
   erp={file:"Maestro "+new Date(m.version).toLocaleDateString("es-CL"),at:m.version,version:m.version,maestro:true,
     items:m.items.map(([cod,ean,desc,um])=>({cod,ean:ean||"",desc:desc||"",um:um||"",stock:null,costo:null,ubic:""}))};
@@ -771,6 +1057,7 @@ async function loadMaestro(){
   try{
     const r=await fetch("maestro.json",{cache:"no-store"}); if(!r.ok)return;
     const m=await r.json(); if(!m||!Array.isArray(m.items))return;
+    if(erp&&erp.conteo)return;              // hay un conteo abierto desde link
     if(erp&&!erp.maestro)return;            // el supervisor cargó un ERP a mano: no se pisa
     if(erp&&erp.version===m.version)return; // ya está al día
     setMaestro(m);
@@ -784,26 +1071,13 @@ function applyMode(){
   if(op&&$("#v-contar").hidden)show("contar");
 }
 $("#btnMode").onclick=()=>{cfg.operator=!isOp();store.set("inv_cfg",cfg);applyMode();if(!isOp())toast("Menú completo activado")};
-const KBD={num:["numeric","[0-9]*","Teclado numérico. Si el código tiene letras, cambia a ABC."],txt:["text","","Puedes escribir el código o parte del nombre del producto."],none:["none","","Modo pistola: no aparece el teclado del celular. Dispara la pistola Bluetooth."]};
-function applyKbd(){
-  const k=KBD[cfg.kbd]?cfg.kbd:"num", el=$("#scan");
-  el.setAttribute("inputmode",KBD[k][0]);
-  if(KBD[k][1])el.setAttribute("pattern",KBD[k][1]);else el.removeAttribute("pattern");
-  el.placeholder=k==="txt"?"Escanea, escribe código o nombre":"Escanea o digita el código";
-  $("#kbdHint").textContent=KBD[k][2];
-  $$("#kbd button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===k));
-}
-$$("#kbd button").forEach(b=>b.onclick=()=>{cfg.kbd=b.dataset.k;store.set("inv_cfg",cfg);applyKbd();$("#scan").blur();setTimeout(()=>$("#scan").focus(),60)});
-$("#btnAdd").onclick=()=>{const v=$("#scan").value;if(!v.trim()){$("#scan").focus();return}$("#scan").value="";handleInput(v);$("#scan").focus()};
-$("#qty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#scan").focus()}});
-$("#qty").addEventListener("focus",e=>setTimeout(()=>e.target.select(),0));
 $("#user").value=cfg.user||"";
 $("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.value=cfg.user;store.set("inv_cfg",cfg)};
 $("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas")},"#confirmScans");
 applyKbd();
-updStatus();renderSess();applyMode();loadMaestro();
+updStatus();renderSess();applyMode();renderGh();renderConteos();
+if(!checkConteoLink())loadMaestro();
 const h=(location.hash||"").slice(1);
 show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
-document.addEventListener("keydown",e=>{if($("#v-contar").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(a.tagName)&&a.id!=="scan"&&a.tagName!=="BUTTON")return;if(a&&a.id==="scan")return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)$("#scan").focus()},true);
 </script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script></body></html>
