@@ -1,13 +1,13 @@
 {
-  "name": "Conteo de Bodega",
+  "name": "Conteo de Bodega · Grupo Vector",
   "short_name": "Conteo",
   "description": "Inventario con pistola o cámara y cruce contra el ERP en Excel",
   "start_url": "./index.html#contar",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f3f5f7",
-  "theme_color": "#18212b",
+  "background_color": "#ffffff",
+  "theme_color": "#084f70",
   "lang": "es-CL",
   "icons": [
     {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
