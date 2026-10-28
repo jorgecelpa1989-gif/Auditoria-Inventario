@@ -97,6 +97,13 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 .small{font-size:12.5px}
 .sep{flex:1}
 details summary{cursor:pointer;font-weight:600}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--panel);color:var(--ink);font:600 14px var(--font);padding:7px 14px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.notice{border:1px solid var(--info);background:var(--info-bg);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13.5px}
+body.op nav.tabs{display:none}
+body.op .supOnly{display:none!important}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -142,6 +149,13 @@ details summary{cursor:pointer;font-weight:600}
       <button class="btn" id="btnErpXlsx">Descargar ERP limpio (.xlsx)</button>
     </div>
   </div>
+
+  <div class="card" id="maestroCard" hidden>
+    <div class="eyebrow">Para los celulares de los operarios</div>
+    <h2>Generar maestro de productos</h2>
+    <p>Crea <b>maestro.json</b> con código, código de barras, descripción y unidad. <b>No incluye stock ni costos</b> (el conteo es ciego y el archivo queda en internet). Súbelo a tu repositorio de GitHub junto a index.html: cada celular lo carga solo al abrir la app.</p>
+    <div class="row"><button class="btn accent" id="btnMaestro">Descargar maestro.json</button></div>
+  </div>
 </section>
 
 <!-- ============ 2 CONTAR ============ -->
@@ -149,20 +163,28 @@ details summary{cursor:pointer;font-weight:600}
   <div class="grid2">
     <div class="card">
       <div class="row">
-        <label class="f" style="flex:1">Ubicación que estás contando<input id="ubic" list="ubicList" placeholder="Ej: B1-P03-R2"></label>
+        <label class="f" style="flex:1 1 120px">Contador<input id="user" placeholder="Tu nombre" autocapitalize="characters"></label>
+        <label class="f" style="flex:2 1 160px">Ubicación que estás contando<input id="ubic" list="ubicList" placeholder="Ej: B1-P03-R2" autocapitalize="characters"></label>
         <datalist id="ubicList"></datalist>
-        <label class="f">Cantidad<input id="qty" class="qty" type="number" value="1" min="0" step="any"></label>
+        <label class="f">Cantidad<input id="qty" class="qty" type="text" inputmode="decimal" enterkeyhint="next" value="1"></label>
+      </div>
+      <div class="row" style="gap:8px">
+        <span class="small muted">Teclado:</span>
+        <div class="seg" id="kbd" role="group" aria-label="Tipo de teclado">
+          <button data-k="num" aria-pressed="true">123</button><button data-k="txt" aria-pressed="false">ABC</button><button data-k="none" aria-pressed="false">Pistola</button>
+        </div>
       </div>
       <div class="scanbox">
-        <input id="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Escanea o escribe código / nombre" inputmode="text">
+        <input id="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="Escanea o digita el código">
+        <button class="btn primary" id="btnAdd" style="padding-inline:18px;font-size:16px">Sumar</button>
       </div>
       <div class="row small muted">
-        <span>Pistola en modo teclado: apunta y dispara, se suma solo. Atajo: <code>12*780123</code> suma 12.</span>
+        <span id="kbdHint">Pistola en modo teclado: apunta y dispara, se suma solo. Atajo: <code>12*780123</code> suma 12.</span>
       </div>
       <div class="row">
         <button class="btn accent" id="btnCam">Escanear con cámara</button>
         <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="keepQty"> Mantener cantidad</label>
-        <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="blind" checked> Conteo ciego (no mostrar stock)</label>
+        <label class="small supOnly" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="blind" checked> Conteo ciego (no mostrar stock)</label>
       </div>
       <div id="camWrap" hidden><div id="reader"></div><div class="row" style="margin-top:8px"><button class="btn sm" id="btnCamStop">Cerrar cámara</button><span class="small muted" id="camMsg"></span></div></div>
       <div class="sugg" id="sugg" hidden></div>
@@ -177,10 +199,15 @@ details summary{cursor:pointer;font-weight:600}
 
   <div class="card">
     <div class="row"><h2>Lecturas recientes</h2><span class="sep"></span>
-      <button class="btn sm" id="btnExpScans">Exportar mis conteos (.xlsx)</button>
+      <button class="btn sm primary" id="btnExpScans">Exportar mis conteos (.xlsx)</button>
+      <button class="btn sm danger" id="btnClearScans">Borrar lecturas…</button>
     </div>
-    <p class="small">Si cuentas con varios celulares, cada uno exporta sus conteos y en el PC los cargas en <b>3 · Importar conteos</b>.</p>
+    <div id="confirmScans"></div>
+    <p class="small">Al terminar, exporta y envía el archivo al supervisor. Después borra las lecturas para dejar el celular listo para el próximo conteo.</p>
     <div class="tbl"><table id="recent"></table></div>
+  </div>
+  <div class="row small muted" style="justify-content:center">
+    <button class="btn sm" id="btnMode">Opciones de supervisor</button>
   </div>
 </section>
 
@@ -202,6 +229,7 @@ details summary{cursor:pointer;font-weight:600}
 
 <!-- ============ 4 RESULTADO ============ -->
 <section class="view" id="v-resultado" hidden>
+  <div class="notice" id="resNote" hidden>Este equipo tiene cargada la lista de productos del maestro, que no trae stock. Para ver diferencias, carga el informe del ERP en <b>1 · Stock ERP</b>.</div>
   <div class="kpis" id="kpis"></div>
   <div class="card">
     <div class="row">
@@ -297,7 +325,8 @@ function codeStr(v){
   if(/^\d+\.0+$/.test(s))s=s.replace(/\.0+$/,"");
   return s.toUpperCase();
 }
-let cfg=store.get("inv_cfg",{zeros:true,ubic:"",blind:true,keepQty:false,device:""});
+let cfg=Object.assign({zeros:true,ubic:"",blind:true,keepQty:false,user:"",kbd:"num",operator:null},store.get("inv_cfg",{}));
+const qtyVal=()=>{const n=num($("#qty").value);return n==null?1:n};
 const key=c=>{let s=codeStr(c).replace(/\s+/g,""); if(cfg.zeros)s=s.replace(/^0+(?=.)/,""); return s};
 const isSci=v=>typeof v==="string"&&/^\d[.,]?\d*E\+\d+$/i.test(norm(v));
 
@@ -313,7 +342,7 @@ function saveScans(){store.set("inv_scans",scans);updStatus()}
 function updStatus(){
   $("#nScans").textContent=fmt(scans.length);
   const tot=scans.reduce((a,s)=>a+(+s.qty||0),0);
-  $("#status").innerHTML=(erp?`<span>ERP: <b>${fmt(erp.items.length)}</b> ítems</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
+  $("#status").innerHTML=(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
 }
 
 /* ================= pestañas ================= */
@@ -441,7 +470,7 @@ function renderDraft(){
   $("#erpPrev").innerHTML=`<thead><tr><th>Código</th><th>Cód. barras</th><th>Descripción</th><th class="num">Stock</th><th class="num">Costo</th><th>Ubicación</th></tr></thead><tbody>`+
     p.map(i=>`<tr><td class="code">${esc(i.cod)}</td><td class="code">${esc(i.ean)}</td><td class="desc">${esc(i.desc)}</td><td class="num">${fmt2(i.stock)}</td><td class="num">${fmt2(i.costo)}</td><td>${esc(i.ubic)}</td></tr>`).join("")+
     (d.items.length>15?`<tr><td colspan="6" class="muted">… y ${fmt(d.items.length-15)} más</td></tr>`:"")+"</tbody>";
-  $("#btnErpOk").disabled=!d.items.length;
+  $("#btnErpOk").disabled=!d.items.length;$("#maestroCard").hidden=!d.items.length;
 }
 async function loadErpFile(file){
   try{
@@ -494,7 +523,7 @@ $("#keepQty").onchange=e=>{cfg.keepQty=e.target.checked;store.set("inv_cfg",cfg)
 function addScan(code,qty,src){
   code=codeStr(code); if(!code)return;
   qty=+qty; if(!isFinite(qty))qty=1;
-  const s={code,qty,ubic:cfg.ubic||"",t:new Date().toISOString(),src};
+  const s={code,qty,ubic:cfg.ubic||"",user:cfg.user||"",t:new Date().toISOString(),src};
   scans.push(s);saveScans();
   const it=erp?findItem(code):null;
   showLast(s,it);audio.beep(!!it||!erp);
@@ -511,7 +540,7 @@ function showLast(s,it){
    <div class="c">${esc(s.code)}${it&&it.cod!==s.code?" → "+esc(it.cod):""} · +${fmt2(s.qty)} ${s.ubic?"en "+esc(s.ubic):""}</div>
    <div class="row" style="align-items:flex-end;gap:18px"><div><div class="eyebrow">${s.ubic?"En esta ubicación":"Contado"}</div><div class="big">${fmt2(s.ubic?here:tot)}</div></div>
    ${s.ubic?`<div><div class="eyebrow">Total todas</div><div class="big" style="font-size:22px">${fmt2(tot)}</div></div>`:""}
-   ${it&&!cfg.blind?`<div><div class="eyebrow">Sistema</div><div class="big" style="font-size:22px">${fmt2(it.stock)}</div></div>`:""}
+   ${it&&it.stock!=null&&!cfg.blind&&!isOp()?`<div><div class="eyebrow">Sistema</div><div class="big" style="font-size:22px">${fmt2(it.stock)}</div></div>`:""}
    <span class="sep"></span><button class="btn sm" id="undoLast">Deshacer</button></div>`;
   $("#undoLast").onclick=()=>{const i=scans.lastIndexOf(s);if(i>=0){scans.splice(i,1);saveScans();renderRecent();renderSess();el.innerHTML=`<div class="d muted">Lectura deshecha</div>`}};
 }
@@ -529,7 +558,7 @@ function renderRecent(){
 }
 function handleInput(raw){
   let v=norm(raw); if(!v)return;
-  let q=+$("#qty").value||1;
+  let q=qtyVal();
   const m=v.match(/^(\d+(?:[.,]\d+)?)\s*[*xX]\s*(\S+)$/); if(m){q=num(m[1]);v=m[2]}
   const it=erp&&findItem(v);
   if(it||!/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){ $("#sugg").hidden=true; addScan(v,q,"teclado"); return }
@@ -540,14 +569,14 @@ function handleInput(raw){
   if(!res.length){box.hidden=false;box.innerHTML=`<button data-raw="1"><span>No encontré "${esc(v)}" por nombre. ¿Registrar como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;addScan(v,q,"teclado")};return}
   box.hidden=false;
   box.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
-  $$("#sugg button").forEach(b=>b.onclick=()=>{box.hidden=true;addScan(res[+b.dataset.n].cod,+$("#qty").value||q,"búsqueda");$("#scan").focus()});
+  $$("#sugg button").forEach(b=>b.onclick=()=>{box.hidden=true;addScan(res[+b.dataset.n].cod,q,"búsqueda");$("#scan").focus()});
 }
 $("#scan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();const v=e.target.value;e.target.value="";handleInput(v)}});
 $("#btnExpScans").onclick=()=>{
   if(!scans.length)return toast("No hay lecturas para exportar");
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Cantidad":s.qty,"Ubicación":s.ubic,"Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
-  saveWb(wb,"Conteos_"+(cfg.ubic?cfg.ubic+"_":"")+stamp()+".xlsx");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Descripción":(erp&&findItem(s.code)||{}).desc||"","Cantidad":s.qty,"Ubicación":s.ubic,"Contador":s.user||"","Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
+  saveWb(wb,"Conteos_"+(cfg.user?cfg.user.replace(/[^\w-]+/g,"_")+"_":"")+stamp()+".xlsx");
 };
 
 /* cámara */
@@ -560,7 +589,7 @@ $("#btnCam").onclick=async()=>{
     cam=new Html5Qrcode("reader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.CODE_93,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
     await cam.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.45,160)})},txt=>{
       const now=Date.now(); if(txt===lastCam.c&&now-lastCam.t<1800)return; lastCam={c:txt,t:now};
-      addScan(txt,+$("#qty").value||1,"cámara");
+      addScan(txt,qtyVal(),"cámara");
     },()=>{});
     $("#camMsg").textContent="Apunta al código. Cada código distinto se suma; el mismo se vuelve a sumar a los 2 segundos.";
   }catch(e){
@@ -629,7 +658,7 @@ function renderImpDone(){$("#impDone").innerHTML=`<thead><tr><th>Archivo</th><th
 
 /* ================= RESULTADO ================= */
 let rFilter="todos",rLimit=300;
-const STATES={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],nocont:["No contado","p-mut"],noerp:["No existe en ERP","p-info"]};
+const STATES={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],nocont:["No contado","p-mut"],noerp:["No existe en ERP","p-info"],contado:["Contado (sin stock)","p-info"]};
 function compute(){
   const all=$("#optUncounted").checked, uf=$("#fUbic").value;
   const cnt=new Map();
@@ -638,14 +667,14 @@ function compute(){
   const rows=[];
   (erp?erp.items:[]).forEach((it,i)=>{const c=cnt.get("i"+i);const counted=c?c.qty:0;
     if(!c&&uf)return;
-    const st=!c?(all?(it.stock===0?"ok":"falta"):"nocont"):(Math.abs(counted-it.stock)<1e-9?"ok":(counted<it.stock?"falta":"sobra"));
-    const dif=(c||all)?counted-it.stock:null;
+    const st=it.stock==null?(c?"contado":"nocont"):!c?(all?(it.stock===0?"ok":"falta"):"nocont"):(Math.abs(counted-it.stock)<1e-9?"ok":(counted<it.stock?"falta":"sobra"));
+    const dif=it.stock==null?null:(c||all)?counted-it.stock:null;
     rows.push({cod:it.cod,ean:it.ean,desc:it.desc,um:it.um,ubicErp:it.ubic,ubic:c?[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "):"",stock:it.stock,cont:c?counted:null,dif,costo:it.costo,difv:dif!=null&&it.costo!=null?dif*it.costo:null,st,n:c?c.n:0})});
   for(const [k,c] of cnt){if(k[0]!=="x")continue;rows.push({cod:c.raw,ean:"",desc:"",um:"",ubicErp:"",ubic:[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "),stock:null,cont:c.qty,dif:null,costo:null,difv:null,st:"noerp",n:c.n})}
   return rows;
 }
 function kpis(rows){
-  const c=rows.filter(r=>r.st!=="nocont"&&r.st!=="noerp"), dif=c.filter(r=>r.st==="falta"||r.st==="sobra");
+  const c=rows.filter(r=>r.st!=="nocont"&&r.st!=="noerp"&&r.st!=="contado"), dif=c.filter(r=>r.st==="falta"||r.st==="sobra");
   const net=c.reduce((a,r)=>a+(r.difv||0),0), abs=c.reduce((a,r)=>a+Math.abs(r.difv||0),0);
   const val=c.reduce((a,r)=>a+((r.costo||0)*Math.max(0,r.stock)),0);
   return {erp:erp?erp.items.length:0,contados:rows.filter(r=>r.cont!=null&&r.st!=="noerp").length,eval:c.length,ok:c.length-dif.length,dif:dif.length,falta:rows.filter(r=>r.st==="falta").length,sobra:rows.filter(r=>r.st==="sobra").length,
@@ -664,6 +693,7 @@ function renderResult(){
   let f=rows.filter(r=>rFilter==="todos"||(rFilter==="dif"?(r.st==="falta"||r.st==="sobra"):r.st===rFilter));
   if(q)f=f.filter(r=>deacc(r.cod+" "+r.ean+" "+r.desc).includes(q));
   f.sort((a,b)=>Math.abs(b.difv??b.dif??0)-Math.abs(a.difv??a.dif??0));
+  $("#resNote").hidden=!(erp&&erp.maestro);
   $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Contado en</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Dif. $</th><th>Estado</th></tr></thead><tbody>`+
     f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td class="desc small">${esc(r.ubic)}</td><td class="num">${fmt2(r.stock)}</td><td class="num">${fmt2(r.cont)}</td>
     <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td class="num">${r.difv==null?"":fmt(r.difv)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td></tr>`).join("")+
@@ -686,13 +716,13 @@ $("#btnExpRes").onclick=()=>{
   XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.map(detRow)),"Detalle");
   XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.filter(r=>r.st==="falta"||r.st==="sobra"||r.st==="noerp").map(detRow)),"Diferencias");
   XLSX.utils.book_append_sheet(wb,recountSheet(sorted),"Reconteo");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>{const it=erp&&findItem(s.code);return {"Fecha hora":fmtDT(s.t),"Código leído":s.code,"Código ERP":it?it.cod:"","Descripción":it?it.desc:"","Ubicación":s.ubic,"Cantidad":s.qty,"Origen":s.src}})),"Lecturas");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>{const it=erp&&findItem(s.code);return {"Fecha hora":fmtDT(s.t),"Código leído":s.code,"Código ERP":it?it.cod:"","Descripción":it?it.desc:"","Ubicación":s.ubic,"Cantidad":s.qty,"Contador":s.user||"","Origen":s.src}})),"Lecturas");
   if(erp)XLSX.utils.book_append_sheet(wb,sheetFrom(erpRows(erp.items)),"Stock ERP limpio");
   saveWb(wb,"Inventario_resultado_"+stamp()+".xlsx");
 };
 function recountSheet(rows){return sheetFrom(rows.filter(r=>r.st==="falta"||r.st==="sobra").map(r=>({"Código":r.cod,"Descripción":r.desc,"Contado en":r.ubic,"Primer conteo":r.cont??0,"Reconteo":"","Responsable":"","Observación":""})))}
 $("#btnExpRecount").onclick=()=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,recountSheet([...compute()].sort((a,b)=>Math.abs(b.difv??0)-Math.abs(a.difv??0))),"Reconteo");saveWb(wb,"Reconteo_"+stamp()+".xlsx")};
-function confirmBox(msg,fn){const b=$("#confirmBox");b.innerHTML=`<div class="confirm"><span>${msg}</span><span class="sep"></span><button class="btn sm danger" id="cYes">Sí, borrar</button><button class="btn sm" id="cNo">Cancelar</button></div>`;$("#cNo").onclick=()=>b.innerHTML="";$("#cYes").onclick=()=>{fn();b.innerHTML=""}}
+function confirmBox(msg,fn,target){const b=$(target||"#confirmBox");b.innerHTML=`<div class="confirm"><span>${msg}</span><span class="sep"></span><button class="btn sm danger" id="cYes">Sí, borrar</button><button class="btn sm" id="cNo">Cancelar</button></div>`;$("#cNo").onclick=()=>b.innerHTML="";$("#cYes").onclick=()=>{fn();b.innerHTML=""}}
 $("#btnReset").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este equipo. Exporta antes si las necesitas.`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",imported);renderResult();toast("Lecturas borradas")});
 $("#btnResetAll").onclick=()=>confirmBox("Se borrarán lecturas y stock ERP de este equipo.",()=>{scans=[];imported=[];erp=null;saveScans();store.set("inv_imported",[]);try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();renderResult();toast("Todo borrado")});
 
@@ -710,21 +740,70 @@ function sheetFrom(rows){
   keys.forEach((k,c)=>{if(/^c[oó]digo/i.test(k))for(let r=1;r<=rng.e.r;r++){const a=XLSX.utils.encode_cell({r,c});if(ws[a]){ws[a].t="s";ws[a].v=String(ws[a].v)}}});
   return ws;
 }
-async function saveWb(wb,name){
+function saveWb(wb,name){return saveData(name,new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})]),()=>XLSX.writeFile(wb,name))}
+async function saveData(name,blob,fallback){
   let dl=null;
   try{if(window.claude&&window.claude.use)dl=await window.claude.use("downloads")}catch(e){}
   if(dl){
-    try{const buf=XLSX.write(wb,{bookType:"xlsx",type:"array"});await dl.save({filename:name,data:new Blob([buf])});toast("Archivo guardado: "+name)}
+    try{await dl.save({filename:name,data:blob});toast("Archivo guardado: "+name)}
     catch(e){if(e&&e.code!=="declined")toast("No se pudo descargar: "+(e.message||e.code))}
     return;
   }
-  try{XLSX.writeFile(wb,name);toast("Descargando "+name)}catch(e){toast("No se pudo descargar: "+e.message)}
+  try{if(fallback)fallback();else{const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}toast("Descargando "+name)}catch(e){toast("No se pudo descargar: "+e.message)}
 }
 
 /* ================= inicio ================= */
-updStatus();renderSess();
+
+/* ================= maestro, modo operario, teclado ================= */
+$("#btnMaestro").onclick=()=>{
+  const d=erpDraft; if(!d||!d.items.length)return;
+  const m={app:"conteo-bodega",version:new Date().toISOString(),origen:d.file,productos:d.items.length,items:d.items.map(i=>[i.cod,i.ean,i.desc,i.um])};
+  saveData("maestro.json",new Blob([JSON.stringify(m)],{type:"application/json"}));
+};
+function setMaestro(m,silent){
+  erp={file:"Maestro "+new Date(m.version).toLocaleDateString("es-CL"),at:m.version,version:m.version,maestro:true,
+    items:m.items.map(([cod,ean,desc,um])=>({cod,ean:ean||"",desc:desc||"",um:um||"",stock:null,costo:null,ubic:""}))};
+  store.set("inv_erp",erp);buildIndex();updStatus();applyMode();
+  if(!silent)toast("Lista de productos actualizada: "+fmt(erp.items.length));
+}
+async function loadMaestro(){
+  if(!/^https?:$/.test(location.protocol)||/claude\.ai|claudeusercontent/.test(location.hostname))return;
+  try{
+    const r=await fetch("maestro.json",{cache:"no-store"}); if(!r.ok)return;
+    const m=await r.json(); if(!m||!Array.isArray(m.items))return;
+    if(erp&&!erp.maestro)return;            // el supervisor cargó un ERP a mano: no se pisa
+    if(erp&&erp.version===m.version)return; // ya está al día
+    setMaestro(m);
+  }catch(e){}
+}
+const isOp=()=>cfg.operator==null?!!(erp&&erp.maestro):cfg.operator;
+function applyMode(){
+  const op=isOp();
+  document.body.classList.toggle("op",op);
+  $("#btnMode").textContent=op?"Opciones de supervisor":"Volver a modo operario (solo contar)";
+  if(op&&$("#v-contar").hidden)show("contar");
+}
+$("#btnMode").onclick=()=>{cfg.operator=!isOp();store.set("inv_cfg",cfg);applyMode();if(!isOp())toast("Menú completo activado")};
+const KBD={num:["numeric","[0-9]*","Teclado numérico. Si el código tiene letras, cambia a ABC."],txt:["text","","Puedes escribir el código o parte del nombre del producto."],none:["none","","Modo pistola: no aparece el teclado del celular. Dispara la pistola Bluetooth."]};
+function applyKbd(){
+  const k=KBD[cfg.kbd]?cfg.kbd:"num", el=$("#scan");
+  el.setAttribute("inputmode",KBD[k][0]);
+  if(KBD[k][1])el.setAttribute("pattern",KBD[k][1]);else el.removeAttribute("pattern");
+  el.placeholder=k==="txt"?"Escanea, escribe código o nombre":"Escanea o digita el código";
+  $("#kbdHint").textContent=KBD[k][2];
+  $$("#kbd button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===k));
+}
+$$("#kbd button").forEach(b=>b.onclick=()=>{cfg.kbd=b.dataset.k;store.set("inv_cfg",cfg);applyKbd();$("#scan").blur();setTimeout(()=>$("#scan").focus(),60)});
+$("#btnAdd").onclick=()=>{const v=$("#scan").value;if(!v.trim()){$("#scan").focus();return}$("#scan").value="";handleInput(v);$("#scan").focus()};
+$("#qty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#scan").focus()}});
+$("#qty").addEventListener("focus",e=>setTimeout(()=>e.target.select(),0));
+$("#user").value=cfg.user||"";
+$("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.value=cfg.user;store.set("inv_cfg",cfg)};
+$("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas")},"#confirmScans");
+applyKbd();
+updStatus();renderSess();applyMode();loadMaestro();
 const h=(location.hash||"").slice(1);
-show(["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
+show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
 document.addEventListener("keydown",e=>{if($("#v-contar").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(a.tagName)&&a.id!=="scan"&&a.tagName!=="BUTTON")return;if(a&&a.id==="scan")return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)$("#scan").focus()},true);
 </script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script></body></html>
