@@ -104,6 +104,18 @@ body.expired .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}
 .dim{opacity:.6}
 .sync{font-size:13px;font-weight:600;padding:5px 10px;border-radius:14px}
 .s-ok{background:var(--ok-bg);color:var(--ok)}.s-wait{background:var(--warn-bg);color:var(--warn)}.s-bad{background:var(--bad-bg);color:var(--bad)}.s-run{background:var(--info-bg);color:var(--info)}
+body.locked nav.tabs,body.locked #status,body.locked section.view{display:none!important}
+body:not(.locked) #lockBox{display:none}
+#lockBox{max-width:560px;margin:40px auto;display:flex;flex-direction:column;gap:14px}
+.lockCard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 20px;display:flex;flex-direction:column;gap:10px;text-align:center}
+.lockCard .big{font-size:34px;line-height:1}.lockCard h2{margin:0;font-size:18px}.lockCard p{margin:0;color:var(--muted)}
+.live{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.live .lh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--chip);font-size:12.5px;color:var(--muted)}
+.lrow{display:grid;grid-template-columns:minmax(0,1.4fr) auto minmax(0,1.6fr);gap:6px 14px;align-items:center;padding:10px 12px;border-top:1px solid var(--line)}
+.lrow .ln{font-weight:600;min-width:0}.lrow .ld{font-size:12.5px;color:var(--muted);min-width:0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle;background:var(--muted)}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}.dot.off{background:var(--warn)}.dot.end{background:var(--primary)}
+@media (max-width:640px){.lrow{grid-template-columns:1fr}}
 .lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .last{border-radius:10px;padding:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px;transition:background .2s}
 .last.flash-ok{background:var(--ok-bg);border-color:var(--ok)}
@@ -148,6 +160,7 @@ body.op .supOnly{display:none!important}
 </div></header>
 
 <main class="wrap">
+<div id="lockBox"></div>
 
 <!-- ============ 1 ERP ============ -->
 <section class="view" id="v-erp">
@@ -403,6 +416,51 @@ grant execute on function
   public.cb_lecturas_de(text, uuid), public.cb_finalizar(text, uuid), public.cb_eliminar(text, uuid),
   public.cb_abrir(uuid, text, text), public.cb_enviar(uuid, text, text, jsonb)
 to anon, authenticated;
+
+-- =====================================================================
+--  AUDITORÍA DE INVENTARIO · Actualización: estado en línea del contador
+--  Pegar en Supabase → SQL Editor → Run. No borra datos. Se puede correr más de una vez.
+-- =====================================================================
+alter table public.cb_conteos add column if not exists visto timestamptz;      -- último "latido" del celular
+alter table public.cb_conteos add column if not exists terminado timestamptz;  -- el contador tocó "Terminar conteo"
+
+-- Latido: el celular avisa cada minuto que sigue con la app abierta.
+create or replace function public.cb_latido(p_id uuid, p_secret text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos;
+begin
+  select * into c from cb_conteos where id = p_id;
+  if not found or c.secret_hash is null or c.secret_hash <> extensions.crypt(coalesce(p_secret,''), c.secret_hash) then raise exception 'no_autorizado'; end if;
+  update cb_conteos set visto = now() where id = p_id;
+end $$;
+
+-- El contador terminó su conteo en el celular.
+create or replace function public.cb_terminar(p_id uuid, p_secret text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos;
+begin
+  select * into c from cb_conteos where id = p_id;
+  if not found or c.secret_hash is null or c.secret_hash <> extensions.crypt(coalesce(p_secret,''), c.secret_hash) then raise exception 'no_autorizado'; end if;
+  update cb_conteos set terminado = now(), visto = now() where id = p_id;
+end $$;
+
+-- El listado del supervisor ahora incluye "visto" y "terminado".
+create or replace function public.cb_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'finalizado', c.finalizado,
+      'abierto', c.abierto, 'contador', c.contador, 'ultimo_envio', c.ultimo_envio, 'n_lecturas', c.n_lecturas,
+      'visto', c.visto, 'terminado', c.terminado,
+      'productos', jsonb_array_length(c.items),
+      'contados', (select count(distinct l.data->>'k') from cb_lecturas l where l.conteo = c.id)
+    ) order by c.creado desc)
+    from cb_conteos c where c.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+grant execute on function public.cb_latido(uuid, text), public.cb_terminar(uuid, text) to anon, authenticated;
 </script>
   </div>
 
@@ -546,6 +604,7 @@ to anon, authenticated;
   <div class="card">
     <div class="eyebrow">Tabla 1</div>
     <h2>Resumen por producto</h2>
+    <div id="liveBox"></div>
     <div class="row">
       <div class="chips" id="fChips"></div>
       <span class="sep"></span>
@@ -732,12 +791,14 @@ const KW={
   cod:/^(c[oó]d(igo)?\.?(\s*(de\s*)?(art[ií]culo|producto|prod|item|interno|sku))?|sku|art[ií]culo|item|n[°º.]?\s*art|referencia|ref\.?|id\s*prod.*|cod\.?\s*art.*|cod\.?\s*prod.*|material|parte|n[°º]?\s*parte)$/,
   ean:/(ean|barra|barcode|upc|gtin|c[oó]d\.?\s*barras?)/,
   desc:/(descrip|detalle|nombre|glosa|^producto$|^art[ií]culo\s*desc)/,
-  stock:/(stock|saldo|existencia|^cant|cantidad|disponible|f[ií]sico|unidades|^q$|^qty)/,
+  disp:/(disponible|libre)/,
+  res:/(reserv|comprometid|asignad)/,
+  stock:/(stock|saldo|existencia|^cant|cantidad|f[ií]sico|unidades|^q$|^qty|^total$)/,
   costo:/(costo|precio|unitario|^cpp|pmp|valor\s*unit|p\.?\s*unit)/,
   ubic:/(ubicaci|bodega|pasillo|rack|zona|^loc|almac[eé]n|sucursal)/,
   um:/^(u\.?\s*m\.?|unidad(\s*de\s*medida)?|medida)$/
 };
-const FIELDS=[["cod","Código *"],["ean","Código de barras"],["desc","Descripción"],["stock","Stock sistema *"],["costo","Costo unitario"],["ubic","Ubicación/Bodega"],["um","Unidad"]];
+const FIELDS=[["cod","Código *"],["ean","Código de barras"],["desc","Descripción"],["stock","Stock total *"],["disp","Disponible"],["res","Reserva"],["costo","Costo unitario"],["ubic","Ubicación/Bodega"],["um","Unidad"]];
 const JUNK=/^(total(es)?|sub\s*-?\s*total|p[aá]gina|page|p[aá]g\.|fecha|hora|usuario|empresa|r\.?u\.?t|reporte|informe|listado|emitido|impreso|saldo\s*total|resumen|fin\s*del?\s*(reporte|informe)|-{3,}|={3,}|\*{3,})/i;
 
 function scoreHeader(r){let k=0,t=0;for(const c of r){const s=deacc(c);if(!s||typeof c==="number")continue;if(/^[\d.,\-\/: ]+$/.test(s))continue;t++;for(const f in KW)if(KW[f].test(s)){k++;break}}return k*3+t*.3}
@@ -745,17 +806,18 @@ function detectHeader(aoa){let best=0,bs=-1;for(let i=0;i<Math.min(aoa.length,60
 function autoMap(hdr,data){
   const h=hdr.map(deacc), m={};
   const used=new Set();
-  const order=["ean","cod","desc","stock","costo","ubic","um"];
+  const order=["ean","cod","desc","disp","res","stock","costo","ubic","um"];
   for(const f of order){for(let i=0;i<h.length;i++){if(used.has(i)||!h[i])continue;
     if(f==="cod"&&KW.ean.test(h[i]))continue;
-    if(f==="stock"&&/(valor|costo|precio|total\s*\$|monto)/.test(h[i]))continue;
+    if(f==="stock"&&/(valor|costo|precio|total\s*\$|monto|disponible|reserv|comprometid)/.test(h[i]))continue;
+    if((f==="disp"||f==="res")&&/(valor|costo|precio|monto)/.test(h[i]))continue;
     if(f==="desc"&&/(cod|c[oó]d)/.test(h[i]))continue;
     if(KW[f].test(h[i])){m[f]=i;used.add(i);break}}}
   // respaldo: código = columna más "única"; stock = última numérica
   const ncol=Math.max(hdr.length,...data.slice(0,200).map(r=>r.length));
   if(m.cod==null){let bi=-1,bu=0;for(let i=0;i<ncol;i++){if(used.has(i))continue;const vals=data.slice(0,300).map(r=>codeStr(r[i])).filter(Boolean);const u=new Set(vals).size;if(u>bu&&vals.length>data.length*.5){bu=u;bi=i}}if(bi>=0){m.cod=bi;used.add(bi)}}
   if(m.desc==null){let bi=-1,bl=0;for(let i=0;i<ncol;i++){if(used.has(i))continue;const l=data.slice(0,200).reduce((a,r)=>a+(typeof r[i]==="string"&&num(r[i])==null?r[i].length:0),0);if(l>bl){bl=l;bi=i}}if(bi>=0){m.desc=bi;used.add(bi)}}
-  if(m.stock==null){for(let i=ncol-1;i>=0;i--){if(used.has(i))continue;const ok=data.slice(0,200).filter(r=>num(r[i])!=null).length;if(ok>data.length*.5){m.stock=i;used.add(i);break}}}
+  if(m.stock==null&&m.disp==null&&m.res==null){for(let i=ncol-1;i>=0;i--){if(used.has(i))continue;const ok=data.slice(0,200).filter(r=>num(r[i])!=null).length;if(ok>data.length*.5){m.stock=i;used.add(i);break}}}
   return m;
 }
 let erpDraft=null; // {file, wb, sheet, aoa, hdrRow, map}
@@ -765,7 +827,7 @@ function processDraft(){
   const raw=aoa.slice(h+1);
   if(!d.map)d.map=autoMap(hdr,raw);
   const m=d.map, hdrSet=new Set(hdr.map(deacc));
-  let empty=0,rep=0,junk=0,nocode=0,sci=0,neg=0;
+  let empty=0,rep=0,junk=0,nocode=0,sci=0,neg=0,mism=0;
   const byKey=new Map(), items=[];
   for(const r of raw){
     const cells=r.map(norm);
@@ -776,11 +838,13 @@ function processDraft(){
     const cod=m.cod!=null?codeStr(r[m.cod]):"";
     if(!cod){ if(filled.length<=2||filled.some(c=>/total/i.test(c))){junk++;continue} nocode++;continue}
     if(isSci(r[m.cod]))sci++;
-    const it={cod,ean:m.ean!=null?codeStr(r[m.ean]):"",desc:m.desc!=null?norm(r[m.desc]):"",stock:m.stock!=null?(num(r[m.stock])??0):0,
+    const it={cod,ean:m.ean!=null?codeStr(r[m.ean]):"",desc:m.desc!=null?norm(r[m.desc]):"",disp:m.disp!=null?(num(r[m.disp])??0):null,res:m.res!=null?(num(r[m.res])??0):null,stock:0,
       costo:m.costo!=null?num(r[m.costo]):null,ubic:m.ubic!=null?norm(r[m.ubic]):"",um:m.um!=null?norm(r[m.um]):""};
+    it.stock=m.stock!=null?(num(r[m.stock])??0):((it.disp||0)+(it.res||0));
+    if(m.stock!=null&&m.disp!=null&&m.res!=null&&Math.abs(it.disp+it.res-it.stock)>1e-6)mism++;
     if(it.stock<0)neg++;
     const k=key(cod);
-    if(byKey.has(k)){const p=byKey.get(k);p.stock+=it.stock;if(!p.desc)p.desc=it.desc;if(!p.ean)p.ean=it.ean;if(p.costo==null)p.costo=it.costo;if(it.ubic&&!p.ubic.split(" | ").includes(it.ubic))p.ubic=(p.ubic?p.ubic+" | ":"")+it.ubic;p._n++;}
+    if(byKey.has(k)){const p=byKey.get(k);p.stock+=it.stock;if(it.disp!=null)p.disp=(p.disp||0)+it.disp;if(it.res!=null)p.res=(p.res||0)+it.res;if(!p.desc)p.desc=it.desc;if(!p.ean)p.ean=it.ean;if(p.costo==null)p.costo=it.costo;if(it.ubic&&!p.ubic.split(" | ").includes(it.ubic))p.ubic=(p.ubic?p.ubic+" | ":"")+it.ubic;p._n++;}
     else{it._n=1;byKey.set(k,it);items.push(it)}
   }
   const merged=items.filter(i=>i._n>1).length;
@@ -792,7 +856,10 @@ function processDraft(){
   if(merged)log.push(`<span class="w">! ${fmt(merged)} códigos aparecían en varias filas (ej. varias bodegas): se sumó su stock</span>`);
   if(neg)log.push(`<span class="w">! ${fmt(neg)} productos con stock negativo en el sistema</span>`);
   if(sci)log.push(`<span class="w">! ${fmt(sci)} códigos vienen en notación científica (7,8E+12): el ERP los exportó mal y no van a cruzar. Pide el informe con esa columna como texto.</span>`);
-  if(m.cod==null||m.stock==null)log.push(`<span class="w">! Falta elegir la columna de ${m.cod==null?"código":"stock"}</span>`);
+  if(m.stock==null&&(m.disp!=null||m.res!=null))log.push(`<span class="ok">✓ Stock total = Disponible + Reserva (el informe no trae columna de total)</span>`);
+  if(m.stock!=null&&m.disp==null&&m.res==null)log.push(`<span class="w">! Revisa que "Stock total" sea el stock físico completo (disponible + reserva). Si el informe trae Disponible y Reserva por separado, elígelas abajo.</span>`);
+  if(mism)log.push(`<span class="w">! ${fmt(mism)} productos donde Disponible + Reserva no suma el Stock total</span>`);
+  if(m.cod==null||(m.stock==null&&m.disp==null&&m.res==null))log.push(`<span class="w">! Falta elegir la columna de ${m.cod==null?"código":"stock"}</span>`);
   items.forEach(i=>delete i._n);
   d.hdr=hdr; d.items=items; d.log=log; d.merged=merged;
   renderDraft();
@@ -807,8 +874,8 @@ function renderDraft(){
   $$("#mapSel select").forEach(s=>s.onchange=()=>{d.map[s.dataset.f]=s.value===""?null:+s.value;processDraft()});
   $("#erpLog").innerHTML=d.log.map(l=>`<div>${l}</div>`).join("");
   const p=d.items.slice(0,15);
-  $("#erpPrev").innerHTML=`<thead><tr><th>Código</th><th>Cód. barras</th><th>Descripción</th><th class="num">Stock</th><th class="num">Costo</th><th>Ubicación</th></tr></thead><tbody>`+
-    p.map(i=>`<tr><td class="code">${esc(i.cod)}</td><td class="code">${esc(i.ean)}</td><td class="desc">${esc(i.desc)}</td><td class="num">${fmt2(i.stock)}</td><td class="num">${fmt2(i.costo)}</td><td>${esc(i.ubic)}</td></tr>`).join("")+
+  $("#erpPrev").innerHTML=`<thead><tr><th>Código</th><th>Cód. barras</th><th>Descripción</th>${d.map.disp!=null?'<th class="num">Disponible</th>':""}${d.map.res!=null?'<th class="num">Reserva</th>':""}<th class="num">Stock total</th><th class="num">Costo</th><th>Ubicación</th></tr></thead><tbody>`+
+    p.map(i=>`<tr><td class="code">${esc(i.cod)}</td><td class="code">${esc(i.ean)}</td><td class="desc">${esc(i.desc)}</td>${d.map.disp!=null?`<td class="num">${fmt2(i.disp)}</td>`:""}${d.map.res!=null?`<td class="num">${fmt2(i.res)}</td>`:""}<td class="num">${fmt2(i.stock)}</td><td class="num">${fmt2(i.costo)}</td><td>${esc(i.ubic)}</td></tr>`).join("")+
     (d.items.length>15?`<tr><td colspan="6" class="muted">… y ${fmt(d.items.length-15)} más</td></tr>`:"")+"</tbody>";
   $("#btnErpOk").disabled=!d.items.length;$("#maestroCard").hidden=!d.items.length;renderFact();
 }
@@ -832,7 +899,7 @@ $("#btnErpOk").onclick=()=>{
   buildIndex();updStatus();toast(`Stock cargado: ${fmt(erp.items.length)} productos`);show("contar");
 };
 $("#btnErpXlsx").onclick=()=>{const d=erpDraft;const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,sheetFrom(erpRows(d.items)),"Stock ERP limpio");saveWb(wb,"ERP_limpio_"+stamp()+".xlsx")};
-function erpRows(items){return items.map(i=>({"Código":i.cod,"Código barras":i.ean,"Descripción":i.desc,"Unidad":i.um,"Ubicación ERP":i.ubic,"Stock sistema":i.stock,"Costo unitario":i.costo??"","Stock valorizado":i.costo!=null?i.stock*i.costo:""}))}
+function erpRows(items){return items.map(i=>({"Código":i.cod,"Código barras":i.ean,"Descripción":i.desc,"Unidad":i.um,"Ubicación ERP":i.ubic,"Disponible":i.disp??"","Reserva":i.res??"","Stock total":i.stock,"Costo unitario":i.costo??"","Stock valorizado":i.costo!=null?i.stock*i.costo:""}))}
 function dropZone(zone,input,cb){
   zone.onclick=()=>input.click(); zone.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();input.click()}};
   input.onchange=()=>{cb([...input.files]);input.value=""};
@@ -1144,9 +1211,9 @@ function compute(){
   for(const it of items){const k=key(it.cod),a=first.get(k),b=re.get(k);
     const fin=b?b.q:(a?a.q:null);
     const st=it.stock==null?(fin!=null?"contado":"nocont"):fin==null?"nocont":(Math.abs(fin-it.stock)<1e-9?"ok":(fin<it.stock?"falta":"sobra"));
-    rows.push({cod:it.cod,desc:it.desc,sg:it.sg||"",um:umTxt(it.um),stock:it.stock,c1:a?a.q:null,c2:b?b.q:null,fin,dif:it.stock!=null&&fin!=null?fin-it.stock:null,st,
-      val:b&&a?(Math.abs(a.q-b.q)<1e-9?"conf":"corr"):"",nub:new Set([...(a?a.ub:[]),...(b?b.ub:[])]).size,n:(a?a.n:0)+(b?b.n:0)})}
-  for(const m of [first,re])for(const [k,c] of m)if(k[0]==="x"&&!rows.some(r=>r.k===k))rows.push({k,cod:c.raw,desc:"",um:"",stock:null,c1:first.get(k)?first.get(k).q:null,c2:re.get(k)?re.get(k).q:null,fin:(re.get(k)||first.get(k)).q,dif:null,st:"noerp",val:"",nub:c.ub.size,n:c.n});
+    rows.push({cod:it.cod,desc:it.desc,sg:it.sg||"",um:umTxt(it.um),stock:it.stock,disp:it.disp??null,res:it.res??null,c1:a?a.q:null,c2:b?b.q:null,fin,dif:it.stock!=null&&fin!=null?fin-it.stock:null,st,
+      val:b&&a?(Math.abs(a.q-b.q)<1e-9?"conf":"corr"):"",nub:new Set([...(a?a.ub:[]),...(b?b.ub:[])]).size,ubl:[...new Set([...(a?a.ub:[]),...(b?b.ub:[])])].sort().join(", "),n:(a?a.n:0)+(b?b.n:0)})}
+  for(const m of [first,re])for(const [k,c] of m)if(k[0]==="x"&&!rows.some(r=>r.k===k))rows.push({k,cod:c.raw,desc:"",um:"",stock:null,c1:first.get(k)?first.get(k).q:null,c2:re.get(k)?re.get(k).q:null,fin:(re.get(k)||first.get(k)).q,dif:null,st:"noerp",val:"",nub:c.ub.size,ubl:[...c.ub].sort().join(", "),n:c.n});
   return rows;
 }
 function kpis(rows){
@@ -1162,6 +1229,7 @@ function renderSel(){
   $("#rSel").innerHTML=opts.map(([v,l])=>`<option value="${esc(v)}" ${v===rSel?"selected":""}>${esc(l)}</option>`).join("");
 }
 function renderResult(){
+  renderLive();
   renderSel();
   const rows=compute(), k=kpis(rows), sc=scope();
   $("#resNote").hidden=!(erp&&erp.maestro)&&!!erp;
@@ -1175,12 +1243,12 @@ function renderResult(){
   if(q)f=f.filter(r=>deacc(r.cod+" "+r.desc).includes(q));
   const ord={falta:0,sobra:1,nocont:2,noerp:3,contado:4,ok:5};
   f.sort((a,b)=>(ord[a.st]-ord[b.st])||Math.abs(b.dif||0)-Math.abs(a.dif||0)||String(a.cod).localeCompare(String(b.cod)));
-  const hasRe=rows.some(r=>r.c2!=null);
-  $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Sistema</th><th class="num">${hasRe?"1er conteo":"Contado"}</th>${hasRe?'<th class="num">Reconteo</th>':""}<th class="num">Diferencia</th><th>Estado</th>${hasRe?"<th>Validación</th>":""}<th class="num">Ubic.</th></tr></thead><tbody>`+
-    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td>${esc(r.um||"")}</td><td class="num">${fmt2(r.stock)}</td><td class="num">${fmt2(r.c1)}</td>${hasRe?`<td class="num">${fmt2(r.c2)}</td>`:""}
-    <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td>${hasRe?`<td>${r.val?`<span class="pill ${VALID[r.val][1]}">${VALID[r.val][0]}</span>`:""}</td>`:""}<td class="num">${r.nub||""}</td></tr>`).join("")+
-    (f.length?"":`<tr><td colspan="10" class="muted">${scans.length?"Nada con este filtro.":"Todavía no hay lecturas. Tráelas con el botón de arriba."}</td></tr>`)+"</tbody>";
-  $("#resInfo").textContent=`Mostrando ${fmt(Math.min(rLimit,f.length))} de ${fmt(f.length)} productos${hasRe?" · Diferencia y estado usan el reconteo cuando existe":""}`;
+  const hasRe=rows.some(r=>r.c2!=null), hasDR=rows.some(r=>r.disp!=null||r.res!=null);
+  $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th>${hasDR?'<th class="num">Disponible</th><th class="num">Reserva</th><th class="num">Stock total</th>':'<th class="num">Sistema</th>'}<th class="num">${hasRe?"1er conteo":"Contado"}</th>${hasRe?'<th class="num">Reconteo</th>':""}<th class="num">Diferencia</th><th>Estado</th>${hasRe?"<th>Validación</th>":""}<th class="num" title="Cantidad de lecturas (escaneos) del producto, igual que en la Tabla 2">Lecturas</th><th class="num" title="Ubicaciones distintas donde se encontró el producto">Ubic.</th></tr></thead><tbody>`+
+    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td>${esc(r.um||"")}</td>${hasDR?`<td class="num">${fmt2(r.disp)}</td><td class="num">${fmt2(r.res)}</td>`:""}<td class="num" style="font-weight:600">${fmt2(r.stock)}</td><td class="num">${fmt2(r.c1)}</td>${hasRe?`<td class="num">${fmt2(r.c2)}</td>`:""}
+    <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td>${hasRe?`<td>${r.val?`<span class="pill ${VALID[r.val][1]}">${VALID[r.val][0]}</span>`:""}</td>`:""}<td class="num">${r.n||""}</td><td class="num" title="${esc(r.ubl||"")}">${r.nub||""}</td></tr>`).join("")+
+    (f.length?"":`<tr><td colspan="14" class="muted">${scans.length?"Nada con este filtro.":"Todavía no hay lecturas. Tráelas con el botón de arriba."}</td></tr>`)+"</tbody>";
+  $("#resInfo").textContent=`Mostrando ${fmt(Math.min(rLimit,f.length))} de ${fmt(f.length)} productos · La diferencia se calcula contra el ${hasDR?"Stock total (disponible + reserva)":"stock del sistema"}${hasRe?" · Diferencia y estado usan el reconteo cuando existe":""} · Lecturas = veces escaneado · Ubic. = ubicaciones distintas (pasa el mouse para verlas)`;
   $("#btnMore").hidden=f.length<=rLimit;
   // reconteo
   const rc=rows.filter(r=>r.st==="falta"||r.st==="sobra"||($("#reNoCont").checked&&r.st==="nocont"));
@@ -1241,7 +1309,7 @@ $("#btnReconteo").onclick=async()=>{
 };
 
 /* ---- exportar ---- */
-const detRow=r=>({"Código":r.cod,"Descripción":r.desc,"Subgrupo":r.sg||"","Unidad":r.um,"Stock sistema":r.stock??"","1er conteo":r.c1??"","Reconteo":r.c2??"","Conteo final":r.fin??"","Diferencia":r.dif??"","Estado":STATES[r.st][0],"Validación":r.val?VALID[r.val][0]:"","N° ubicaciones":r.nub||"","N° lecturas":r.n});
+const detRow=r=>({"Código":r.cod,"Descripción":r.desc,"Subgrupo":r.sg||"","Unidad":r.um,"Disponible":r.disp??"","Reserva":r.res??"","Stock total":r.stock??"","1er conteo":r.c1??"","Reconteo":r.c2??"","Conteo final":r.fin??"","Diferencia":r.dif??"","Estado":STATES[r.st][0],"Validación":r.val?VALID[r.val][0]:"","N° ubicaciones":r.nub||"","N° lecturas":r.n});
 const lectRow=s=>{const it=erp&&findItem(s.code),c=conteoDeScan(s);return {"Conteo":c?c.nombre:(s.conteo||"Este equipo"),"Tipo":esReconteo(c)?"Reconteo":"Conteo","Fecha":new Date(s.t).toLocaleDateString("es-CL"),"Hora":new Date(s.t).toLocaleTimeString("es-CL"),"Contador":s.user||"","Ubicación":s.ubic||"","Código":s.code,"Descripción":it?it.desc:"","Cantidad contada":s.qty,"Unidad contada":s.ce||s.um||"","Factor":s.f||1,"Total (unidad ERP)":sq(s),"Unidad ERP":s.um||""}};
 $("#btnExpRes").onclick=()=>{
   const rows=compute(),k=kpis(rows),sc=scope(),wb=XLSX.utils.book_new();
@@ -1564,11 +1632,53 @@ async function crearNube(m,its,sel,rot){
 let nubeLive=new Map(), nubeAt=null, nubeBusy=false;
 async function refreshNube(silent){
   if(!nubeOn()||nubeBusy)return;nubeBusy=true;
-  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();renderConteosOnly()}
+  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();renderConteosOnly();renderLive()}
   catch(e){if(!silent)toast(sbMsg(e))}
   finally{nubeBusy=false}
 }
 setInterval(()=>{if(nubeOn()&&!document.hidden&&(!$("#v-erp").hidden||!$("#v-importar").hidden)&&conteos.some(c=>c.nube&&!c.fin))refreshNube(true)},20000);
+const hhmm=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});
+function hace(t){const m=Math.round((Date.now()-Date.parse(t))/60000);return m<1?"hace segundos":m<60?`hace ${m} min`:hhmm(t)}
+/* estado en vivo del contador de un link: [clase del punto, texto, detalle] */
+function liveEstado(x){
+  if(!x)return ["","Consultando…",""];
+  const ult=[x.visto,x.ultimo_envio,x.abierto].filter(Boolean).sort().at(-1);
+  if(x.finalizado)return ["end","Finalizado por ti",`el ${fmtDT(x.finalizado)}`];
+  if(x.terminado)return ["end","Terminó el conteo",`a las ${hhmm(x.terminado)}`];
+  if(!x.abierto)return isVenc(x.vence)?["off","Venció sin abrir",""]:["","Aún no abre el link",`vence ${fmtDT(x.vence)}`];
+  const on=ult&&Date.now()-Date.parse(ult)<150000;
+  if(isVenc(x.vence))return ["off","Conteo vencido",ult?`última señal ${hace(ult)}`:""];
+  if(on)return ["on",x.n_lecturas?"En línea · contando":"En línea · abrió el link",x.ultimo_envio?`último envío ${hace(x.ultimo_envio)}`:`abrió ${hace(x.abierto)}`];
+  return ["off","Sin señal",ult?`última señal ${hace(ult)}`:""];
+}
+function renderLive(){
+  const box=$("#liveBox");if(!box)return;
+  if(!nubeOn()){box.innerHTML="";return}
+  let list;
+  if(rSel&&rSel!=="*"&&rSel!=="local")list=conteos.filter(c=>c.nube&&(c.id===rSel||c.reconteoDe===rSel));
+  else if(rSel==="*")list=conteos.filter(c=>c.nube&&(!nubeLive.get(c.id)||!nubeLive.get(c.id).finalizado));
+  else list=[];
+  if(!list.length){box.innerHTML="";return}
+  const sinEstado=list.some(c=>{const x=nubeLive.get(c.id);return x&&x.abierto&&x.visto===undefined});
+  box.innerHTML=`<div class="live"><div class="lh"><span><b>Contadores en línea</b></span><span class="sep"></span><span>${nubeAt?"actualizado "+hhmm(nubeAt):""} · se refresca cada 20 s</span><button class="btn sm" id="liveGo">Actualizar</button></div>`+
+    list.map(c=>{const x=nubeLive.get(c.id);const [d,t,det]=liveEstado(x);
+      return `<div class="lrow"><div class="ln">${esReconteo(c)?'<span class="pill p-warn">Reconteo</span> ':""}${esc(c.nombre)}<div class="ld">${x&&x.contador?"Contador: "+esc(x.contador):"Contador sin nombre todavía"}</div></div>
+      <div><span class="dot ${d}"></span><b>${t}</b>${det?`<div class="ld">${det}</div>`:""}</div>
+      <div class="ld">${x?`${fmt(x.contados)} de ${fmt(x.productos)} productos · ${fmt(x.n_lecturas)} lecturas`:""}<div class="bar" style="margin-top:4px"><span style="width:${x&&x.productos?Math.round(x.contados*100/x.productos):0}%"></span></div></div></div>`}).join("")+
+    (sinEstado?`<div class="lh">Para ver "en línea" y "terminó", ejecuta en Supabase el script de actualización (supabase_estado.sql).</div>`:"")+`</div>`;
+  $("#liveGo").onclick=()=>liveTick(true);
+}
+/* refresca el estado y, si llegaron lecturas nuevas, las trae solas */
+let liveSeen={};
+async function liveTick(force){
+  if(!nubeOn()||$("#v-resultado").hidden)return;
+  await refreshNube(true);
+  const ids=rSel&&rSel!=="*"&&rSel!=="local"?conteos.filter(c=>c.nube&&(c.id===rSel||c.reconteoDe===rSel)):(rSel==="*"?conteos.filter(c=>c.nube):[]);
+  let nuevo=false;
+  for(const c of ids){const x=nubeLive.get(c.id);const sig=x?(x.ultimo_envio||"")+"|"+x.n_lecturas:"";if(force||liveSeen[c.id]!==sig){if(liveSeen[c.id]!==undefined||force){try{await traerLecturas(c,true);nuevo=true}catch(e){}}liveSeen[c.id]=sig}}
+  if(nuevo)renderResult();else renderLive();
+}
+setInterval(()=>{if(!document.hidden)liveTick(false)},20000);
 function nubeEstado(c,x){
   if(!x)return ['<span class="pill p-mut">…</span>',""];
   if(x.finalizado)return ['<span class="pill p-mut">Finalizado</span>',""];
@@ -1602,7 +1712,7 @@ async function checkNubeLink(){
   try{history.replaceState(null,"",location.pathname+"#contar")}catch(e){}
   const [id,token]=nb.split(".");
   const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), key=q.get("k")||"";
-  if(!/^[0-9a-f-]{36}$/.test(id||"")||!token||!url||!key){$("#conteoBanner").innerHTML=`<div class="confirm"><span>El link del conteo está incompleto. Pide que te lo reenvíen.</span></div>`;return true}
+  if(!/^[0-9a-f-]{36}$/.test(id||"")||!token||!url||!key){$("#conteoBanner").innerHTML=`<div class="confirm"><span>El link del conteo está incompleto. Pide que te lo reenvíen.</span></div>`;lockFromBanner();return true}
   if(erp&&erp.conteo&&erp.conteo.id===id){toast("Conteo "+erp.conteo.nombre);syncNow();return true}
   $("#conteoBanner").innerHTML=`<div class="notice">Abriendo el conteo…</div>`;
   try{
@@ -1619,7 +1729,7 @@ async function checkNubeLink(){
       return true;
     }
     go();
-  }catch(e){$("#conteoBanner").innerHTML=`<div class="confirm"><span>${esc(sbMsg(e))}</span></div>`}
+  }catch(e){$("#conteoBanner").innerHTML=`<div class="confirm"><span>${esc(sbMsg(e))}</span></div>`;lockFromBanner()}
   return true;
 }
 let syncT=null,syncing=false;
@@ -1649,6 +1759,8 @@ function renderSync(){
   else h=`<span class="sync s-ok">☁ Enviado al supervisor${cfg.syncAt?" · "+new Date(cfg.syncAt).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):""}</span>`;
   el.innerHTML=h;const b=$("#syncGo");if(b)b.onclick=()=>{cfg.syncErr="";syncNow()};
 }
+async function latido(){const c=nubeConf();if(!c||document.hidden||navigator.onLine===false)return;try{await rpc(c,"cb_latido",{p_id:erp.conteo.id,p_secret:c.secret})}catch(e){}}
+setInterval(latido,60000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)latido()});setTimeout(latido,3000);
 addEventListener("online",()=>{if(cfg.dirty)syncNow();else renderSync()});
 addEventListener("offline",renderSync);
 setInterval(()=>{if(nubeConf()&&cfg.dirty&&!syncing)syncNow()},30000);
@@ -1658,13 +1770,13 @@ function checkConteoLink(){
   let c=null;try{c=new URLSearchParams(location.search).get("c")}catch(e){}
   if(!c)return false;
   try{history.replaceState(null,"",location.pathname+"#contar")}catch(e){}
-  if(!/^[\w-]+\/[0-9a-f]{20,}\/[0-9a-f]{20,}$/.test(c)){toast("El link del conteo está incompleto. Pide que te lo reenvíen.");return false}
+  if(!/^[\w-]+\/[0-9a-f]{20,}\/[0-9a-f]{20,}$/.test(c)){toast("El link del conteo está incompleto. Pide que te lo reenvíen.");lockScreen("El link del conteo está incompleto. Pide que te lo reenvíen.","No se puede abrir este link","⚠️");return true}
   const [u,id,sha]=c.split("/");
   if(cfg.conteoId===id&&erp&&erp.conteo){toast("Conteo "+erp.conteo.nombre);return true}
   $("#conteoBanner").innerHTML=`<div class="notice">Descargando el conteo…</div>`;
   fetch(RAW+u+"/"+id+"/raw/"+sha+"/conteo.json").then(r=>{if(!r.ok)throw new Error(r.status===404?"gone":"net");return r.json()}).then(m=>{
     if(!m||m.app!=="conteo-bodega"||!Array.isArray(m.items))throw new Error("bad");
-    if(isVenc(m.vence)){$("#conteoBanner").innerHTML=`<div class="confirm"><span>Este link venció (${fmtDT(m.vence)}). Pide uno nuevo al supervisor.</span></div>`;return}
+    if(isVenc(m.vence)){$("#conteoBanner").innerHTML=`<div class="confirm"><span>Este link venció (${fmtDT(m.vence)}). Pide uno nuevo al supervisor.</span></div>`;lockFromBanner();return}
     if(cfg.conteoId===id&&erp&&erp.conteo){$("#conteoBanner").innerHTML="";toast("Conteo "+m.nombre+" ya estaba abierto");return}
     if(scans.length){
       $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch">
@@ -1677,7 +1789,7 @@ function checkConteoLink(){
     }
     applyConteo(m,id);
   }).catch(e=>{
-    $("#conteoBanner").innerHTML=`<div class="confirm"><span>${e.message==="gone"?"Este link ya fue cerrado por el supervisor. Si eres el contador asignado, pídele uno nuevo.":"No se pudo descargar el conteo. Revisa la señal y vuelve a abrir el link."}</span></div>`;
+    $("#conteoBanner").innerHTML=`<div class="confirm"><span>${e.message==="gone"?"Este link ya fue cerrado por el supervisor. Si eres el contador asignado, pídele uno nuevo.":"No se pudo descargar el conteo. Revisa la señal y vuelve a abrir el link."}</span></div>`;lockFromBanner();
   });
   return true;
 }
@@ -1711,6 +1823,7 @@ function renderConteoBox(){
   }
 }
 function applyConteo(m,id,sb){
+  document.body.classList.remove("locked");$("#lockBox").innerHTML="";
   delete $("#conteoBanner").dataset.exp;
   erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null,sb:sb||null},
     items:m.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1,stock:null,costo:null,ubic:""}))};
@@ -1741,6 +1854,16 @@ async function loadMaestro(){
 }
 if((location.hash||"")==="#panel"){cfg.sup=true;store.set("inv_cfg",cfg)}
 const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.login);
+/* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
+function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(typeof gh!=="undefined"&&gh.login)||(erp&&!erp.maestro))}
+function lockScreen(msg,title,icon){
+  if(isOp()||isSupDevice())return false;
+  if(typeof stopCam==="function")stopCam();
+  document.body.classList.add("locked");
+  $("#lockBox").innerHTML=`<div class="lockCard"><div class="big">${icon||"🔒"}</div><h2>${esc(title||"Esta app se usa con el link de tu supervisor")}</h2><p>${msg||"Abre el link de conteo que te enviaron por WhatsApp."}</p></div>`;
+  return true;
+}
+function lockFromBanner(title){const t=($("#conteoBanner").textContent||"").trim();lockScreen(esc(t),title||"No se puede abrir este link","⚠️")}
 function applyMode(){
   const op=isOp();
   document.body.classList.toggle("op",op);
@@ -1751,12 +1874,14 @@ $("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.val
 $("#btnClearScans").onclick=async()=>{
   if(nubeConf()){
     if(cfg.dirty){await syncNow();if(cfg.dirty)return toast("Aún hay lecturas sin enviar. Busca señal y toca Enviar ahora (o exporta el respaldo).")}
-    return confirmBox(`Todas tus lecturas (${fmt(scans.length)}) ya llegaron al supervisor. Se borrarán de este celular junto con la lista de productos.`,()=>{
+    const cfin=nubeConf(), idfin=erp.conteo.id;
+    return confirmBox(`Todas tus lecturas (${fmt(scans.length)}) ya llegaron al supervisor. Se borrarán de este celular junto con la lista de productos.`,async()=>{
+      try{await rpc(cfin,"cb_terminar",{p_id:idfin,p_secret:cfin.secret})}catch(e){}
       scans=[];imported=[];store.set("inv_scans",scans);store.set("inv_imported",[]);erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}cfg.dirty=false;store.set("inv_cfg",cfg);
       buildIndex();updStatus();renderRecent();renderSess();renderConteoBox();clearProduct();setUbic("",true);
-      $("#conteoBanner").innerHTML='<div class="notice">Conteo terminado y enviado. ¡Gracias!</div>';},"#confirmScans");
+      $("#conteoBanner").innerHTML='<div class="notice">Conteo terminado y enviado. ¡Gracias!</div>';lockScreen("Tus lecturas llegaron al supervisor. Ya puedes cerrar esta página.","Conteo terminado","✅");},"#confirmScans");
   }
-  confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>'}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");};
+  confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>';lockScreen("Este celular ya no tiene la lista de productos.","Conteo terminado","✅")}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");};
 applyKbd();
 function checkExpiry(){
   const v=erp&&erp.conteo&&erp.conteo.vence, exp=isVenc(v);
@@ -1772,10 +1897,12 @@ function checkExpiry(){
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
+{let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c"))}catch(e){}
+ if(!isOp()&&!isSupDevice())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
 checkNubeLink().then(x=>{if(!x&&!checkConteoLink())loadMaestro()});
 if(nubeOn())refreshNube(true);
 if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
 show(isOp()?"contar":["erp","contar","resultado"].includes(h)?h:(erp?"contar":"erp"));
 </script>
-<script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script></body></html>
+<script>if("serviceWorker" in navigator&&location.protocol==="https:"){const had=!!navigator.serviceWorker.controller;let rl=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(had&&!rl){rl=true;location.reload()}});addEventListener("load",()=>navigator.serviceWorker.register("sw.js").then(r=>{r.update();setInterval(()=>r.update(),30*60*1000)}).catch(()=>{}))}</script></body></html>
