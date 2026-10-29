@@ -101,6 +101,9 @@ body.expired .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}
 .clrow{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;text-align:left;background:var(--panel);border:0;border-bottom:1px solid var(--line);padding:9px 10px;font:inherit;color:var(--ink);cursor:pointer}
 .clrow .code{font:12px var(--mono);color:var(--muted)}.clrow .cd{font-size:13px;font-weight:600;min-width:0}
 .clrow .cs{font-size:12px;color:var(--muted);white-space:nowrap}.clrow.done{background:var(--ok-bg)}.clrow.done .cs{color:var(--ok);font-weight:700}
+.dim{opacity:.6}
+.sync{font-size:13px;font-weight:600;padding:5px 10px;border-radius:14px}
+.s-ok{background:var(--ok-bg);color:var(--ok)}.s-wait{background:var(--warn-bg);color:var(--warn)}.s-bad{background:var(--bad-bg);color:var(--bad)}.s-run{background:var(--info-bg);color:var(--info)}
 .lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .last{border-radius:10px;padding:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px;transition:background .2s}
 .last.flash-ok{background:var(--ok-bg);border-color:var(--ok)}
@@ -210,8 +213,202 @@ body.op .supOnly{display:none!important}
     <div id="crearRes"></div>
   </div>
 
+  <div class="card" id="sbCard">
+    <div class="row"><div class="eyebrow">Configuración (una sola vez) · recomendado</div><span class="sep"></span><span class="pill" id="sbState"></span></div>
+    <h2>Envío automático de conteos (Supabase)</h2>
+    <p>Con esto las lecturas de cada contador <b>llegan solas</b> a este Panel, ves el avance en vivo y cada link funciona en <b>un solo celular</b>. Supabase es gratuito para este uso.</p>
+    <details id="sbHelp">
+      <summary>Cómo configurarlo (unos 15 minutos)</summary>
+      <ol class="small" style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
+        <li>Entra a <a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com</a>, crea una cuenta gratis y luego un <b>New project</b> (nombre: conteo-bodega, región: São Paulo). Anota la contraseña de la base de datos que te pide.</li>
+        <li>Cuando el proyecto esté listo, abre <b>SQL Editor</b> en el menú izquierdo, toca <b>New query</b>, pega el script con este botón y toca <b>Run</b>: <button class="btn sm" id="btnSqlCopy">Copiar script SQL</button></li>
+        <li>Ve a <b>Project Settings → API</b> (o <b>Connect</b>). Copia la <b>Project URL</b> y la clave <b>anon public</b> (o <b>publishable</b>) y pégalas abajo.</li>
+        <li>Toca <b>Conectar y probar</b>. La clave de supervisor se genera sola: <b>guárdala</b>, la necesitas si usas el Panel en otro computador.</li>
+      </ol>
+    </details>
+    <div class="row">
+      <label class="f" style="flex:1 1 260px">Project URL<input id="sbUrl" placeholder="https://xxxxxxxx.supabase.co" autocomplete="off"></label>
+      <label class="f" style="flex:1 1 260px">Clave pública (anon / publishable)<input id="sbKey" placeholder="eyJ… o sb_publishable_…" autocomplete="off"></label>
+    </div>
+    <div class="row">
+      <label class="f" style="flex:1 1 260px">Clave de supervisor (secreta)<input id="sbAdmin" autocomplete="off" style="font-family:var(--mono)"></label>
+      <button class="btn sm" id="btnAdminCopy" style="margin-top:16px">Copiar clave</button>
+      <button class="btn primary" id="btnSbSave" style="margin-top:16px">Conectar y probar</button>
+      <button class="btn sm" id="btnSbOff" style="margin-top:16px">Desactivar</button>
+    </div>
+    <p class="small">La clave pública va dentro de los links (es normal). La clave de supervisor es solo tuya: con ella se crean conteos y se leen los resultados.</p>
+    <script type="text/plain" id="sqlScript">-- =====================================================================
+--  CONTEO DE BODEGA · Grupo Vector
+--  Script para Supabase (pegar completo en SQL Editor y tocar RUN)
+--  Crea las tablas y funciones para que los conteos lleguen solos al Panel.
+--  Se puede ejecutar más de una vez sin perder datos.
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+-- ---------- Tablas (nadie las lee directo: todo pasa por las funciones) ----------
+create table if not exists public.cb_admin (
+  id      int primary key default 1 check (id = 1),
+  hash    text not null,
+  creado  timestamptz not null default now()
+);
+
+create table if not exists public.cb_conteos (
+  id            uuid primary key default gen_random_uuid(),
+  nombre        text not null,
+  creado        timestamptz not null default now(),
+  vence         timestamptz,
+  finalizado    timestamptz,
+  token_hash    text not null,          -- llave del link (solo se guarda cifrada)
+  device        text,                   -- celular que abrió el link (un solo uso)
+  secret_hash   text,                   -- llave de envío de ese celular
+  abierto       timestamptz,
+  contador      text,
+  ultimo_envio  timestamptz,
+  n_lecturas    int not null default 0,
+  items         jsonb not null,
+  meta          jsonb
+);
+
+create table if not exists public.cb_lecturas (
+  conteo    uuid not null references public.cb_conteos(id) on delete cascade,
+  lid       text not null,
+  data      jsonb not null,
+  recibido  timestamptz not null default now(),
+  primary key (conteo, lid)
+);
+
+alter table public.cb_admin    enable row level security;
+alter table public.cb_conteos  enable row level security;
+alter table public.cb_lecturas enable row level security;
+revoke all on public.cb_admin, public.cb_conteos, public.cb_lecturas from anon, authenticated;
+
+-- ---------- Supervisor ----------
+create or replace function public.cb_es_admin(p_clave text) returns boolean
+language sql security definer set search_path = public, extensions stable as $$
+  select exists (select 1 from cb_admin where hash = extensions.crypt(coalesce(p_clave,''), hash));
+$$;
+
+create or replace function public.cb_check(p_clave text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not cb_es_admin(p_clave) then
+    perform pg_sleep(0.5);
+    raise exception 'clave_supervisor';
+  end if;
+end $$;
+
+-- Primera vez: guarda la clave del supervisor. Después: solo comprueba que sea la misma.
+create or replace function public.cb_configurar(p_clave text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if length(coalesce(p_clave,'')) < 12 then raise exception 'clave_corta'; end if;
+  if not exists (select 1 from cb_admin) then
+    insert into cb_admin(id, hash) values (1, extensions.crypt(p_clave, extensions.gen_salt('bf')));
+    return 'creado';
+  end if;
+  perform cb_check(p_clave);
+  return 'ok';
+end $$;
+
+create or replace function public.cb_crear(p_clave text, p_nombre text, p_vence timestamptz, p_items jsonb, p_meta jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex'); v_id uuid;
+begin
+  perform cb_check(p_clave);
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'sin_productos'; end if;
+  insert into cb_conteos(nombre, vence, token_hash, items, meta)
+  values (left(p_nombre, 120), p_vence, extensions.crypt(v_token, extensions.gen_salt('bf')), p_items, p_meta)
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'token', v_token);
+end $$;
+
+create or replace function public.cb_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'finalizado', c.finalizado,
+      'abierto', c.abierto, 'contador', c.contador, 'ultimo_envio', c.ultimo_envio, 'n_lecturas', c.n_lecturas,
+      'productos', jsonb_array_length(c.items),
+      'contados', (select count(distinct l.data->>'k') from cb_lecturas l where l.conteo = c.id)
+    ) order by c.creado desc)
+    from cb_conteos c where c.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_lecturas_de(p_clave text, p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_agg(data order by data->>'t') from cb_lecturas where conteo = p_id), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_finalizar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_conteos set finalizado = coalesce(finalizado, now()) where id = p_id;
+end $$;
+
+create or replace function public.cb_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  delete from cb_conteos where id = p_id;
+end $$;
+
+-- ---------- Celular del contador ----------
+-- Abre el link. El primer celular que lo abre queda dueño del conteo (un solo uso real).
+create or replace function public.cb_abrir(p_id uuid, p_token text, p_device text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos; v_secret text := encode(extensions.gen_random_bytes(16), 'hex');
+begin
+  select * into c from cb_conteos where id = p_id for update;
+  if not found or c.token_hash <> extensions.crypt(coalesce(p_token,''), c.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if c.finalizado is not null then raise exception 'finalizado'; end if;
+  if c.vence is not null and c.vence < now() then raise exception 'vencido'; end if;
+  if c.device is not null and c.device <> p_device then raise exception 'usado'; end if;
+  update cb_conteos set device = p_device, secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')),
+         abierto = coalesce(abierto, now()) where id = p_id;
+  return jsonb_build_object('nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'items', c.items, 'meta', c.meta, 'secret', v_secret);
+end $$;
+
+-- Envía TODAS las lecturas del celular (reemplaza las anteriores: así viajan también correcciones y borrados).
+create or replace function public.cb_enviar(p_id uuid, p_secret text, p_contador text, p_lecturas jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos; n int;
+begin
+  select * into c from cb_conteos where id = p_id for update;
+  if not found or c.secret_hash is null or c.secret_hash <> extensions.crypt(coalesce(p_secret,''), c.secret_hash) then
+    perform pg_sleep(0.5); raise exception 'no_autorizado';
+  end if;
+  if c.finalizado is not null then raise exception 'finalizado'; end if;
+  if c.vence is not null and c.vence < now() - interval '24 hours' then raise exception 'vencido'; end if;
+  if jsonb_typeof(p_lecturas) <> 'array' or jsonb_array_length(p_lecturas) > 20000 then raise exception 'datos_invalidos'; end if;
+  delete from cb_lecturas where conteo = p_id;
+  insert into cb_lecturas(conteo, lid, data)
+    select p_id, coalesce(e->>'lid', md5(e::text)), e from jsonb_array_elements(p_lecturas) e
+    on conflict (conteo, lid) do update set data = excluded.data;
+  get diagnostics n = row_count;
+  update cb_conteos set n_lecturas = n, ultimo_envio = now(), contador = left(p_contador, 80) where id = p_id;
+  return jsonb_build_object('n', n, 'at', now());
+end $$;
+
+-- Solo las funciones públicas quedan disponibles para la app.
+revoke execute on function public.cb_es_admin(text), public.cb_check(text) from public, anon, authenticated;
+grant execute on function
+  public.cb_configurar(text), public.cb_crear(text, text, timestamptz, jsonb, jsonb), public.cb_listar(text),
+  public.cb_lecturas_de(text, uuid), public.cb_finalizar(text, uuid), public.cb_eliminar(text, uuid),
+  public.cb_abrir(uuid, text, text), public.cb_enviar(uuid, text, text, jsonb)
+to anon, authenticated;
+</script>
+  </div>
+
   <div class="card" id="ghCard">
-    <div class="row"><div class="eyebrow">Configuración (una sola vez)</div><span class="sep"></span><span class="pill" id="ghState"></span></div>
+    <div class="row"><div class="eyebrow">Configuración (una sola vez) <span id="ghOptional" hidden>· opcional si usas envío automático</span></div><span class="sep"></span><span class="pill" id="ghState"></span></div>
     <h2>Conexión con GitHub</h2>
     <p>Los conteos se guardan como <b>Gist secreto</b> en tu cuenta de GitHub: no aparece en tu perfil ni en búsquedas, solo lo abre quien tiene el link. Para crearlos, la app necesita una llave (token) de tu cuenta.</p>
     <details id="ghHelp">
@@ -306,7 +503,7 @@ body.op .supOnly{display:none!important}
 
   <div class="card">
     <div class="eyebrow">Al terminar el conteo</div>
-    <p class="small">Exporta tus conteos y envía el archivo al supervisor. Después borra las lecturas para dejar el celular listo para el próximo conteo.</p>
+    <p class="small" id="expNote"></p>
     <button class="btn primary" id="btnExpScans" style="justify-content:center;font-size:16px;padding:12px">Exportar mis conteos (.xlsx)</button>
     <button class="btn danger" id="btnClearScans" style="justify-content:center">Borrar lecturas…</button>
     <div id="confirmScans"></div>
@@ -315,6 +512,12 @@ body.op .supOnly{display:none!important}
 
 <!-- ============ 3 IMPORTAR ============ -->
 <section class="view" id="v-importar" hidden>
+  <div class="card" id="nubeImp" hidden>
+    <div class="eyebrow">Envío automático</div>
+    <h2>Lecturas de los celulares</h2>
+    <p>Los conteos creados con envío automático llegan solos. Tráelos aquí para cruzarlos con el stock (reemplaza la versión anterior de cada conteo, no duplica).</p>
+    <div class="row"><button class="btn primary" id="btnTraerImp">Traer lecturas de la nube</button></div>
+  </div>
   <div class="card">
     <div class="eyebrow">Pistola con memoria · otros celulares</div>
     <h2>Carga los archivos de conteo</h2>
@@ -332,6 +535,7 @@ body.op .supOnly{display:none!important}
 <!-- ============ 4 RESULTADO ============ -->
 <section class="view" id="v-resultado" hidden>
   <div class="notice" id="resNote" hidden>Este equipo tiene cargada la lista de productos del maestro, que no trae stock. Para ver diferencias, carga el informe del ERP en <b>1 · Panel</b>.</div>
+  <div class="row" id="nubeRes" hidden><button class="btn primary" id="btnTraerRes">Actualizar con lecturas de la nube</button></div>
   <div class="kpis" id="kpis"></div>
   <div class="card">
     <div class="row">
@@ -461,6 +665,7 @@ function show(v){
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
   if(v==="resultado")renderResult();
+  if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
   if(v==="importar")renderImpDone();
   if(v!=="contar")stopCam();
   try{history.replaceState(null,"","#"+v)}catch(e){}
@@ -716,12 +921,13 @@ function addScan(code,qty,src){
   const it=erp?findItem(code):null;
   const s={code,qty,ubic:cfg.ubic||"",user:cfg.user||"",t:new Date().toISOString(),src,conteo:erp&&erp.conteo?erp.conteo.nombre:""};
   if(conv(it)){s.f=+it.f;s.ce=it.ce}
+  s.lid=newLid();
   if(it)s.um=umTxt(it.um);
   scans.push(s);saveScans();
   showLast(s,it);audio.beep(!!it||!erp);
   resetQty();showPending(code);
   const pe=$("#pending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${s.f?`${fmt2(qty)} ${esc(plural(s.ce))} = ${fmt2(sq(s))} ${esc(s.um||"")}`:"+"+fmt2(qty)+(s.um&&s.um!=="un"?" "+esc(s.um):"")}${s.ubic?" en "+esc(s.ubic):""}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
-  renderRecent();renderSess();renderConteoBox();
+  renderRecent();renderSess();renderConteoBox();markDirty();
 }
 function totalFor(code){const k=key(code);let a=0,u=0;for(const s of scans)if(key(s.code)===k){a+=+s.qty;if((s.ubic||"")===(cfg.ubic||""))u+=+s.qty}return [a,u]}
 function showLast(s,it){
@@ -737,7 +943,7 @@ function showLast(s,it){
      <div><div class="eyebrow">Total producto</div><div class="big" style="font-size:24px">${fmt2(tot)}</div></div>
    </div>
    <div class="row">${it&&it.stock!=null&&!cfg.blind&&!isOp()?`<span class="small muted">Sistema: <b>${fmt2(it.stock)}</b></span>`:""}<span class="sep"></span><button class="btn sm" id="undoLast">Deshacer</button></div>`;
-  $("#undoLast").onclick=()=>{const i=scans.lastIndexOf(s);if(i>=0){scans.splice(i,1);saveScans();renderRecent();renderSess();el.innerHTML=`<div class="d muted">Lectura deshecha</div>`;if($("#scan").value)showPending($("#scan").value)}};
+  $("#undoLast").onclick=()=>{const i=scans.lastIndexOf(s);if(i>=0){scans.splice(i,1);saveScans();markDirty();renderRecent();renderSess();el.innerHTML=`<div class="d muted">Lectura deshecha</div>`;if($("#scan").value)showPending($("#scan").value)}};
 }
 function renderSess(){const u=cfg.ubic||"";const here=scans.filter(s=>(s.ubic||"")===u);
   $("#sessInfo").textContent=`${u?"Ubicación "+u:"Sin ubicación"}: ${fmt(new Set(here.map(s=>key(s.code))).size)} productos · ${fmt(here.length)} lecturas`;
@@ -750,8 +956,8 @@ function renderRecent(){
    <td class="num"><input type="text" inputmode="decimal" value="${String(s.qty).replace(".",",")}" data-i="${i}" class="eq" aria-label="Cantidad"><div class="small muted">${s.f?esc(plural(s.ce)):esc(s.um||"")}</div></td>
    <td class="num tot">${fmt2(sq(s))} <span class="small">${esc(s.um||"")}</span>${s.f?`<div class="small muted" style="font-weight:400">${fmt2(s.qty)} × ${fmt2(s.f)}</div>`:""}</td>
    <td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="4" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
-  $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=num(x.value)??0;saveScans();renderRecent();renderSess();renderConteoBox()}});
-  $$("#recent [data-del]").forEach(b=>b.onclick=()=>{scans.splice(+b.dataset.del,1);saveScans();renderRecent();renderSess();renderConteoBox()});
+  $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=num(x.value)??0;saveScans();renderRecent();renderSess();renderConteoBox();markDirty()}});
+  $$("#recent [data-del]").forEach(b=>b.onclick=()=>{scans.splice(+b.dataset.del,1);saveScans();renderRecent();renderSess();renderConteoBox();markDirty()});
   updStatus();
 }
 $("#btnExpScans").onclick=()=>{
@@ -1118,7 +1324,7 @@ $("#btnCrear").onclick=async()=>{
   const d=erpDraft;
   if(!d||!d.items.length)return toast("Primero carga el inventario del ERP");
   if(d.map.cod==null)return toast("Falta elegir la columna de código");
-  if(!gh.token){$("#ghCard").scrollIntoView({behavior:"smooth"});return toast("Falta conectar GitHub (una sola vez, más abajo)")}
+  if(!nubeOn()&&!gh.token){$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático o GitHub (una sola vez, más abajo)")}
   const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
   const vv=$("#cVence").value, ahora=new Date();
   const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
@@ -1129,6 +1335,13 @@ $("#btnCrear").onclick=async()=>{
   const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,rotativo:!!rot,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
   try{
+   if(nubeOn()){
+    const c=await crearNube(m,its,sel,rot);
+    conteos.unshift(c);store.set("inv_conteos",conteos);
+    erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
+    cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
+    showCreated(c);renderConteos();refreshNube(true);$("#crearMsg").textContent="";return;
+   }
     const r=await fetch(GH+"/gists",{method:"POST",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json","Content-Type":"application/json"},
       body:JSON.stringify({description:"Conteo de Bodega · "+nombre,public:false,files:{"conteo.json":{content:JSON.stringify(m)}}})});
     if(r.status===401)throw new Error("La llave de GitHub no es válida o venció. Pega una nueva abajo.");
@@ -1142,7 +1355,7 @@ $("#btnCrear").onclick=async()=>{
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
     cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
     showCreated(c);renderConteos();$("#crearMsg").textContent="";
-  }catch(e){$("#crearMsg").textContent="";toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":e.message)}
+  }catch(e){$("#crearMsg").textContent="";toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":(nubeOn()?sbMsg(e):e.message))}
   finally{$("#btnCrear").disabled=false}
 };
 async function closeLink(c){
@@ -1161,29 +1374,187 @@ function showCreated(c){
     <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
     <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div>
-    <div class="small" style="border-top:1px solid var(--line);padding-top:8px">Cuando el contador te confirme que <b>ya lo abrió</b>, cierra el link para que no se pueda abrir en otro celular.</div>
-    <div class="row"><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`;
+    ${c.nube?`<div class="small" style="border-top:1px solid var(--line);padding-top:8px">Envío automático activo: el link funciona en <b>un solo celular</b> (el primero que lo abre) y sus lecturas llegan solas a la tabla de abajo.</div></div>`:`<div class="small" style="border-top:1px solid var(--line);padding-top:8px">Cuando el contador te confirme que <b>ya lo abrió</b>, cierra el link para que no se pueda abrir en otro celular.</div>
+    <div class="row"><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`}`;
   $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));
-  $("#btnCloseLink").onclick=()=>closeLink(c);
+  if($("#btnCloseLink"))$("#btnCloseLink").onclick=()=>closeLink(c);
   $("#linkOut").onclick=e=>e.target.select();
 }
 const isVenc=v=>!!v&&Date.now()>Date.parse(v);
 let autoClosing=false;
-async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
+async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.nube&&!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
 function renderConteos(){renderConteosOnly();autoCloseExpired()}
 function renderConteosOnly(){
-  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Link</th><th></th></tr></thead><tbody>`+
-   (conteos.length?conteos.map((c,i)=>`<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
-    <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>
-    <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`).join("")
-   :`<tr><td colspan="6" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>";
+  const hasN=conteos.some(c=>c.nube);
+  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
+   (conteos.length?conteos.map((c,i)=>{
+     if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&x.finalizado)c.fin=true;
+       return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
+       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&!x.abierto&&!x.finalizado?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&!x.finalizado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
+     return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
+    <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
+    <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
+   :`<tr><td colspan="7" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>"+
+   (hasN&&nubeAt?`<caption class="small muted" style="caption-side:bottom;text-align:left;padding:6px">Actualizado ${nubeAt.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · se refresca cada 20 s</caption>`:"");
   $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
   $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
+  $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{await traerLecturas(conteos[+b.dataset.tr]);show("resultado")}catch(e){toast(sbMsg(e))}});
+  $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
+    confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#crearRes")});
   $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
-    confirmBox(`Quitar "${esc(c.nombre)}" de la lista${c.cerrado?"":" y cerrar su link"}.`,async()=>{
-      if(!c.cerrado){try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo cerrar en GitHub; se quitó solo de la lista")}}
+    confirmBox(c.nube?`Quitar "${esc(c.nombre)}" de esta lista (en Supabase queda guardado).`:`Quitar "${esc(c.nombre)}" de la lista${c.cerrado?"":" y cerrar su link"}.`,async()=>{
+      if(!c.nube&&!c.cerrado){try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo cerrar en GitHub; se quitó solo de la lista")}}
       conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#crearRes")});
 }
+
+/* ================= NUBE (Supabase): los conteos llegan solos ================= */
+let SB=store.get("inv_sb",{url:"",key:"",admin:"",ok:false});
+const nubeOn=()=>!!(SB.ok&&SB.url&&SB.key&&SB.admin);
+const sbRef=u=>{const m=String(u||"").match(/^https:\/\/([a-z0-9]{10,40})\.supabase\.co\/?$/i);return m?m[1]:""};
+const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a-z0-9]{10,40}$/i.test(u))u="https://"+u+".supabase.co";return u};
+async function rpc(conf,fn,args){
+  const h={"Content-Type":"application/json",apikey:conf.key};
+  if(/^eyJ/.test(conf.key))h.Authorization="Bearer "+conf.key;
+  let r;
+  try{r=await fetch(conf.url+"/rest/v1/rpc/"+fn,{method:"POST",headers:h,body:JSON.stringify(args),cache:"no-store"})}
+  catch(e){const er=new Error("sin_conexion");er.net=true;throw er}
+  const t=await r.text();let j=null;try{j=t?JSON.parse(t):null}catch(e){}
+  if(!r.ok)throw new Error((j&&(j.message||j.msg||j.error))||("error_"+r.status));
+  return j;
+}
+const SBMSG={clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
+  usado:"Este link ya se abrió en otro celular. Pide uno nuevo al supervisor.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
+  no_existe:"El link no es válido o el conteo fue eliminado. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para enviar este conteo.",sin_conexion:"Sin conexión a internet.",sin_productos:"El conteo no tiene productos."};
+const sbMsg=e=>SBMSG[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script SQL en Supabase (paso 2 de las instrucciones).":/Invalid API key|401|JWT|apikey/i.test(e.message)?"La clave pública (anon / publishable) no es válida.":e.message);
+const rndKey=n=>{const a=new Uint8Array(n);crypto.getRandomValues(a);return [...a].map(b=>"abcdefghjkmnpqrstuvwxyz23456789"[b%31]).join("")};
+
+/* ---- configuración en el Panel ---- */
+function renderSB(){
+  $("#sbUrl").value=SB.url||"";$("#sbKey").value=SB.key||"";
+  if(!SB.admin){SB.admin=rndKey(20);store.set("inv_sb",SB)}
+  $("#sbAdmin").value=SB.admin;
+  const st=$("#sbState");st.className="pill "+(nubeOn()?"p-ok":"p-warn");st.textContent=nubeOn()?"Conectado":"Sin conectar";
+  $("#sbHelp").open=!nubeOn();
+  $("#ghCard").classList.toggle("dim",nubeOn());
+  $("#ghOptional").hidden=!nubeOn();
+  $("#nubeImp").hidden=!nubeOn();$("#nubeRes").hidden=!nubeOn();
+}
+$("#btnSbSave").onclick=async()=>{
+  const url=sbUrl($("#sbUrl").value), key=norm($("#sbKey").value), admin=norm($("#sbAdmin").value);
+  if(!/^https:\/\//.test(url)||!key)return toast("Pega la URL del proyecto y la clave pública");
+  if(admin.length<12)return toast("La clave de supervisor debe tener al menos 12 caracteres");
+  $("#btnSbSave").disabled=true;
+  try{const r=await rpc({url,key},"cb_configurar",{p_clave:admin});
+    SB={url,key,admin,ok:true};store.set("inv_sb",SB);renderSB();renderConteos();
+    toast(r==="creado"?"Supabase listo. Guarda tu clave de supervisor en un lugar seguro.":"Conectado a Supabase");
+  }catch(e){SB={url,key,admin,ok:false};store.set("inv_sb",SB);renderSB();toast(sbMsg(e))}
+  finally{$("#btnSbSave").disabled=false}
+};
+$("#btnSqlCopy").onclick=()=>copyText($("#sqlScript").textContent.trim());
+$("#btnAdminCopy").onclick=()=>copyText($("#sbAdmin").value);
+$("#btnSbOff").onclick=()=>{SB.ok=false;store.set("inv_sb",SB);renderSB();renderConteos();toast("Envío automático desactivado en este computador")};
+
+/* ---- crear conteo en la nube ---- */
+async function crearNube(m,its,sel,rot){
+  const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo}});
+  const ref=sbRef(SB.url);
+  const link=appUrl()+"?nube="+r.id+"."+r.token+(ref?"&p="+ref:"&u="+encodeURIComponent(SB.url))+"&k="+encodeURIComponent(SB.key);
+  return {id:r.id,nube:true,nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
+}
+
+/* ---- estado en vivo de los conteos ---- */
+let nubeLive=new Map(), nubeAt=null, nubeBusy=false;
+async function refreshNube(silent){
+  if(!nubeOn()||nubeBusy)return;nubeBusy=true;
+  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();renderConteosOnly()}
+  catch(e){if(!silent)toast(sbMsg(e))}
+  finally{nubeBusy=false}
+}
+setInterval(()=>{if(nubeOn()&&!document.hidden&&(!$("#v-erp").hidden||!$("#v-importar").hidden)&&conteos.some(c=>c.nube&&!c.fin))refreshNube(true)},20000);
+function nubeEstado(c,x){
+  if(!x)return ['<span class="pill p-mut">…</span>',""];
+  if(x.finalizado)return ['<span class="pill p-mut">Finalizado</span>',""];
+  if(!x.abierto)return isVenc(x.vence)?['<span class="pill p-warn">Venció sin abrir</span>',""]:['<span class="pill p-info">Sin abrir</span>',""];
+  const av=`${fmt(x.contados)} de ${fmt(x.productos)} productos · ${fmt(x.n_lecturas)} lecturas${x.contador?" · "+esc(x.contador):""}${x.ultimo_envio?`<br><span class="muted">último envío ${new Date(x.ultimo_envio).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}</span>`:""}`;
+  return [isVenc(x.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Contando</span>',av];
+}
+async function traerLecturas(c,silent){
+  const arr=await rpc(SB,"cb_lecturas_de",{p_clave:SB.admin,p_id:c.id});
+  scans=scans.filter(s=>s.nube!==c.id);
+  for(const d of arr||[])scans.push({code:d.code,qty:+d.qty||0,f:+d.f>0&&+d.f!==1?+d.f:undefined,ce:d.ce||undefined,um:d.um||undefined,ubic:d.ubic||"",user:d.user||"",t:d.t,src:"nube: "+c.nombre,nube:c.id,lid:d.lid,conteo:c.nombre});
+  saveScans();
+  if(!silent)toast(`${fmt((arr||[]).length)} lecturas de "${c.nombre}" listas para el cruce`);
+  return (arr||[]).length;
+}
+async function traerTodas(){
+  if(!nubeOn())return;let n=0,k=0;
+  for(const c of conteos.filter(c=>c.nube)){try{n+=await traerLecturas(c,true);k++}catch(e){toast(sbMsg(e));return}}
+  toast(`${fmt(n)} lecturas traídas de ${fmt(k)} conteos`);
+  if(!$("#v-resultado").hidden)renderResult();
+}
+$("#btnTraerImp").onclick=traerTodas;
+$("#btnTraerRes").onclick=async()=>{await traerTodas();renderResult()};
+
+/* ---- celular: abrir link de la nube y enviar lecturas ---- */
+if(!cfg.dev){cfg.dev=rndKey(16);store.set("inv_cfg",cfg)}
+const newLid=()=>Date.now().toString(36)+rndKey(6);
+const nubeConf=()=>erp&&erp.conteo&&erp.conteo.sb;
+async function checkNubeLink(){
+  let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
+  const nb=q.get("nube");if(!nb)return false;
+  try{history.replaceState(null,"",location.pathname+"#contar")}catch(e){}
+  const [id,token]=nb.split(".");
+  const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), key=q.get("k")||"";
+  if(!/^[0-9a-f-]{36}$/.test(id||"")||!token||!url||!key){$("#conteoBanner").innerHTML=`<div class="confirm"><span>El link del conteo está incompleto. Pide que te lo reenvíen.</span></div>`;return true}
+  if(erp&&erp.conteo&&erp.conteo.id===id){toast("Conteo "+erp.conteo.nombre);syncNow();return true}
+  $("#conteoBanner").innerHTML=`<div class="notice">Abriendo el conteo…</div>`;
+  try{
+    const m=await rpc({url,key},"cb_abrir",{p_id:id,p_token:token,p_device:cfg.dev});
+    const go=()=>applyConteo(m,id,{url,key,secret:m.secret});
+    if(scans.length){
+      $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch">
+        <b>Llegó un conteo nuevo: ${esc(m.nombre)}</b>
+        <span class="small">Este celular tiene ${fmt(scans.length)} lecturas de un conteo anterior${erp&&erp.conteo?" ("+esc(erp.conteo.nombre)+")":""}. ${nubeConf()?(cfg.dirty?"Algunas aún no se envían: se intentará enviarlas ahora.":"Ya fueron enviadas al supervisor."):"Expórtalas antes de empezar, o se borrarán."}</span>
+        <div class="row"><button class="btn primary" id="cbExp">Exportar lecturas anteriores</button><button class="btn danger" id="cbNew">Empezar conteo nuevo</button></div></div>`;
+      $("#cbExp").onclick=()=>$("#btnExpScans").click();
+      $("#cbNew").onclick=async()=>{if(nubeConf()&&cfg.dirty){await syncNow();if(cfg.dirty)return toast("No se pudieron enviar las lecturas anteriores. Exporta antes de seguir.")}
+        scans=[];imported=[];store.set("inv_scans",scans);store.set("inv_imported",[]);go()};
+      return true;
+    }
+    go();
+  }catch(e){$("#conteoBanner").innerHTML=`<div class="confirm"><span>${esc(sbMsg(e))}</span></div>`}
+  return true;
+}
+let syncT=null,syncing=false;
+function markDirty(){if(!nubeConf())return;cfg.dirty=true;cfg.ver=(cfg.ver||0)+1;store.set("inv_cfg",cfg);clearTimeout(syncT);syncT=setTimeout(syncNow,2500);renderSync()}
+async function syncNow(){
+  const c=nubeConf();if(!c||syncing)return;
+  if(navigator.onLine===false){renderSync();return}
+  syncing=true;renderSync();const v=cfg.ver||0;
+  try{
+    const lect=scans.map(s=>{if(!s.lid)s.lid=newLid();const it=findItem(s.code);return {lid:s.lid,code:s.code,k:it?it.cod:s.code,qty:+s.qty||0,f:s.f||1,ce:s.ce||"",um:s.um||"",ubic:s.ubic||"",user:s.user||"",t:s.t,src:s.src}});
+    store.set("inv_scans",scans);
+    await rpc(c,"cb_enviar",{p_id:erp.conteo.id,p_secret:c.secret,p_contador:cfg.user||"",p_lecturas:lect});
+    if((cfg.ver||0)===v)cfg.dirty=false;else{clearTimeout(syncT);syncT=setTimeout(syncNow,1500)}
+    cfg.syncAt=new Date().toISOString();cfg.syncErr="";store.set("inv_cfg",cfg);
+  }catch(e){cfg.syncErr=e.net?"":sbMsg(e);store.set("inv_cfg",cfg)}
+  finally{syncing=false;renderSync()}
+}
+function renderSync(){
+  const el=$("#syncChip"),c=nubeConf();
+  $("#expNote").textContent=c?"Tus lecturas se envían solas al supervisor. Exportar queda solo como respaldo. Al terminar, toca \"Terminar conteo en este celular\".":"Exporta tus conteos y envía el archivo al supervisor. Después borra las lecturas para dejar el celular listo para el próximo conteo.";
+  $("#btnClearScans").textContent=c?"Terminar conteo en este celular…":"Borrar lecturas…";
+  if(!el)return; if(!c){el.innerHTML="";return}
+  let h;
+  if(syncing)h=`<span class="sync s-run">☁ Enviando…</span>`;
+  else if(cfg.syncErr)h=`<span class="sync s-bad">⚠ ${esc(cfg.syncErr)}</span><button class="btn sm" id="syncGo">Reintentar</button>`;
+  else if(cfg.dirty)h=`<span class="sync s-wait">⏳ ${navigator.onLine===false?"Sin señal: se enviará solo al volver":"Pendiente de envío"}</span><button class="btn sm" id="syncGo">Enviar ahora</button>`;
+  else h=`<span class="sync s-ok">☁ Enviado al supervisor${cfg.syncAt?" · "+new Date(cfg.syncAt).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}):""}</span>`;
+  el.innerHTML=h;const b=$("#syncGo");if(b)b.onclick=()=>{cfg.syncErr="";syncNow()};
+}
+addEventListener("online",()=>{if(cfg.dirty)syncNow();else renderSync()});
+addEventListener("offline",renderSync);
+setInterval(()=>{if(nubeConf()&&cfg.dirty&&!syncing)syncNow()},30000);
 
 /* ================= CELULAR: abrir conteo desde el link ================= */
 function checkConteoLink(){
@@ -1234,7 +1605,7 @@ function renderConteoBox(){
       ${n>150?`<div class="small muted" style="padding:8px">… ${fmt(n-150)} más. Usa la búsqueda.</div>`:""}</div>
       <div class="small muted">Toca un producto para contarlo (sirve para los que no tienen código de barras).</div>`;
   }
-  h+=`</div>`; box.innerHTML=h;
+  h+=`<div class="row" id="syncChip" style="gap:8px"></div></div>`; box.innerHTML=h;renderSync();
   $("#clToggle").onclick=()=>{cfg.listOpen=!open;store.set("inv_cfg",cfg);renderConteoBox()};
   if(open){
     $$("#conteoBox [data-cf]").forEach(b=>b.onclick=()=>{clFilter=b.dataset.cf;renderConteoBox()});
@@ -1242,11 +1613,11 @@ function renderConteoBox(){
     $$("#conteoBox .clrow").forEach(b=>b.onclick=()=>{if(checkExpiry())return;productRead(b.dataset.cod,"lista");$("#scan").scrollIntoView({block:"center",behavior:"smooth"})});
   }
 }
-function applyConteo(m,id){
+function applyConteo(m,id,sb){
   delete $("#conteoBanner").dataset.exp;
-  erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null},
+  erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null,sb:sb||null},
     items:m.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1,stock:null,costo:null,ubic:""}))};
-  store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";store.set("inv_cfg",cfg);
+  store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";cfg.dirty=false;cfg.syncAt=null;cfg.syncErr="";store.set("inv_cfg",cfg);
   buildIndex();updStatus();applyMode();setUbic("",true);clearProduct();renderRecent();renderSess();
   $("#last").innerHTML=`<div class="d">Listo para contar</div><div class="c">${esc(m.nombre)} · ${fmt(erp.items.length)} productos</div>`;
   $("#conteoBanner").innerHTML="";cfg.listOpen=erp.items.length<=60;store.set("inv_cfg",cfg);
@@ -1280,7 +1651,15 @@ function applyMode(){
 }
 $("#user").value=cfg.user||"";
 $("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.value=cfg.user;store.set("inv_cfg",cfg)};
-$("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>'}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");
+$("#btnClearScans").onclick=async()=>{
+  if(nubeConf()){
+    if(cfg.dirty){await syncNow();if(cfg.dirty)return toast("Aún hay lecturas sin enviar. Busca señal y toca Enviar ahora (o exporta el respaldo).")}
+    return confirmBox(`Todas tus lecturas (${fmt(scans.length)}) ya llegaron al supervisor. Se borrarán de este celular junto con la lista de productos.`,()=>{
+      scans=[];imported=[];store.set("inv_scans",scans);store.set("inv_imported",[]);erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}cfg.dirty=false;store.set("inv_cfg",cfg);
+      buildIndex();updStatus();renderRecent();renderSess();renderConteoBox();clearProduct();setUbic("",true);
+      $("#conteoBanner").innerHTML='<div class="notice">Conteo terminado y enviado. ¡Gracias!</div>';},"#confirmScans");
+  }
+  confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>'}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");};
 applyKbd();
 function checkExpiry(){
   const v=erp&&erp.conteo&&erp.conteo.vence, exp=isVenc(v);
@@ -1295,7 +1674,10 @@ function checkExpiry(){
 }
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
-if(!checkConteoLink())loadMaestro();
+renderSB();renderSync();
+checkNubeLink().then(x=>{if(!x&&!checkConteoLink())loadMaestro()});
+if(nubeOn())refreshNube(true);
+if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
 show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
 </script>
