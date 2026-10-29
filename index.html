@@ -95,6 +95,12 @@ body.expired .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}
 #recent .rd{font-weight:600;font-size:13px;line-height:1.3}
 #recent .eq{width:62px;padding:4px 6px;text-align:right}
 #recent table,#recent{table-layout:auto}
+.cbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;max-width:720px;width:100%;margin:0 auto}
+.bar{height:6px;background:var(--chip);border-radius:4px;overflow:hidden}.bar span{display:block;height:100%;background:var(--primary);border-radius:4px}
+.clist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;max-height:46vh;overflow:auto}
+.clrow{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;text-align:left;background:var(--panel);border:0;border-bottom:1px solid var(--line);padding:9px 10px;font:inherit;color:var(--ink);cursor:pointer}
+.clrow .code{font:12px var(--mono);color:var(--muted)}.clrow .cd{font-size:13px;font-weight:600;min-width:0}
+.clrow .cs{font-size:12px;color:var(--muted);white-space:nowrap}.clrow.done{background:var(--ok-bg)}.clrow.done .cs{color:var(--ok);font-weight:700}
 .lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .last{border-radius:10px;padding:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px;transition:background .2s}
 .last.flash-ok{background:var(--ok-bg);border-color:var(--ok)}
@@ -196,6 +202,10 @@ body.op .supOnly{display:none!important}
     <details id="sgBox" hidden><summary>Subgrupos a contar <span class="small muted" id="sgInfo"></span></summary>
       <div class="row small" style="margin:8px 0"><button class="btn sm" id="sgAll">Todos</button><button class="btn sm" id="sgNone">Ninguno</button><input id="sgQ" placeholder="Filtrar subgrupos" style="flex:1 1 160px;padding:5px 8px"></div>
       <div id="sgList" class="sgList"></div></details>
+    <details id="rotBox"><summary>Conteo rotativo: solo algunos códigos <span class="small muted" id="rotInfo"></span></summary>
+      <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
+      <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
+      <div class="small" id="rotRes"></div></details>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
   </div>
@@ -230,6 +240,7 @@ body.op .supOnly{display:none!important}
 <!-- ============ 2 CONTAR ============ -->
 <section class="view" id="v-contar" hidden>
   <div id="conteoBanner"></div>
+  <div id="conteoBox"></div>
   <div class="card contarCard">
       <div id="camWrap" class="camWrap" hidden>
         <div class="row" style="justify-content:space-between">
@@ -710,7 +721,7 @@ function addScan(code,qty,src){
   showLast(s,it);audio.beep(!!it||!erp);
   resetQty();showPending(code);
   const pe=$("#pending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${s.f?`${fmt2(qty)} ${esc(plural(s.ce))} = ${fmt2(sq(s))} ${esc(s.um||"")}`:"+"+fmt2(qty)+(s.um&&s.um!=="un"?" "+esc(s.um):"")}${s.ubic?" en "+esc(s.ubic):""}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
-  renderRecent();renderSess();
+  renderRecent();renderSess();renderConteoBox();
 }
 function totalFor(code){const k=key(code);let a=0,u=0;for(const s of scans)if(key(s.code)===k){a+=+s.qty;if((s.ubic||"")===(cfg.ubic||""))u+=+s.qty}return [a,u]}
 function showLast(s,it){
@@ -739,8 +750,8 @@ function renderRecent(){
    <td class="num"><input type="text" inputmode="decimal" value="${String(s.qty).replace(".",",")}" data-i="${i}" class="eq" aria-label="Cantidad"><div class="small muted">${s.f?esc(plural(s.ce)):esc(s.um||"")}</div></td>
    <td class="num tot">${fmt2(sq(s))} <span class="small">${esc(s.um||"")}</span>${s.f?`<div class="small muted" style="font-weight:400">${fmt2(s.qty)} × ${fmt2(s.f)}</div>`:""}</td>
    <td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="4" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
-  $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=num(x.value)??0;saveScans();renderRecent();renderSess()}});
-  $$("#recent [data-del]").forEach(b=>b.onclick=()=>{scans.splice(+b.dataset.del,1);saveScans();renderRecent();renderSess()});
+  $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=num(x.value)??0;saveScans();renderRecent();renderSess();renderConteoBox()}});
+  $$("#recent [data-del]").forEach(b=>b.onclick=()=>{scans.splice(+b.dataset.del,1);saveScans();renderRecent();renderSess();renderConteoBox()});
   updStatus();
 }
 $("#btnExpScans").onclick=()=>{
@@ -1053,6 +1064,21 @@ $("#sgAll").onclick=()=>{sgOff.clear();store.set("inv_sgoff",[]);renderSg()};
 $("#sgNone").onclick=()=>{sgAllList().forEach(([g])=>sgOff.add(g));store.set("inv_sgoff",[...sgOff]);renderSg()};
 $("#sgQ").oninput=renderSg;
 
+/* ---- conteo rotativo: lista de códigos pegada ---- */
+function rotParse(){
+  const raw=$("#rotCodes").value.split(/[\s,;]+/).map(codeStr).filter(Boolean);
+  if(!raw.length)return null;
+  const items=enrich(factItems()), byK=new Map(items.map(i=>[key(i.cod),i])), byE=new Map(items.filter(i=>i.ean).map(i=>[key(i.ean),i]));
+  const found=[],miss=[],seen=new Set();
+  for(const c of raw){const it=byK.get(key(c))||byE.get(key(c));if(!it){miss.push(c);continue}if(!seen.has(it)){seen.add(it);found.push(it)}}
+  return {found,miss,total:raw.length};
+}
+function renderRot(){const r=rotParse();
+  $("#rotInfo").textContent=r?`(${fmt(r.found.length)} productos)`:"";
+  $("#rotRes").innerHTML=!r?"":`<span style="color:var(--ok)">✓ ${fmt(r.found.length)} productos encontrados</span>${r.miss.length?` · <span style="color:var(--bad)">${fmt(r.miss.length)} no están en el informe: ${esc(r.miss.slice(0,15).join(", "))}${r.miss.length>15?"…":""}</span>`:""}`;
+  $("#sgBox").style.opacity=r?.45:1;}
+$("#rotCodes").oninput=renderRot;
+
 /* ================= PANEL: crear conteo y compartir link ================= */
 const GH="https://api.github.com", RAW="https://gist.githubusercontent.com/";
 const DEFAULT_APP="https://jorgecelpa1989-gif.github.io/Conteo--Bodega/";
@@ -1097,9 +1123,10 @@ $("#btnCrear").onclick=async()=>{
   const vv=$("#cVence").value, ahora=new Date();
   const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
   enrich(d.items);
-  const sel=sgSelected(), its=sel?d.items.filter(i=>sel.has(i.sg||"(sin subgrupo)")):d.items;
-  if(!its.length)return toast("Elige al menos un subgrupo");
-  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
+  const rot=rotParse();
+  const sel=rot?null:sgSelected(), its=rot?rot.found:(sel?d.items.filter(i=>sel.has(i.sg||"(sin subgrupo)")):d.items);
+  if(!its.length)return toast(rot?"Ninguno de los códigos pegados está en el informe":"Elige al menos un subgrupo");
+  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,rotativo:!!rot,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
   try{
     const r=await fetch(GH+"/gists",{method:"POST",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json","Content-Type":"application/json"},
@@ -1186,6 +1213,35 @@ function checkConteoLink(){
   });
   return true;
 }
+/* lista de productos del conteo en el celular */
+let clFilter="pend";
+function countedMap(){const m=new Map();for(const s of scans){const it=findItem(s.code);if(!it)continue;const k=key(it.cod);const c=m.get(k)||{q:0,n:0};c.q+=sq(s);c.n++;m.set(k,c)}return m}
+function renderConteoBox(){
+  const box=$("#conteoBox"); if(!(erp&&erp.conteo)){box.innerHTML="";return}
+  const cm=countedMap(), tot=erp.items.length, done=erp.items.filter(i=>cm.has(key(i.cod))).length, open=!!cfg.listOpen;
+  const pct=tot?Math.round(done*100/tot):0;
+  let h=`<div class="cbox"><div class="row" style="gap:8px"><div style="flex:1;min-width:0"><b>${esc(erp.conteo.nombre)}</b><div class="small muted">${fmt(done)} de ${fmt(tot)} productos contados</div></div>
+    <button class="btn sm" id="clToggle" aria-expanded="${open}">${open?"Ocultar lista ▴":"Ver productos ▾"}</button></div>
+    <div class="bar"><span style="width:${pct}%"></span></div>`;
+  if(open){
+    const q=deacc($("#clQ")?$("#clQ").value:"");
+    let list=erp.items.filter(i=>clFilter==="todos"||(clFilter==="pend"?!cm.has(key(i.cod)):cm.has(key(i.cod))));
+    if(q)list=erp.items.filter(i=>deacc(i.cod+" "+i.ean+" "+i.desc).includes(q));
+    const n=list.length;list=list.slice(0,150);
+    h+=`<div class="row" style="gap:6px"><div class="chips">${[["pend","Pendientes",tot-done],["ok","Contados",done],["todos","Todos",tot]].map(([v,l,c])=>`<button class="chip" data-cf="${v}" aria-pressed="${clFilter===v}">${l} · ${fmt(c)}</button>`).join("")}</div></div>
+      <input id="clQ" placeholder="Buscar código o descripción" value="${esc(q?$("#clQ").value:"")}" autocomplete="off">
+      <div class="clist">${n?list.map(i=>{const c=cm.get(key(i.cod));return `<button class="clrow${c?" done":""}" data-cod="${esc(i.cod)}"><span class="code">${esc(i.cod)}</span><span class="cd">${esc(i.desc)}</span><span class="cs">${c?`✓ ${fmt2(c.q)} ${esc(umTxt(i.um))}`:"Pendiente"}</span></button>`}).join(""):`<div class="small muted" style="padding:10px">${clFilter==="pend"&&!q?"¡Todos los productos tienen al menos una lectura!":"Sin resultados."}</div>`}
+      ${n>150?`<div class="small muted" style="padding:8px">… ${fmt(n-150)} más. Usa la búsqueda.</div>`:""}</div>
+      <div class="small muted">Toca un producto para contarlo (sirve para los que no tienen código de barras).</div>`;
+  }
+  h+=`</div>`; box.innerHTML=h;
+  $("#clToggle").onclick=()=>{cfg.listOpen=!open;store.set("inv_cfg",cfg);renderConteoBox()};
+  if(open){
+    $$("#conteoBox [data-cf]").forEach(b=>b.onclick=()=>{clFilter=b.dataset.cf;renderConteoBox()});
+    const qi=$("#clQ");qi.oninput=()=>{const pos=qi.selectionStart;renderConteoBox();const n=$("#clQ");n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}};
+    $$("#conteoBox .clrow").forEach(b=>b.onclick=()=>{if(checkExpiry())return;productRead(b.dataset.cod,"lista");$("#scan").scrollIntoView({block:"center",behavior:"smooth"})});
+  }
+}
 function applyConteo(m,id){
   delete $("#conteoBanner").dataset.exp;
   erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null},
@@ -1193,7 +1249,8 @@ function applyConteo(m,id){
   store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";store.set("inv_cfg",cfg);
   buildIndex();updStatus();applyMode();setUbic("",true);clearProduct();renderRecent();renderSess();
   $("#last").innerHTML=`<div class="d">Listo para contar</div><div class="c">${esc(m.nombre)} · ${fmt(erp.items.length)} productos</div>`;
-  $("#conteoBanner").innerHTML=`<div class="notice"><b>${esc(m.nombre)}</b> · ${fmt(erp.items.length)} productos. Escribe tu nombre, escanea la primera ubicación y empieza.</div>`;
+  $("#conteoBanner").innerHTML="";cfg.listOpen=erp.items.length<=60;store.set("inv_cfg",cfg);
+  renderConteoBox();toast("Conteo listo: escribe tu nombre y escanea la primera ubicación");
   show("contar");
 }
 
@@ -1223,7 +1280,7 @@ function applyMode(){
 }
 $("#user").value=cfg.user||"";
 $("#user").onchange=e=>{cfg.user=norm(e.target.value).toUpperCase();e.target.value=cfg.user;store.set("inv_cfg",cfg)};
-$("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>'}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas")},"#confirmScans");
+$("#btnClearScans").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>'}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");
 applyKbd();
 function checkExpiry(){
   const v=erp&&erp.conteo&&erp.conteo.vence, exp=isVenc(v);
@@ -1237,7 +1294,7 @@ function checkExpiry(){
   return exp;
 }
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
-updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();
+updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 if(!checkConteoLink())loadMaestro();
 const h=(location.hash||"").slice(1);
 show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
