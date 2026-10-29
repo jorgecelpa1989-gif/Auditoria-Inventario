@@ -143,8 +143,7 @@ body.op .supOnly{display:none!important}
   <nav class="tabs" role="tablist">
     <button role="tab" data-v="erp" aria-selected="true">1 · Panel</button>
     <button role="tab" data-v="contar" aria-selected="false">2 · Contar<span class="n" id="nScans">0</span></button>
-    <button role="tab" data-v="importar" aria-selected="false">3 · Importar conteos</button>
-    <button role="tab" data-v="resultado" aria-selected="false">4 · Resultado</button>
+    <button role="tab" data-v="resultado" aria-selected="false">3 · Resultados</button>
   </nav>
 </div></header>
 
@@ -534,33 +533,58 @@ to anon, authenticated;
 
 <!-- ============ 4 RESULTADO ============ -->
 <section class="view" id="v-resultado" hidden>
-  <div class="notice" id="resNote" hidden>Este equipo tiene cargada la lista de productos del maestro, que no trae stock. Para ver diferencias, carga el informe del ERP en <b>1 · Panel</b>.</div>
-  <div class="row" id="nubeRes" hidden><button class="btn primary" id="btnTraerRes">Actualizar con lecturas de la nube</button></div>
-  <div class="kpis" id="kpis"></div>
+  <div class="notice" id="resNote" hidden>Para comparar contra el stock, carga el informe del ERP en <b>1 · Panel</b> en este computador.</div>
   <div class="card">
+    <div class="row">
+      <label class="f" style="flex:1 1 280px">Conteo<select id="rSel"></select></label>
+      <button class="btn primary" id="btnTraerRes" style="margin-top:16px">Actualizar lecturas</button>
+    </div>
+    <div class="kpis" id="kpis"></div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Tabla 1</div>
+    <h2>Resumen por producto</h2>
     <div class="row">
       <div class="chips" id="fChips"></div>
       <span class="sep"></span>
       <input id="fSearch" placeholder="Buscar código o descripción" style="min-width:0;flex:1 1 200px;max-width:320px">
     </div>
-    <div class="row small">
-      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="optUncounted"> Tratar los no contados como faltantes (inventario total)</label>
-      <label style="display:flex;gap:6px;align-items:center">Ubicación <select id="fUbic"><option value="">Todas</option></select></label>
-    </div>
     <div class="tbl"><table id="res"></table></div>
     <div class="row"><span class="small muted" id="resInfo"></span><span class="sep"></span><button class="btn sm" id="btnMore" hidden>Mostrar más</button></div>
   </div>
+
+  <div class="card">
+    <div class="eyebrow">Reconteo y validación</div>
+    <h2>Recontar las diferencias</h2>
+    <p class="small">Crea un link nuevo solo con los productos que no cuadraron. Cuando llegue el reconteo, la tabla muestra el 1er conteo y el reconteo lado a lado: <b>Confirmado</b> si ambos coinciden, <b>Corregido</b> si el reconteo cambió la cantidad. La diferencia final se calcula con el reconteo.</p>
+    <div class="row">
+      <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="reNoCont"> Incluir también los pendientes (no contados)</label>
+      <label class="f" style="flex:0 1 180px">Vigencia<select id="reVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas</option><option value="hoy">Hasta hoy 23:59</option></select></label>
+    </div>
+    <div class="row"><button class="btn accent" id="btnReconteo">Crear reconteo</button><span class="small muted" id="reInfo"></span></div>
+    <div id="reRes"></div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Tabla 2</div>
+    <h2>Detalle de lecturas (una línea por conteo)</h2>
+    <div class="row">
+      <select id="dUbic" style="flex:0 1 220px"></select>
+      <input id="dSearch" placeholder="Buscar código, descripción o contador" style="min-width:0;flex:1 1 200px;max-width:320px">
+    </div>
+    <div class="tbl"><table id="det"></table></div>
+    <div class="row"><span class="small muted" id="detInfo"></span><span class="sep"></span><button class="btn sm" id="btnMoreDet" hidden>Mostrar más</button></div>
+  </div>
+
   <div class="card">
     <h2>Exportar</h2>
-    <div class="row">
-      <button class="btn primary" id="btnExpRes">Excel de resultados</button>
-      <button class="btn" id="btnExpRecount">Hoja de reconteo</button>
-    </div>
-    <p class="small">El Excel trae: Resumen, Detalle completo, Diferencias, Reconteo, Lecturas (todas, con hora y ubicación) y el Stock ERP limpio.</p>
+    <div class="row"><button class="btn primary" id="btnExpRes">Excel de resultados</button></div>
+    <p class="small">Trae: Resumen, Resumen por producto, Diferencias y Detalle de lecturas del conteo elegido.</p>
   </div>
   <div class="card">
-    <h2>Nuevo inventario</h2>
-    <p class="small">Borra las lecturas de este equipo. El stock ERP cargado se mantiene.</p>
+    <h2>Limpiar este equipo</h2>
+    <p class="small">Borra las lecturas guardadas en este computador. Las de la nube no se pierden: se vuelven a traer con "Actualizar lecturas".</p>
     <div class="row"><button class="btn danger" id="btnReset">Borrar lecturas…</button><button class="btn danger" id="btnResetAll">Borrar todo…</button></div>
     <div id="confirmBox"></div>
   </div>
@@ -664,7 +688,7 @@ function show(v){
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
-  if(v==="resultado")renderResult();
+  if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult)}
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
   if(v==="importar")renderImpDone();
   if(v!=="contar")stopCam();
@@ -861,7 +885,7 @@ $("#btnNextUbic").onclick=()=>{
 
 /* ---- producto: el código queda visible hasta leer otro ---- */
 function clearProduct(){$("#scan").value="";$("#pending").hidden=true;$("#sugg").hidden=true;$("#stepQty .eyebrow").textContent="3 · Cantidad"}
-function focusSel(el){el.focus();setTimeout(()=>{try{el.select()}catch(e){}},0)}
+function focusSel(el){el.focus();try{el.select()}catch(e){}}
 function resetQty(){$("#qty").value=""}
 function showPending(code){
   const it=erp?findItem(code):null, p=$("#pending");
@@ -913,7 +937,7 @@ function doSum(){
 }
 $("#btnAdd").onclick=doSum;
 $("#qty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();doSum()}});
-$("#qty").addEventListener("focus",e=>setTimeout(()=>{try{e.target.select()}catch(x){}},0));
+$("#qty").addEventListener("focus",e=>{const v=e.target.value;setTimeout(()=>{try{if(e.target.value===v)e.target.select()}catch(x){}},0)});
 
 function addScan(code,qty,src){
   code=codeStr(code); if(!code)return;
@@ -1091,74 +1115,147 @@ function renderImpDone(){$("#impDone").innerHTML=`<thead><tr><th>Archivo</th><th
   (imported.length?imported.map((x,i)=>`<tr><td>${esc(x.name)}</td><td>${fmtDT(x.at)}</td><td class="num">${fmt(x.rows)}</td><td class="num">${fmt2(x.qty)}</td><td><button class="btn sm danger" data-un="${i}">Quitar</button></td></tr>`).join(""):`<tr><td colspan="5" class="muted">Ningún archivo importado.</td></tr>`)+"</tbody>";
   $$("#impDone [data-un]").forEach(b=>b.onclick=()=>{const x=imported[+b.dataset.un];scans=scans.filter(s=>!(s.src==="archivo: "+x.name&&s.t===x.at));imported.splice(+b.dataset.un,1);store.set("inv_imported",imported);saveScans();renderImpDone();toast("Lecturas de "+x.name+" quitadas")});}
 
-/* ================= RESULTADO ================= */
-let rFilter="todos",rLimit=300;
+/* ================= RESULTADOS (panel de control) ================= */
+let rFilter="todos",rLimit=300,dLimit=300,rSel=store.get("inv_rsel","");
 const STATES={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],nocont:["No contado","p-mut"],noerp:["No existe en ERP","p-info"],contado:["Contado (sin stock)","p-info"]};
+const VALID={conf:["Confirmado","p-info"],corr:["Corregido","p-warn"]};
+const esReconteo=c=>!!(c&&c.reconteoDe);
+function conteoDeScan(s){if(s.nube)return conteos.find(c=>c.id===s.nube)||null;if(s.conteo)return conteos.find(c=>c.nombre===s.conteo)||null;return null}
+/* qué conteo(s) se están mirando */
+function scope(){
+  const c=rSel&&rSel!=="*"&&rSel!=="local"?conteos.find(x=>x.id===rSel):null;
+  if(c){const hijos=conteos.filter(x=>x.reconteoDe===c.id);
+    return {c,label:c.nombre,first:s=>s.nube===c.id||(!s.nube&&s.conteo===c.nombre),re:s=>hijos.some(h=>s.nube===h.id),
+      codes:c.codes?new Set(c.codes.map(key)):null}}
+  if(rSel==="local")return {label:"Lecturas de este equipo",first:s=>!s.nube,re:()=>false,codes:null};
+  // todos
+  const all=conteos.filter(x=>!esReconteo(x)&&x.codes);
+  return {label:"Todos los conteos",first:s=>!esReconteo(conteoDeScan(s)),re:s=>esReconteo(conteoDeScan(s)),
+    codes:all.length&&all.length===conteos.filter(x=>!esReconteo(x)).length?new Set(all.flatMap(x=>x.codes.map(key))):null};
+}
 function compute(){
-  const all=$("#optUncounted").checked, uf=$("#fUbic").value;
-  const cnt=new Map();
-  for(const s of scans){if(uf&&s.ubic!==uf)continue;const k=erp&&idx.has(key(s.code))?"i"+idx.get(key(s.code)):"x"+key(s.code);
-    let c=cnt.get(k);if(!c){c={qty:0,n:0,ubic:new Map(),raw:s.code,cu:new Map()};cnt.set(k,c)}c.qty+=sq(s);c.n++;const u=s.ubic||"(sin ubicación)";c.ubic.set(u,(c.ubic.get(u)||0)+sq(s));if(s.f)c.cu.set(s.ce,(c.cu.get(s.ce)||0)+ +s.qty)}
+  const sc=scope(), first=new Map(), re=new Map(), add=(m,s)=>{const it=erp&&findItem(s.code);const k=it?key(it.cod):"x"+key(s.code);const c=m.get(k)||{q:0,n:0,ub:new Set(),raw:s.code,it};c.q+=sq(s);c.n++;if(s.ubic)c.ub.add(s.ubic);m.set(k,c)};
+  for(const s of scans){if(sc.re(s))add(re,s);else if(sc.first(s))add(first,s)}
+  let items=erp?erp.items:[];
+  if(sc.codes)items=items.filter(i=>sc.codes.has(key(i.cod)));
+  else if(rSel&&rSel!=="*")items=items.filter(i=>first.has(key(i.cod))||re.has(key(i.cod)));
   const rows=[];
-  (erp?erp.items:[]).forEach((it,i)=>{const c=cnt.get("i"+i);const counted=c?c.qty:0;
-    if(!c&&uf)return;
-    const st=it.stock==null?(c?"contado":"nocont"):!c?(all?(it.stock===0?"ok":"falta"):"nocont"):(Math.abs(counted-it.stock)<1e-9?"ok":(counted<it.stock?"falta":"sobra"));
-    const dif=it.stock==null?null:(c||all)?counted-it.stock:null;
-    rows.push({cod:it.cod,ean:it.ean,desc:it.desc,um:umTxt(it.um),cu:c&&c.cu.size?[...c.cu].map(([ce,q])=>`${fmt2(q)} ${plural(ce)}`).join(" + "):"",ubicErp:it.ubic,ubic:c?[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "):"",stock:it.stock,cont:c?counted:null,dif,costo:it.costo,difv:dif!=null&&it.costo!=null?dif*it.costo:null,st,n:c?c.n:0})});
-  for(const [k,c] of cnt){if(k[0]!=="x")continue;rows.push({cod:c.raw,ean:"",desc:"",um:"",ubicErp:"",ubic:[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "),stock:null,cont:c.qty,dif:null,costo:null,difv:null,st:"noerp",n:c.n})}
+  for(const it of items){const k=key(it.cod),a=first.get(k),b=re.get(k);
+    const fin=b?b.q:(a?a.q:null);
+    const st=it.stock==null?(fin!=null?"contado":"nocont"):fin==null?"nocont":(Math.abs(fin-it.stock)<1e-9?"ok":(fin<it.stock?"falta":"sobra"));
+    rows.push({cod:it.cod,desc:it.desc,sg:it.sg||"",um:umTxt(it.um),stock:it.stock,c1:a?a.q:null,c2:b?b.q:null,fin,dif:it.stock!=null&&fin!=null?fin-it.stock:null,st,
+      val:b&&a?(Math.abs(a.q-b.q)<1e-9?"conf":"corr"):"",nub:new Set([...(a?a.ub:[]),...(b?b.ub:[])]).size,n:(a?a.n:0)+(b?b.n:0)})}
+  for(const m of [first,re])for(const [k,c] of m)if(k[0]==="x"&&!rows.some(r=>r.k===k))rows.push({k,cod:c.raw,desc:"",um:"",stock:null,c1:first.get(k)?first.get(k).q:null,c2:re.get(k)?re.get(k).q:null,fin:(re.get(k)||first.get(k)).q,dif:null,st:"noerp",val:"",nub:c.ub.size,n:c.n});
   return rows;
 }
 function kpis(rows){
-  const c=rows.filter(r=>r.st!=="nocont"&&r.st!=="noerp"&&r.st!=="contado"), dif=c.filter(r=>r.st==="falta"||r.st==="sobra");
-  const net=c.reduce((a,r)=>a+(r.difv||0),0), abs=c.reduce((a,r)=>a+Math.abs(r.difv||0),0);
-  const val=c.reduce((a,r)=>a+((r.costo||0)*Math.max(0,r.stock)),0);
-  return {erp:erp?erp.items.length:0,contados:rows.filter(r=>r.cont!=null&&r.st!=="noerp").length,eval:c.length,ok:c.length-dif.length,dif:dif.length,falta:rows.filter(r=>r.st==="falta").length,sobra:rows.filter(r=>r.st==="sobra").length,
-    noerp:rows.filter(r=>r.st==="noerp").length,nocont:rows.filter(r=>r.st==="nocont").length,exact:c.length?(c.length-dif.length)/c.length:null,net,abs,val};
+  const ev=rows.filter(r=>r.st==="ok"||r.st==="falta"||r.st==="sobra"), dif=ev.filter(r=>r.st!=="ok");
+  return {total:rows.filter(r=>r.st!=="noerp").length,contados:rows.filter(r=>r.fin!=null&&r.st!=="noerp").length,nocont:rows.filter(r=>r.st==="nocont").length,
+    ok:ev.length-dif.length,dif:dif.length,falta:rows.filter(r=>r.st==="falta").length,sobra:rows.filter(r=>r.st==="sobra").length,noerp:rows.filter(r=>r.st==="noerp").length,
+    re:rows.filter(r=>r.c2!=null).length,exact:ev.length?(ev.length-dif.length)/ev.length:null};
+}
+function renderSel(){
+  const opts=[["*","Todos los conteos"],...conteos.map(c=>[c.id,(esReconteo(c)?"↻ ":"")+c.nombre+" · "+new Date(c.creado).toLocaleDateString("es-CL")])];
+  if(scans.some(s=>!s.nube))opts.push(["local","Lecturas de este equipo"]);
+  if(!opts.some(o=>o[0]===rSel))rSel=conteos[0]?conteos[0].id:"*";
+  $("#rSel").innerHTML=opts.map(([v,l])=>`<option value="${esc(v)}" ${v===rSel?"selected":""}>${esc(l)}</option>`).join("");
 }
 function renderResult(){
-  const ubs=[...new Set(scans.map(s=>s.ubic).filter(Boolean))].sort(), cur=$("#fUbic").value;
-  $("#fUbic").innerHTML=`<option value="">Todas</option>`+ubs.map(u=>`<option ${u===cur?"selected":""}>${esc(u)}</option>`).join("");
-  const rows=compute(), k=kpis(rows);
-  $("#kpis").innerHTML=[["Exactitud de ítems",k.exact==null?"—":fmt(k.exact*100,1)+"%"],["Ítems contados",`${fmt(k.contados)} / ${fmt(k.erp)}`],["Con diferencia",fmt(k.dif)],["Diferencia neta $",fmt(k.net)],["Diferencia absoluta $",fmt(k.abs)],["Códigos fuera del ERP",fmt(k.noerp)]]
+  renderSel();
+  const rows=compute(), k=kpis(rows), sc=scope();
+  $("#resNote").hidden=!(erp&&erp.maestro)&&!!erp;
+  $("#kpis").innerHTML=[["Productos del conteo",fmt(k.total)],["Contados",`${fmt(k.contados)} / ${fmt(k.total)}`],["Pendientes",fmt(k.nocont)],["Cuadran",fmt(k.ok)],["Con diferencia",fmt(k.dif)],["Exactitud",k.exact==null?"—":fmt(k.exact*100,1)+"%"]]
     .map(([l,v])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
-  const ch=[["todos","Todos",rows.length],["dif","Con diferencia",k.dif],["falta","Faltantes",k.falta],["sobra","Sobrantes",k.sobra],["ok","Cuadran",rows.filter(r=>r.st==="ok").length],["nocont","No contados",k.nocont],["noerp","No existen en ERP",k.noerp]];
+  const ch=[["todos","Todos",rows.length],["dif","Con diferencia",k.dif],["falta","Faltantes",k.falta],["sobra","Sobrantes",k.sobra],["ok","Cuadran",k.ok],["nocont","Pendientes",k.nocont],["re","Recontados",k.re],["noerp","No existen en ERP",k.noerp]].filter(x=>x[2]||x[0]==="todos"||x[0]===rFilter);
   $("#fChips").innerHTML=ch.map(([v,l,n])=>`<button class="chip" aria-pressed="${rFilter===v}" data-f="${v}">${l} · ${fmt(n)}</button>`).join("");
   $$("#fChips .chip").forEach(b=>b.onclick=()=>{rFilter=b.dataset.f;rLimit=300;renderResult()});
   const q=deacc($("#fSearch").value);
-  let f=rows.filter(r=>rFilter==="todos"||(rFilter==="dif"?(r.st==="falta"||r.st==="sobra"):r.st===rFilter));
-  if(q)f=f.filter(r=>deacc(r.cod+" "+r.ean+" "+r.desc).includes(q));
-  f.sort((a,b)=>Math.abs(b.difv??b.dif??0)-Math.abs(a.difv??a.dif??0));
-  $("#resNote").hidden=!(erp&&erp.maestro);
-  $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Contado en</th><th>Unidad</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Dif. $</th><th>Estado</th></tr></thead><tbody>`+
-    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td class="desc small">${esc(r.ubic)}</td><td>${esc(r.um||"")}</td><td class="num">${fmt2(r.stock)}</td><td class="num">${fmt2(r.cont)}${r.cu?`<div class="small muted">${esc(r.cu)}</div>`:""}</td>
-    <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td class="num">${r.difv==null?"":fmt(r.difv)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td></tr>`).join("")+
-    (f.length?"":`<tr><td colspan="9" class="muted">${erp||scans.length?"Nada con este filtro.":"Carga el stock ERP y registra conteos para ver el cruce."}</td></tr>`)+"</tbody>";
-  $("#resInfo").textContent=`Mostrando ${fmt(Math.min(rLimit,f.length))} de ${fmt(f.length)} · ordenado por mayor diferencia valorizada`;
+  let f=rows.filter(r=>rFilter==="todos"||(rFilter==="dif"?(r.st==="falta"||r.st==="sobra"):rFilter==="re"?r.c2!=null:r.st===rFilter));
+  if(q)f=f.filter(r=>deacc(r.cod+" "+r.desc).includes(q));
+  const ord={falta:0,sobra:1,nocont:2,noerp:3,contado:4,ok:5};
+  f.sort((a,b)=>(ord[a.st]-ord[b.st])||Math.abs(b.dif||0)-Math.abs(a.dif||0)||String(a.cod).localeCompare(String(b.cod)));
+  const hasRe=rows.some(r=>r.c2!=null);
+  $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Sistema</th><th class="num">${hasRe?"1er conteo":"Contado"}</th>${hasRe?'<th class="num">Reconteo</th>':""}<th class="num">Diferencia</th><th>Estado</th>${hasRe?"<th>Validación</th>":""}<th class="num">Ubic.</th></tr></thead><tbody>`+
+    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td>${esc(r.um||"")}</td><td class="num">${fmt2(r.stock)}</td><td class="num">${fmt2(r.c1)}</td>${hasRe?`<td class="num">${fmt2(r.c2)}</td>`:""}
+    <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td>${hasRe?`<td>${r.val?`<span class="pill ${VALID[r.val][1]}">${VALID[r.val][0]}</span>`:""}</td>`:""}<td class="num">${r.nub||""}</td></tr>`).join("")+
+    (f.length?"":`<tr><td colspan="10" class="muted">${scans.length?"Nada con este filtro.":"Todavía no hay lecturas. Tráelas con el botón de arriba."}</td></tr>`)+"</tbody>";
+  $("#resInfo").textContent=`Mostrando ${fmt(Math.min(rLimit,f.length))} de ${fmt(f.length)} productos${hasRe?" · Diferencia y estado usan el reconteo cuando existe":""}`;
   $("#btnMore").hidden=f.length<=rLimit;
+  // reconteo
+  const rc=rows.filter(r=>r.st==="falta"||r.st==="sobra"||($("#reNoCont").checked&&r.st==="nocont"));
+  $("#btnReconteo").textContent=`Crear reconteo (${fmt(rc.length)} productos)`;$("#btnReconteo").disabled=!rc.length;
+  $("#reInfo").textContent=nubeOn()?"":"Requiere el envío automático (Supabase) conectado en el Panel.";
+  renderDetalle();
 }
+function renderDetalle(){
+  const sc=scope(), q=deacc($("#dSearch").value), uf=$("#dUbic").value;
+  let ls=scans.filter(s=>sc.first(s)||sc.re(s));
+  const ubs=[...new Set(ls.map(s=>s.ubic).filter(Boolean))].sort();
+  $("#dUbic").innerHTML=`<option value="">Todas las ubicaciones</option>`+ubs.map(u=>`<option ${u===uf?"selected":""}>${esc(u)}</option>`).join("");
+  if(uf)ls=ls.filter(s=>s.ubic===uf);
+  if(q)ls=ls.filter(s=>{const it=erp&&findItem(s.code);return deacc(s.code+" "+(it?it.desc:"")+" "+(s.user||"")).includes(q)});
+  const tipo=s=>esReconteo(conteoDeScan(s))?1:0;
+  ls=[...ls].sort((a,b)=>tipo(a)-tipo(b)||String(a.ubic).localeCompare(String(b.ubic))||String(a.t).localeCompare(String(b.t)));
+  $("#det").innerHTML=`<thead><tr><th>Conteo</th><th>Fecha</th><th>Contador</th><th>Ubicación</th><th>Código</th><th>Descripción</th><th class="num">Cantidad contada</th><th class="num">Total</th></tr></thead><tbody>`+
+    ls.slice(0,dLimit).map(s=>{const it=erp&&findItem(s.code),c=conteoDeScan(s);return `<tr><td class="small">${c?(esReconteo(c)?'<span class="pill p-warn">Reconteo</span> ':"")+esc(c.nombre):esc(s.conteo||"Este equipo")}</td><td>${new Date(s.t).toLocaleDateString("es-CL")}</td><td>${esc(s.user||"")}</td><td>${esc(s.ubic||"—")}</td><td class="code">${esc(s.code)}</td><td class="desc">${it?esc(it.desc):""}</td>
+      <td class="num">${fmt2(s.qty)} <span class="small muted">${esc(s.f?plural(s.ce):(s.um||""))}</span></td><td class="num" style="font-weight:600">${fmt2(sq(s))} <span class="small muted">${esc(s.um||"")}</span></td></tr>`}).join("")+
+    (ls.length?"":`<tr><td colspan="8" class="muted">Sin lecturas.</td></tr>`)+"</tbody>";
+  $("#detInfo").textContent=`${fmt(Math.min(dLimit,ls.length))} de ${fmt(ls.length)} lecturas`;
+  $("#btnMoreDet").hidden=ls.length<=dLimit;
+}
+$("#rSel").onchange=async e=>{rSel=e.target.value;store.set("inv_rsel",rSel);rLimit=300;dLimit=300;rFilter="todos";await traerSel(true);renderResult()};
 $("#btnMore").onclick=()=>{rLimit+=500;renderResult()};
+$("#btnMoreDet").onclick=()=>{dLimit+=500;renderDetalle()};
 $("#fSearch").oninput=()=>{rLimit=300;renderResult()};
-$("#optUncounted").onchange=renderResult;$("#fUbic").onchange=renderResult;
-const detRow=r=>({"Código":r.cod,"Código barras":r.ean,"Descripción":r.desc,"Unidad":r.um,"Ubicación ERP":r.ubicErp,"Contado en":r.ubic,"Stock sistema":r.stock??"","Contado":r.cont??"","Contado en unidades de conteo":r.cu||"","Diferencia":r.dif??"","Costo unitario":r.costo??"","Diferencia $":r.difv??"","Estado":STATES[r.st][0],"N° lecturas":r.n});
-$("#btnExpRes").onclick=()=>{
-  const rows=compute(),k=kpis(rows),wb=XLSX.utils.book_new();
-  const res=[["Resumen de inventario"],[],["Fecha exportación",fmtDT(new Date().toISOString())],["Archivo ERP",erp?erp.file:"—"],["Filtro ubicación",$("#fUbic").value||"Todas"],["No contados como faltantes",$("#optUncounted").checked?"Sí":"No"],[],
-    ["Ítems en ERP",k.erp],["Ítems contados",k.contados],["Ítems que cuadran",k.ok],["Ítems con diferencia",k.dif],["  Faltantes",k.falta],["  Sobrantes",k.sobra],["No contados",k.nocont],["Códigos no existentes en ERP",k.noerp],
-    ["Exactitud de ítems",k.exact==null?"":k.exact],["Diferencia neta $",k.net],["Diferencia absoluta $",k.abs],["Lecturas totales",scans.length]];
-  const ws0=XLSX.utils.aoa_to_sheet(res);ws0["!cols"]=[{wch:32},{wch:28}];if(k.exact!=null){const c=ws0["B16"];if(c)c.z="0.0%"}
-  XLSX.utils.book_append_sheet(wb,ws0,"Resumen");
-  const sorted=[...rows].sort((a,b)=>Math.abs(b.difv??b.dif??0)-Math.abs(a.difv??a.dif??0));
-  XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.map(detRow)),"Detalle");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.filter(r=>r.st==="falta"||r.st==="sobra"||r.st==="noerp").map(detRow)),"Diferencias");
-  XLSX.utils.book_append_sheet(wb,recountSheet(sorted),"Reconteo");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>{const it=erp&&findItem(s.code);return {"Fecha hora":fmtDT(s.t),"Código leído":s.code,"Código ERP":it?it.cod:"","Descripción":it?it.desc:"","Ubicación":s.ubic,"Cantidad contada":s.qty,"Unidad contada":s.ce||s.um||"","Factor":s.f||1,"Cantidad (unidad ERP)":sq(s),"Contador":s.user||"","Origen":s.src}})),"Lecturas");
-  if(erp)XLSX.utils.book_append_sheet(wb,sheetFrom(erpRows(erp.items)),"Stock ERP limpio");
-  saveWb(wb,"Inventario_resultado_"+stamp()+".xlsx");
+$("#dSearch").oninput=()=>{dLimit=300;renderDetalle()};$("#dUbic").onchange=renderDetalle;
+$("#reNoCont").onchange=renderResult;
+async function traerSel(silent){
+  if(!nubeOn())return;
+  const list=rSel==="*"?conteos.filter(c=>c.nube):conteos.filter(c=>c.nube&&(c.id===rSel||c.reconteoDe===rSel));
+  try{let n=0;for(const c of list)n+=await traerLecturas(c,true);if(!silent)toast(`${fmt(n)} lecturas actualizadas`)}catch(e){toast(sbMsg(e))}
+}
+$("#btnTraerRes").onclick=async()=>{$("#btnTraerRes").disabled=true;await traerSel();$("#btnTraerRes").disabled=false;renderResult()};
+
+/* ---- crear reconteo desde las diferencias ---- */
+$("#btnReconteo").onclick=async()=>{
+  if(!nubeOn())return toast("Conecta el envío automático (Supabase) en el Panel para crear reconteos");
+  if(!erp||erp.maestro)return toast("Carga el informe del ERP en el Panel");
+  const rows=compute().filter(r=>r.st==="falta"||r.st==="sobra"||($("#reNoCont").checked&&r.st==="nocont"));
+  const its=enrich(erp.items).filter(i=>rows.some(r=>key(r.cod)===key(i.cod)));
+  if(!its.length)return toast("No hay productos para recontar");
+  const padre=rSel&&rSel!=="*"&&rSel!=="local"?conteos.find(c=>c.id===rSel):null;
+  const raiz=padre&&padre.reconteoDe?conteos.find(c=>c.id===padre.reconteoDe)||padre:padre;
+  const ahora=new Date(), vv=$("#reVence").value;
+  const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+  const nombre="Reconteo · "+(raiz?raiz.nombre:ahora.toLocaleDateString("es-CL"));
+  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
+  $("#btnReconteo").disabled=true;
+  try{const c=await crearNube(m,its,null,true);c.codes=its.map(i=>i.cod);if(raiz)c.reconteoDe=raiz.id;
+    conteos.unshift(c);store.set("inv_conteos",conteos);renderConteos();
+    $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)} · Manda este link a quien hará el reconteo (idealmente otra persona):</div>
+      <input id="reLink" readonly value="${esc(c.link)}" style="font:13px var(--mono)"><div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="reCopy">Copiar link</button></div></div>`;
+    $("#reCopy").onclick=()=>copyText(c.link,$("#reLink"));
+    toast("Reconteo creado");renderResult();
+  }catch(e){toast(sbMsg(e))}finally{$("#btnReconteo").disabled=false}
 };
-function recountSheet(rows){return sheetFrom(rows.filter(r=>r.st==="falta"||r.st==="sobra").map(r=>({"Código":r.cod,"Descripción":r.desc,"Contado en":r.ubic,"Primer conteo":r.cont??0,"Reconteo":"","Responsable":"","Observación":""})))}
-$("#btnExpRecount").onclick=()=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,recountSheet([...compute()].sort((a,b)=>Math.abs(b.difv??0)-Math.abs(a.difv??0))),"Reconteo");saveWb(wb,"Reconteo_"+stamp()+".xlsx")};
-function confirmBox(msg,fn,target){const b=$(target||"#confirmBox");b.innerHTML=`<div class="confirm"><span>${msg}</span><span class="sep"></span><button class="btn sm danger" id="cYes">Sí, borrar</button><button class="btn sm" id="cNo">Cancelar</button></div>`;$("#cNo").onclick=()=>b.innerHTML="";$("#cYes").onclick=()=>{fn();b.innerHTML=""}}
-$("#btnReset").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este equipo. Exporta antes si las necesitas.`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",imported);renderResult();toast("Lecturas borradas")});
+
+/* ---- exportar ---- */
+const detRow=r=>({"Código":r.cod,"Descripción":r.desc,"Subgrupo":r.sg||"","Unidad":r.um,"Stock sistema":r.stock??"","1er conteo":r.c1??"","Reconteo":r.c2??"","Conteo final":r.fin??"","Diferencia":r.dif??"","Estado":STATES[r.st][0],"Validación":r.val?VALID[r.val][0]:"","N° ubicaciones":r.nub||"","N° lecturas":r.n});
+const lectRow=s=>{const it=erp&&findItem(s.code),c=conteoDeScan(s);return {"Conteo":c?c.nombre:(s.conteo||"Este equipo"),"Tipo":esReconteo(c)?"Reconteo":"Conteo","Fecha":new Date(s.t).toLocaleDateString("es-CL"),"Hora":new Date(s.t).toLocaleTimeString("es-CL"),"Contador":s.user||"","Ubicación":s.ubic||"","Código":s.code,"Descripción":it?it.desc:"","Cantidad contada":s.qty,"Unidad contada":s.ce||s.um||"","Factor":s.f||1,"Total (unidad ERP)":sq(s),"Unidad ERP":s.um||""}};
+$("#btnExpRes").onclick=()=>{
+  const rows=compute(),k=kpis(rows),sc=scope(),wb=XLSX.utils.book_new();
+  const ord={falta:0,sobra:1,nocont:2,noerp:3,contado:4,ok:5};const sorted=[...rows].sort((a,b)=>(ord[a.st]-ord[b.st])||Math.abs(b.dif||0)-Math.abs(a.dif||0));
+  const res=[["Resultado de inventario · Grupo Vector"],[],["Conteo",sc.label],["Fecha exportación",fmtDT(new Date().toISOString())],["Informe ERP",erp?erp.file:"—"],[],
+    ["Productos del conteo",k.total],["Contados",k.contados],["Pendientes (no contados)",k.nocont],["Cuadran",k.ok],["Con diferencia",k.dif],["  Faltantes",k.falta],["  Sobrantes",k.sobra],["Recontados",k.re],["Códigos no existentes en ERP",k.noerp],["Exactitud",k.exact==null?"":k.exact]];
+  const ws0=XLSX.utils.aoa_to_sheet(res);ws0["!cols"]=[{wch:30},{wch:40}];if(k.exact!=null&&ws0["B16"])ws0["B16"].z="0.0%";
+  XLSX.utils.book_append_sheet(wb,ws0,"Resumen");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.map(detRow)),"Resumen por producto");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.filter(r=>r.st==="falta"||r.st==="sobra"||r.st==="noerp").map(detRow)),"Diferencias");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.filter(s=>sc.first(s)||sc.re(s)).sort((a,b)=>String(a.ubic).localeCompare(String(b.ubic))||String(a.t).localeCompare(String(b.t))).map(lectRow)),"Detalle de lecturas");
+  saveWb(wb,"Resultado_"+sc.label.normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^\w-]+/g,"_").slice(0,40)+"_"+stamp()+".xlsx");
+};
+function confirmBox(msg,fn,target){const b=$(target||"#confirmBox");b.innerHTML=`<div class="confirm"><span>${msg}</span><span class="sep"></span><button class="btn sm danger" id="cYes">Sí, continuar</button><button class="btn sm" id="cNo">Cancelar</button></div>`;$("#cNo").onclick=()=>b.innerHTML="";$("#cYes").onclick=()=>{fn();b.innerHTML=""}}
+$("#btnReset").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas guardadas en este equipo (las de la nube se pueden volver a traer).`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",imported);renderResult();toast("Lecturas borradas")});
 $("#btnResetAll").onclick=()=>confirmBox("Se borrarán lecturas y stock ERP de este equipo.",()=>{scans=[];imported=[];erp=null;saveScans();store.set("inv_imported",[]);try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();renderResult();toast("Todo borrado")});
 
 /* ================= Excel ================= */
@@ -1349,7 +1446,7 @@ $("#btnCrear").onclick=async()=>{
     const g=await r.json(), raw=g.files["conteo.json"].raw_url;
     const mm=raw.match(/^https:\/\/gist\.githubusercontent\.com\/([\w-]+)\/([0-9a-f]+)\/raw\/([0-9a-f]+)\/conteo\.json$/);
     if(!mm)throw new Error("Respuesta inesperada de GitHub");
-    const c={id:g.id,nombre,vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
+    const c={id:g.id,codes:its.map(i=>i.cod),nombre,vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
     conteos.unshift(c);store.set("inv_conteos",conteos);
     // en el PC queda cargado el stock completo para cruzar después
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
@@ -1398,7 +1495,7 @@ function renderConteosOnly(){
    (hasN&&nubeAt?`<caption class="small muted" style="caption-side:bottom;text-align:left;padding:6px">Actualizado ${nubeAt.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · se refresca cada 20 s</caption>`:"");
   $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
   $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
-  $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{await traerLecturas(conteos[+b.dataset.tr]);show("resultado")}catch(e){toast(sbMsg(e))}});
+  $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
   $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
     confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#crearRes")});
   $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
@@ -1437,7 +1534,7 @@ function renderSB(){
   $("#sbHelp").open=!nubeOn();
   $("#ghCard").classList.toggle("dim",nubeOn());
   $("#ghOptional").hidden=!nubeOn();
-  $("#nubeImp").hidden=!nubeOn();$("#nubeRes").hidden=!nubeOn();
+  $("#nubeImp").hidden=!nubeOn();
 }
 $("#btnSbSave").onclick=async()=>{
   const url=sbUrl($("#sbUrl").value), key=norm($("#sbKey").value), admin=norm($("#sbAdmin").value);
@@ -1459,7 +1556,7 @@ async function crearNube(m,its,sel,rot){
   const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo}});
   const ref=sbRef(SB.url);
   const link=appUrl()+"?nube="+r.id+"."+r.token+(ref?"&p="+ref:"&u="+encodeURIComponent(SB.url))+"&k="+encodeURIComponent(SB.key);
-  return {id:r.id,nube:true,nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
+  return {id:r.id,nube:true,codes:its.map(i=>i.cod),nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
 }
 
 /* ---- estado en vivo de los conteos ---- */
@@ -1493,7 +1590,6 @@ async function traerTodas(){
   if(!$("#v-resultado").hidden)renderResult();
 }
 $("#btnTraerImp").onclick=traerTodas;
-$("#btnTraerRes").onclick=async()=>{await traerTodas();renderResult()};
 
 /* ---- celular: abrir link de la nube y enviar lecturas ---- */
 if(!cfg.dev){cfg.dev=rndKey(16);store.set("inv_cfg",cfg)}
@@ -1679,6 +1775,6 @@ checkNubeLink().then(x=>{if(!x&&!checkConteoLink())loadMaestro()});
 if(nubeOn())refreshNube(true);
 if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
-show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
+show(isOp()?"contar":["erp","contar","resultado"].includes(h)?h:(erp?"contar":"erp"));
 </script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script></body></html>
