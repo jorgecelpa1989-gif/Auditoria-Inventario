@@ -430,6 +430,7 @@ to anon, authenticated;
   <div class="card">
     <h2>Conteos creados</h2>
     <div class="tbl"><table id="conteosTbl"></table></div>
+    <div id="ctConfirm"></div>
   </div>
 </section>
 
@@ -555,18 +556,6 @@ to anon, authenticated;
   </div>
 
   <div class="card">
-    <div class="eyebrow">Reconteo y validación</div>
-    <h2>Recontar las diferencias</h2>
-    <p class="small">Crea un link nuevo solo con los productos que no cuadraron. Cuando llegue el reconteo, la tabla muestra el 1er conteo y el reconteo lado a lado: <b>Confirmado</b> si ambos coinciden, <b>Corregido</b> si el reconteo cambió la cantidad. La diferencia final se calcula con el reconteo.</p>
-    <div class="row">
-      <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="reNoCont"> Incluir también los pendientes (no contados)</label>
-      <label class="f" style="flex:0 1 180px">Vigencia<select id="reVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas</option><option value="hoy">Hasta hoy 23:59</option></select></label>
-    </div>
-    <div class="row"><button class="btn accent" id="btnReconteo">Crear reconteo</button><span class="small muted" id="reInfo"></span></div>
-    <div id="reRes"></div>
-  </div>
-
-  <div class="card">
     <div class="eyebrow">Tabla 2</div>
     <h2>Detalle de lecturas (una línea por conteo)</h2>
     <div class="row">
@@ -588,6 +577,18 @@ to anon, authenticated;
     <div class="row"><button class="btn danger" id="btnReset">Borrar lecturas…</button><button class="btn danger" id="btnResetAll">Borrar todo…</button></div>
     <div id="confirmBox"></div>
   </div>
+  <div class="card">
+    <div class="eyebrow">Reconteo y validación</div>
+    <h2>Recontar las diferencias</h2>
+    <p class="small">Crea un link nuevo solo con los productos que no cuadraron. Cuando llegue el reconteo, la tabla muestra el 1er conteo y el reconteo lado a lado: <b>Confirmado</b> si ambos coinciden, <b>Corregido</b> si el reconteo cambió la cantidad. La diferencia final se calcula con el reconteo.</p>
+    <div class="row">
+      <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="reNoCont"> Incluir también los pendientes (no contados)</label>
+      <label class="f" style="flex:0 1 180px">Vigencia<select id="reVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas</option><option value="hoy">Hasta hoy 23:59</option></select></label>
+    </div>
+    <div class="row"><button class="btn accent" id="btnReconteo">Crear reconteo</button><span class="small muted" id="reInfo"></span></div>
+    <div id="reRes"></div>
+  </div>
+
 </section>
 </main>
 <div class="toast" id="toast" hidden></div>
@@ -1497,11 +1498,11 @@ function renderConteosOnly(){
   $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
   $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
   $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
-    confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#crearRes")});
+    confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
     confirmBox(c.nube?`Quitar "${esc(c.nombre)}" de esta lista (en Supabase queda guardado).`:`Quitar "${esc(c.nombre)}" de la lista${c.cerrado?"":" y cerrar su link"}.`,async()=>{
       if(!c.nube&&!c.cerrado){try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo cerrar en GitHub; se quitó solo de la lista")}}
-      conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#crearRes")});
+      conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
 }
 
 /* ================= NUBE (Supabase): los conteos llegan solos ================= */
