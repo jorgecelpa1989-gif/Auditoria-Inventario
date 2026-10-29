@@ -86,6 +86,9 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 body.expired .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}
 .nextUbic{justify-content:center;font-size:16px;padding:12px;border:2px solid var(--accent);color:var(--ink)}
 .done{background:var(--ok-bg)!important;border-color:var(--ok)!important}
+.conv{margin-top:4px;padding:6px 10px;border-radius:6px;background:var(--panel);border:1px dashed var(--primary);font-size:14px;color:var(--ink)}
+.sgList{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px;max-height:260px;overflow:auto;padding:4px 0}
+.sgList label{display:flex;gap:6px;align-items:center}
 .lastgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .last{border-radius:10px;padding:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:4px;transition:background .2s}
 .last.flash-ok{background:var(--ok-bg);border-color:var(--ok)}
@@ -160,8 +163,22 @@ body.op .supOnly{display:none!important}
     </div>
   </div>
 
+  <div class="card" id="factCard" hidden>
+    <div class="eyebrow">Paso 2 · Unidades de conteo</div>
+    <h2>Equivalencias para productos en kilos o metros</h2>
+    <p>Define en qué cuenta el contador cada producto y cuánto equivale. Ejemplo: el ERP maneja metros, el contador cuenta <b>ROLLOS</b>, y 1 ROLLO = 50 m. El contador solo digita cuántos rollos ve; la app multiplica. Las equivalencias quedan guardadas para los próximos conteos.</p>
+    <p class="small">Sirve tu Excel de la empresa (Sub Grupo, Código, Producto, Unidad de medida, Unidad de conversión): <b>ML</b> con número = se cuentan ROLLOS; <b>UN</b> con 1 = se cuentan 1 a 1; <b>KG</b> con número = se cuentan CAJAS de ese peso; <b>KG</b> sin conversión = se pesan. Si quieres otro nombre (CAJA, SACO…), agrega una columna "Cuenta en" o cámbialo en la tabla.</p>
+    <div class="row" id="factSum"></div>
+    <div id="factLoadRes"></div>
+    <div class="row"><button class="btn primary" id="btnFactUp">Cargar archivo de conversiones</button><button class="btn" id="btnFactTpl">Descargar plantilla Excel</button><input type="file" id="fileFact" accept=".xlsx,.xls,.csv" hidden></div>
+    <div class="row"><input id="factQ" placeholder="Buscar producto para editar" style="flex:1 1 220px">
+      <div class="chips" id="factChips"><button class="chip" data-f="pend">Sin equivalencia</button><button class="chip" data-f="con">Con equivalencia</button><button class="chip" data-f="todos">Todos</button></div></div>
+    <div class="tbl" style="max-height:420px"><table id="factTbl"></table></div>
+    <datalist id="ceList"><option value="ROLLO"><option value="SACO"><option value="BARRA"><option value="CAJA"><option value="BOLSA"><option value="PAQUETE"><option value="CARRETE"><option value="BIDON"><option value="PLANCHA"><option value="TIRA"><option value="UNIDAD"></datalist>
+  </div>
+
   <div class="card" id="maestroCard" hidden>
-    <div class="eyebrow">Paso 2 · Para los contadores</div>
+    <div class="eyebrow">Paso 3 · Para los contadores</div>
     <h2>Crear conteo y compartir el link</h2>
     <p>Se crea un link con la lista de productos (código, código de barras, descripción y unidad). <b>No lleva stock ni costos</b>: el contador cuenta a ciegas. Lo mandas por WhatsApp y al abrirlo el celular queda listo para contar.</p>
     <div class="row">
@@ -170,6 +187,9 @@ body.op .supOnly{display:none!important}
         <option value="2">2 horas</option><option value="4">4 horas</option><option value="8" selected>8 horas (un turno)</option><option value="12">12 horas</option><option value="hoy">Hasta hoy 23:59</option>
       </select></label>
     </div>
+    <details id="sgBox" hidden><summary>Subgrupos a contar <span class="small muted" id="sgInfo"></span></summary>
+      <div class="row small" style="margin:8px 0"><button class="btn sm" id="sgAll">Todos</button><button class="btn sm" id="sgNone">Ninguno</button><input id="sgQ" placeholder="Filtrar subgrupos" style="flex:1 1 160px;padding:5px 8px"></div>
+      <div id="sgList" class="sgList"></div></details>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
   </div>
@@ -403,11 +423,19 @@ let idx=new Map();
 function buildIndex(){idx=new Map(); if(!erp)return; erp.items.forEach((it,i)=>{ if(it.cod)idx.set(key(it.cod),i); if(it.ean){String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e); if(k&&!idx.has(k))idx.set(k,i)})}})}
 buildIndex();
 const findItem=c=>{const i=idx.get(key(c));return i==null?null:erp.items[i]};
+let FACT=store.get("inv_fact",{});
+const UMN=u=>{const s=deacc(u).replace(/[.\s]/g,"");if(/^(kg|kgs|kilo|kilos|kilogramos?)$/.test(s))return "kg";if(/^(m|mt|mts|ml|mtl|mtrs|metros?|metroslineales|mlineal(es)?)$/.test(s))return "m";if(!s||/^(un|und|unid|unidad(es)?|u|c\/u|cu|pza|pz|piezas?|uni)$/.test(s))return "un";return s.toUpperCase()};
+const umTxt=u=>{const n=UMN(u);return n==="un"?(u?"un":"un"):n};
+let MASTER=store.get("inv_master",{});
+function enrich(items){for(const it of items){const k=key(it.cod),x=FACT[k],ms=MASTER[k];it.ce=x?x.ce:"";it.f=x?x.f:1;if(ms){if(!it.um)it.um=ms.um;it.sg=ms.sg||"";if(!it.desc)it.desc=ms.desc||""}}return items}
+const sq=s=>(+s.qty||0)*(+s.f||1);
+const plural=ce=>!ce?"":/[AEIOU]$/i.test(ce)?ce+"S":ce.replace(/ÓN$/i,"ON")+"ES";
+const conv=it=>!!(it&&it.ce&&(it.f||1)>0&&!(it.ce==="UNIDAD"&&(it.f||1)===1));
 function saveScans(){store.set("inv_scans",scans);updStatus()}
 function updStatus(){
   $("#nScans").textContent=fmt(scans.length);
   const tot=scans.reduce((a,s)=>a+(+s.qty||0),0);
-  $("#status").innerHTML=(erp&&erp.conteo?`<span>Conteo: <b>${esc(erp.conteo.nombre)}</b></span>`+(erp.conteo.vence?`<span>Vence: <b>${new Date(erp.conteo.vence).toLocaleString("es-CL",{weekday:"short",hour:"2-digit",minute:"2-digit"})}</b></span>`:""):"")+(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span><span>Unidades: <b>${fmt2(tot)}</b></span>`;
+  $("#status").innerHTML=(erp&&erp.conteo?`<span>Conteo: <b>${esc(erp.conteo.nombre)}</b></span>`+(erp.conteo.vence?`<span>Vence: <b>${new Date(erp.conteo.vence).toLocaleString("es-CL",{weekday:"short",hour:"2-digit",minute:"2-digit"})}</b></span>`:""):"")+(erp?`<span>${erp.maestro?"Productos":"ERP"}: <b>${fmt(erp.items.length)}</b>${erp.maestro?"":" ítems"}</span>`:`<span>Sin stock ERP cargado</span>`)+`<span>Lecturas: <b>${fmt(scans.length)}</b></span>`;
 }
 
 /* ================= pestañas ================= */
@@ -535,7 +563,7 @@ function renderDraft(){
   $("#erpPrev").innerHTML=`<thead><tr><th>Código</th><th>Cód. barras</th><th>Descripción</th><th class="num">Stock</th><th class="num">Costo</th><th>Ubicación</th></tr></thead><tbody>`+
     p.map(i=>`<tr><td class="code">${esc(i.cod)}</td><td class="code">${esc(i.ean)}</td><td class="desc">${esc(i.desc)}</td><td class="num">${fmt2(i.stock)}</td><td class="num">${fmt2(i.costo)}</td><td>${esc(i.ubic)}</td></tr>`).join("")+
     (d.items.length>15?`<tr><td colspan="6" class="muted">… y ${fmt(d.items.length-15)} más</td></tr>`:"")+"</tbody>";
-  $("#btnErpOk").disabled=!d.items.length;$("#maestroCard").hidden=!d.items.length;
+  $("#btnErpOk").disabled=!d.items.length;$("#maestroCard").hidden=!d.items.length;renderFact();
 }
 async function loadErpFile(file){
   try{
@@ -551,7 +579,7 @@ $("#hdrRow").onchange=e=>{erpDraft.hdrRow=Math.max(0,(+e.target.value||1)-1);erp
 $("#optZeros").checked=cfg.zeros;
 $("#optZeros").onchange=e=>{cfg.zeros=e.target.checked;store.set("inv_cfg",cfg);buildIndex()};
 $("#btnErpOk").onclick=()=>{
-  const d=erpDraft;
+  const d=erpDraft;enrich(d.items);
   erp={file:d.file,at:new Date().toISOString(),items:d.items,merged:d.merged};
   if(!store.set("inv_erp",erp))return;
   buildIndex();updStatus();toast(`Stock cargado: ${fmt(erp.items.length)} productos`);show("contar");
@@ -569,10 +597,11 @@ dropZone($("#dropErp"),$("#fileErp"),f=>f[0]&&loadErpFile(f[0]));
 
 /* informe de ejemplo con toda la suciedad típica */
 $("#btnDemo").onclick=()=>{
-  const prods=[["000123","7801234500011","ACEITE VEGETAL 1LT","45","1.250,50"],["000124","7801234500028","ARROZ GRADO 1 1KG","120","890"],["000125","7801234500035","AZUCAR 1KG","98","1.020"],["000126","7801234500042","FIDEOS SPAGHETTI 400G","210","560"],["000127","7801234500059","HARINA SIN POLVOS 1KG","64","720"],["000128","7801234500066","SAL FINA 1KG","33","310"],["000129","7801234500073","TE NEGRO 100 BOLSAS","27","2.150"],["000130","7801234500080","CAFE INSTANTANEO 170G","18","4.390"],["000131","7801234500097","LECHE ENTERA 1LT","144","980"],["000132","7801234500103","DETERGENTE 3KG","12","6.790"],["000133","","BOLSA CAMISETA (SIN CODIGO BARRA)","1.500","12,5"],["000134","7801234500127","PAPEL HIGIENICO 4 ROLLOS","-3","2.390"]];
-  const aoa=[["EMPRESA DEMO LTDA"],["RUT 76.123.456-7"],["INFORME DE EXISTENCIAS VALORIZADO"],["Fecha: 28-10-2026","","","Hora: 09:14"],[],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega"]];
-  prods.forEach((p,i)=>{aoa.push([...p,"BOD-CENTRAL"]);if(i===5){aoa.push([],["Página 1 de 2"],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega"])}});
-  aoa.push(["000126","7801234500042","FIDEOS SPAGHETTI 400G","15","560","BOD-SALA"]);
+  const prods=[["000123","7801234500011","ACEITE VEGETAL 1LT","45","1.250,50"],["000124","7801234500028","ARROZ GRADO 1 1KG","120","890"],["000125","7801234500035","AZUCAR 1KG","98","1.020"],["000126","7801234500042","FIDEOS SPAGHETTI 400G","210","560"],["000127","7801234500059","HARINA SIN POLVOS 1KG","64","720"],["000128","7801234500066","SAL FINA 1KG","33","310"],["000129","7801234500073","TE NEGRO 100 BOLSAS","27","2.150"],["000130","7801234500080","CAFE INSTANTANEO 170G","18","4.390"],["000131","7801234500097","LECHE ENTERA 1LT","144","980"],["000132","7801234500103","DETERGENTE 3KG","12","6.790"],["000133","","BOLSA CAMISETA (SIN CODIGO BARRA)","1.500","12,5"],["000134","7801234500127","PAPEL HIGIENICO 4 ROLLOS","-3","2.390"],["000135","7801234500134","CABLE ELECTRICO 2,5MM ROJO","1.250","390"],["000136","7801234500141","CEMENTO ESPECIAL","3.000","180"],["000137","","MANGUERA JARDIN 1/2","240","650"]];
+  const UMD={"000135":"MT","000136":"KG","000137":"M"};
+  const aoa=[["EMPRESA DEMO LTDA"],["RUT 76.123.456-7"],["INFORME DE EXISTENCIAS VALORIZADO"],["Fecha: 28-10-2026","","","Hora: 09:14"],[],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega","U.M."]];
+  prods.forEach((p,i)=>{aoa.push([...p,"BOD-CENTRAL",UMD[p[0]]||"UN"]);if(i===5){aoa.push([],["Página 1 de 2"],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega","U.M."])}});
+  aoa.push(["000126","7801234500042","FIDEOS SPAGHETTI 400G","15","560","BOD-SALA","UN"]);
   aoa.push([],["","","TOTAL GENERAL","2.288",""],["Fin del informe"]);
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),"Informe");
   setDraftSheet({file:"Ejemplo_informe_ERP.xlsx",wb},"Informe");
@@ -602,14 +631,14 @@ $("#btnNextUbic").onclick=()=>{
   if(unsaved&&$("#scan").value.trim()&&Date.now()>nextArmed){nextArmed=Date.now()+5000;toast("Tienes un producto leído sin confirmar con OK. Toca otra vez para pasar igual.");return}
   const u=cfg.ubic, here=scans.filter(s=>(s.ubic||"")===(u||""));
   const prods=new Set(here.map(s=>key(s.code))).size, units=here.reduce((a,s)=>a+ +s.qty,0);
-  if(u)toast(`${u} cerrada: ${fmt(prods)} productos · ${fmt2(units)} unidades`);
+  if(u)toast(`${u} cerrada: ${fmt(prods)} productos · ${fmt(here.length)} lecturas`);
   $("#last").innerHTML=u?`<div class="eyebrow">Ubicación cerrada</div><div class="d">${esc(u)}</div><div class="c">${fmt(prods)} productos distintos · ${fmt2(units)} unidades · ${fmt(here.length)} lecturas</div>`:`<div class="d muted">Escanea la siguiente ubicación</div>`;
   setUbic("",true);clearProduct();unsaved=false;$("#qty").value="";camHold=false;lastCam.c="";
   if(camOpen())setCamTarget("ubic");else $("#ubic").focus();
 };
 
 /* ---- producto: el código queda visible hasta leer otro ---- */
-function clearProduct(){$("#scan").value="";$("#pending").hidden=true;$("#sugg").hidden=true}
+function clearProduct(){$("#scan").value="";$("#pending").hidden=true;$("#sugg").hidden=true;$("#stepQty .eyebrow").textContent="3 · Cantidad"}
 function focusSel(el){el.focus();setTimeout(()=>{try{el.select()}catch(e){}},0)}
 function resetQty(){$("#qty").value=""}
 function showPending(code){
@@ -617,7 +646,9 @@ function showPending(code){
   p.hidden=false;p.className="pending"+((it||!erp)?"":" bad");
   const [tot,here]=totalFor(code);
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):(erp?"Este código NO existe en la lista de productos":"Código leído")}</div>
-    <div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${cfg.ubic?"":" · <b style=\"color:var(--warn)\">sin ubicación</b>"}${tot?` · ya contado: ${fmt2(here)} aquí${cfg.ubic?`, ${fmt2(tot)} en total`:""}`:""}</div>`;
+    <div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${cfg.ubic?"":" · <b style=\"color:var(--warn)\">sin ubicación</b>"}${tot?` · ya contado: ${fmt2(here)}${it&&conv(it)?" "+esc(plural(it.ce)):(it&&UMN(it.um)!=="un"?" "+esc(umTxt(it.um)):"")} aquí${cfg.ubic?`, ${fmt2(tot)} en total`:""}`:""}</div>`+
+    (it&&conv(it)?`<div class="conv">Cuenta en <b>${esc(plural(it.ce))}</b> · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</div>`:(it&&UMN(it.um)==="kg"?`<div class="conv">⚖ <b>Pesar.</b> Digita los <b>kg</b> que marca la balanza. Si pesas por partes, ingresa cada pesada con OK: se van sumando.</div>`:(it&&UMN(it.um)!=="un"?`<div class="conv">Digita la cantidad en <b>${esc(umTxt(it.um))}</b></div>`:"")));
+  $("#stepQty .eyebrow").textContent=it&&conv(it)?"3 · Cantidad de "+plural(it.ce):(it&&UMN(it.um)==="kg"?"3 · Kilos (pesar)":(it&&UMN(it.um)!=="un"?"3 · Cantidad en "+umTxt(it.um):"3 · Cantidad"));
   return it;
 }
 /* lee un producto (pistola, cámara, teclado o búsqueda). En "Con cantidad" espera la cantidad; en "Uno por uno" suma al tiro */
@@ -665,12 +696,14 @@ $("#qty").addEventListener("focus",e=>setTimeout(()=>{try{e.target.select()}catc
 function addScan(code,qty,src){
   code=codeStr(code); if(!code)return;
   qty=+qty; if(!isFinite(qty))qty=1;
-  const s={code,qty,ubic:cfg.ubic||"",user:cfg.user||"",t:new Date().toISOString(),src,conteo:erp&&erp.conteo?erp.conteo.nombre:""};
-  scans.push(s);saveScans();
   const it=erp?findItem(code):null;
+  const s={code,qty,ubic:cfg.ubic||"",user:cfg.user||"",t:new Date().toISOString(),src,conteo:erp&&erp.conteo?erp.conteo.nombre:""};
+  if(conv(it)){s.f=+it.f;s.ce=it.ce}
+  if(it)s.um=umTxt(it.um);
+  scans.push(s);saveScans();
   showLast(s,it);audio.beep(!!it||!erp);
   resetQty();showPending(code);
-  const pe=$("#pending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado +${fmt2(qty)}${s.ubic?" en "+esc(s.ubic):""}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
+  const pe=$("#pending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${s.f?`${fmt2(qty)} ${esc(plural(s.ce))} = ${fmt2(sq(s))} ${esc(s.um||"")}`:"+"+fmt2(qty)+(s.um&&s.um!=="un"?" "+esc(s.um):"")}${s.ubic?" en "+esc(s.ubic):""}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
   renderRecent();renderSess();
 }
 function totalFor(code){const k=key(code);let a=0,u=0;for(const s of scans)if(key(s.code)===k){a+=+s.qty;if((s.ubic||"")===(cfg.ubic||""))u+=+s.qty}return [a,u]}
@@ -690,13 +723,13 @@ function showLast(s,it){
   $("#undoLast").onclick=()=>{const i=scans.lastIndexOf(s);if(i>=0){scans.splice(i,1);saveScans();renderRecent();renderSess();el.innerHTML=`<div class="d muted">Lectura deshecha</div>`;if($("#scan").value)showPending($("#scan").value)}};
 }
 function renderSess(){const u=cfg.ubic||"";const here=scans.filter(s=>(s.ubic||"")===u);
-  $("#sessInfo").textContent=`${u?"Ubicación "+u:"Sin ubicación"}: ${fmt(new Set(here.map(s=>key(s.code))).size)} productos · ${fmt2(here.reduce((a,s)=>a+ +s.qty,0))} unidades`;
+  $("#sessInfo").textContent=`${u?"Ubicación "+u:"Sin ubicación"}: ${fmt(new Set(here.map(s=>key(s.code))).size)} productos · ${fmt(here.length)} lecturas`;
   const ub=[...new Set(scans.map(s=>s.ubic).filter(Boolean))];$("#ubicList").innerHTML=ub.map(u=>`<option value="${esc(u)}">`).join("")}
 function renderRecent(){
   const rows=scans.slice(-40).reverse();
   $("#recent").innerHTML=`<thead><tr><th>Hora</th><th>Código</th><th>Descripción</th><th>Ubicación</th><th class="num">Cant.</th><th></th></tr></thead><tbody>`+
    (rows.length?rows.map(s=>{const it=erp&&findItem(s.code);const i=scans.indexOf(s);return `<tr><td>${new Date(s.t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</td><td class="code">${esc(s.code)}</td><td class="desc">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está en la lista</span>':"")}</td><td>${esc(s.ubic)}</td>
-   <td class="num"><input type="text" inputmode="decimal" value="${s.qty}" data-i="${i}" class="eq" style="width:80px;padding:4px 6px;text-align:right" aria-label="Cantidad"></td><td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="6" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
+   <td class="num"><input type="text" inputmode="decimal" value="${s.qty}" data-i="${i}" class="eq" style="width:80px;padding:4px 6px;text-align:right" aria-label="Cantidad">${s.f?` <span class="small muted">${esc(s.ce)}</span>`:(s.um&&s.um!=="un"?` <span class="small muted">${esc(s.um)}</span>`:"")}</td><td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="6" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
   $$("#recent .eq").forEach(x=>x.onchange=()=>{const s=scans[+x.dataset.i];if(s){s.qty=num(x.value)??0;saveScans();renderSess()}});
   $$("#recent [data-del]").forEach(b=>b.onclick=()=>{scans.splice(+b.dataset.del,1);saveScans();renderRecent();renderSess()});
   updStatus();
@@ -704,7 +737,7 @@ function renderRecent(){
 $("#btnExpScans").onclick=()=>{
   if(!scans.length)return toast("No hay lecturas para exportar");
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Descripción":(erp&&findItem(s.code)||{}).desc||"","Cantidad":s.qty,"Ubicación":s.ubic,"Contador":s.user||"","Conteo":s.conteo||"","Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>({"Código":s.code,"Descripción":(erp&&findItem(s.code)||{}).desc||"","Cantidad contada":s.qty,"Unidad contada":s.ce||s.um||"","Factor":s.f||1,"Cantidad (unidad ERP)":sq(s),"Unidad ERP":s.um||"","Ubicación":s.ubic,"Contador":s.user||"","Conteo":s.conteo||"","Fecha hora":fmtDT(s.t),"Origen":s.src}))),"Conteos");
   saveWb(wb,"Conteos_"+(erp&&erp.conteo?erp.conteo.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w-]+/g,"_").slice(0,40)+"_":"")+(cfg.user?cfg.user.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w-]+/g,"_")+"_":"")+stamp()+".xlsx");
 };
 
@@ -793,12 +826,16 @@ async function importFile(file){
     for(let i=0;i<ncol;i++){if(i===codeCol)continue;const h=deacc(hdr[i]);const vals=data.slice(0,500).map(r=>r[i]);const nn=vals.filter(v=>{const n=num(v);return n!=null&&Math.abs(n)<1e6&&!/[\/:]/.test(String(v))}).length;
       if(hasHdr&&/(cant|qty|conteo|unid|total)/.test(h)&&nn>vals.length*.7){qtyCol=i;break}
       if(!hasHdr&&nn===vals.length&&vals.every(v=>String(v).length<=7)&&qtyCol<0)qtyCol=i;}
-    const job={id:Math.random().toString(36).slice(2),file:file.name,size:file.size,hdr,data,codeCol,qtyCol,ubicCol:-1,ubic:""};
+    const eq=hasHdr?hdr.findIndex(h=>/unidad erp\)/.test(deacc(h))):-1;
+    if(eq>=0)qtyCol=eq;
+    const job={id:Math.random().toString(36).slice(2),file:file.name,size:file.size,hdr,data,codeCol,qtyCol,ubicCol:-1,ubic:"",applyF:eq<0};
     if(hasHdr){const u=hdr.findIndex(h=>/ubic|bodega|zona|pasillo/i.test(deacc(h)));if(u>=0&&u!==codeCol&&u!==qtyCol)job.ubicCol=u}
     renderJob(job);
   }catch(e){console.error(e);toast(file.name+": no se pudo leer ("+(e.message||e)+")")}
 }
-function jobRows(j){const out=[];for(const r of j.data){const c=codeStr(r[j.codeCol]);if(!c||JUNK.test(c))continue;let q=j.qtyCol>=0?num(r[j.qtyCol]):1;if(q==null)q=1;out.push({code:c,qty:q,ubic:(j.ubicCol>=0?norm(r[j.ubicCol]).toUpperCase():"")||j.ubic})}return out}
+function jobRows(j){const out=[];for(const r of j.data){const c=codeStr(r[j.codeCol]);if(!c||JUNK.test(c))continue;let q=j.qtyCol>=0?num(r[j.qtyCol]):1;if(q==null)q=1;
+  const it=erp&&findItem(c),row={code:c,qty:q,ubic:(j.ubicCol>=0?norm(r[j.ubicCol]).toUpperCase():"")||j.ubic};
+  if(j.applyF&&conv(it)){row.f=+it.f;row.ce=it.ce}if(it)row.um=umTxt(it.um);out.push(row)}return out}
 function renderJob(j){
   let el=document.getElementById("job-"+j.id);
   if(!el){el=document.createElement("div");el.className="card";el.id="job-"+j.id;$("#impList").prepend(el)}
@@ -809,16 +846,18 @@ function renderJob(j){
    ${dup?`<div class="confirm small">Este archivo ya se cargó el ${fmtDT(dup.at)}. Si lo agregas de nuevo, se duplican los conteos.</div>`:""}
    <div class="row"><label class="f">Columna código${sel("codeCol",j.codeCol)}</label><label class="f">Columna cantidad${sel("qtyCol",j.qtyCol,"(cada fila = 1)")}</label>
    <label class="f">Columna ubicación${sel("ubicCol",j.ubicCol,"(ninguna)")}</label><label class="f">Ubicación para todo el archivo<input data-k="ubic" value="${esc(j.ubic)}" placeholder="opcional"></label></div>
-   <div class="small">${fmt(rows.length)} lecturas · ${fmt2(rows.reduce((a,r)=>a+r.qty,0))} unidades${found!=null?` · <b>${fmt(found)}</b> códigos encontrados en ERP, <span style="color:var(--bad)">${fmt(rows.length-found)}</span> no encontrados`:""}</div>
-   <div class="tbl" style="max-height:200px"><table><thead><tr><th>Código</th><th class="num">Cant.</th><th>Ubicación</th><th>ERP</th></tr></thead><tbody>${rows.slice(0,8).map(r=>{const it=erp&&findItem(r.code);return `<tr><td class="code">${esc(r.code)}</td><td class="num">${fmt2(r.qty)}</td><td>${esc(r.ubic)}</td><td class="desc">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está</span>':"")}</td></tr>`}).join("")}</tbody></table></div>
+   <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-k="applyF" ${j.applyF?"checked":""}> Aplicar equivalencias (el archivo trae rollos, sacos, cajas… y hay que convertir a la unidad del ERP)</label>
+   <div class="small">${fmt(rows.length)} lecturas · ${fmt(rows.filter(r=>r.f).length)} con equivalencia${found!=null?` · <b>${fmt(found)}</b> códigos encontrados en ERP, <span style="color:var(--bad)">${fmt(rows.length-found)}</span> no encontrados`:""}</div>
+   <div class="tbl" style="max-height:200px"><table><thead><tr><th>Código</th><th class="num">Cant.</th><th>Ubicación</th><th>ERP</th></tr></thead><tbody>${rows.slice(0,8).map(r=>{const it=erp&&findItem(r.code);return `<tr><td class="code">${esc(r.code)}</td><td class="num">${fmt2(r.qty)}${r.f?` ${esc(r.ce)} = ${fmt2(sq(r))} ${esc(r.um)}`:""}</td><td>${esc(r.ubic)}</td><td class="desc">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está</span>':"")}</td></tr>`}).join("")}</tbody></table></div>
    <div class="row"><button class="btn primary" data-act="add">Agregar ${fmt(rows.length)} lecturas</button><button class="btn" data-act="x">Descartar</button></div>`;
   el.querySelectorAll("select[data-k]").forEach(s=>s.onchange=()=>{j[s.dataset.k]=+s.value;renderJob(j)});
+  el.querySelector("input[data-k=applyF]").onchange=e=>{j.applyF=e.target.checked;renderJob(j)};
   el.querySelector("input[data-k=ubic]").onchange=e=>{j.ubic=norm(e.target.value).toUpperCase();renderJob(j)};
   el.querySelector("[data-act=x]").onclick=()=>el.remove();
   el.querySelector("[data-act=add]").onclick=()=>{
     const t=new Date().toISOString();const rs=jobRows(j);
-    rs.forEach(r=>scans.push({code:r.code,qty:r.qty,ubic:r.ubic,t,src:"archivo: "+j.file}));
-    saveScans();imported.push({name:j.file,size:j.size,rows:rs.length,qty:rs.reduce((a,r)=>a+r.qty,0),at:t});store.set("inv_imported",imported);
+    rs.forEach(r=>{const s={code:r.code,qty:r.qty,ubic:r.ubic,t,src:"archivo: "+j.file};if(r.f){s.f=r.f;s.ce=r.ce}if(r.um)s.um=r.um;scans.push(s)});
+    saveScans();imported.push({name:j.file,size:j.size,rows:rs.length,qty:rs.reduce((a,r)=>a+sq(r),0),at:t});store.set("inv_imported",imported);
     el.remove();renderImpDone();toast(`${fmt(rs.length)} lecturas agregadas de ${j.file}`);
   };
 }
@@ -833,13 +872,13 @@ function compute(){
   const all=$("#optUncounted").checked, uf=$("#fUbic").value;
   const cnt=new Map();
   for(const s of scans){if(uf&&s.ubic!==uf)continue;const k=erp&&idx.has(key(s.code))?"i"+idx.get(key(s.code)):"x"+key(s.code);
-    let c=cnt.get(k);if(!c){c={qty:0,n:0,ubic:new Map(),raw:s.code};cnt.set(k,c)}c.qty+=+s.qty;c.n++;const u=s.ubic||"(sin ubicación)";c.ubic.set(u,(c.ubic.get(u)||0)+ +s.qty)}
+    let c=cnt.get(k);if(!c){c={qty:0,n:0,ubic:new Map(),raw:s.code,cu:new Map()};cnt.set(k,c)}c.qty+=sq(s);c.n++;const u=s.ubic||"(sin ubicación)";c.ubic.set(u,(c.ubic.get(u)||0)+sq(s));if(s.f)c.cu.set(s.ce,(c.cu.get(s.ce)||0)+ +s.qty)}
   const rows=[];
   (erp?erp.items:[]).forEach((it,i)=>{const c=cnt.get("i"+i);const counted=c?c.qty:0;
     if(!c&&uf)return;
     const st=it.stock==null?(c?"contado":"nocont"):!c?(all?(it.stock===0?"ok":"falta"):"nocont"):(Math.abs(counted-it.stock)<1e-9?"ok":(counted<it.stock?"falta":"sobra"));
     const dif=it.stock==null?null:(c||all)?counted-it.stock:null;
-    rows.push({cod:it.cod,ean:it.ean,desc:it.desc,um:it.um,ubicErp:it.ubic,ubic:c?[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "):"",stock:it.stock,cont:c?counted:null,dif,costo:it.costo,difv:dif!=null&&it.costo!=null?dif*it.costo:null,st,n:c?c.n:0})});
+    rows.push({cod:it.cod,ean:it.ean,desc:it.desc,um:umTxt(it.um),cu:c&&c.cu.size?[...c.cu].map(([ce,q])=>`${fmt2(q)} ${plural(ce)}`).join(" + "):"",ubicErp:it.ubic,ubic:c?[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "):"",stock:it.stock,cont:c?counted:null,dif,costo:it.costo,difv:dif!=null&&it.costo!=null?dif*it.costo:null,st,n:c?c.n:0})});
   for(const [k,c] of cnt){if(k[0]!=="x")continue;rows.push({cod:c.raw,ean:"",desc:"",um:"",ubicErp:"",ubic:[...c.ubic].map(([u,q])=>`${u}: ${fmt2(q)}`).join(" · "),stock:null,cont:c.qty,dif:null,costo:null,difv:null,st:"noerp",n:c.n})}
   return rows;
 }
@@ -864,17 +903,17 @@ function renderResult(){
   if(q)f=f.filter(r=>deacc(r.cod+" "+r.ean+" "+r.desc).includes(q));
   f.sort((a,b)=>Math.abs(b.difv??b.dif??0)-Math.abs(a.difv??a.dif??0));
   $("#resNote").hidden=!(erp&&erp.maestro);
-  $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Contado en</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Dif. $</th><th>Estado</th></tr></thead><tbody>`+
-    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td class="desc small">${esc(r.ubic)}</td><td class="num">${fmt2(r.stock)}</td><td class="num">${fmt2(r.cont)}</td>
+  $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Contado en</th><th>Unidad</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Dif. $</th><th>Estado</th></tr></thead><tbody>`+
+    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td class="desc small">${esc(r.ubic)}</td><td>${esc(r.um||"")}</td><td class="num">${fmt2(r.stock)}</td><td class="num">${fmt2(r.cont)}${r.cu?`<div class="small muted">${esc(r.cu)}</div>`:""}</td>
     <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td class="num">${r.difv==null?"":fmt(r.difv)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td></tr>`).join("")+
-    (f.length?"":`<tr><td colspan="8" class="muted">${erp||scans.length?"Nada con este filtro.":"Carga el stock ERP y registra conteos para ver el cruce."}</td></tr>`)+"</tbody>";
+    (f.length?"":`<tr><td colspan="9" class="muted">${erp||scans.length?"Nada con este filtro.":"Carga el stock ERP y registra conteos para ver el cruce."}</td></tr>`)+"</tbody>";
   $("#resInfo").textContent=`Mostrando ${fmt(Math.min(rLimit,f.length))} de ${fmt(f.length)} · ordenado por mayor diferencia valorizada`;
   $("#btnMore").hidden=f.length<=rLimit;
 }
 $("#btnMore").onclick=()=>{rLimit+=500;renderResult()};
 $("#fSearch").oninput=()=>{rLimit=300;renderResult()};
 $("#optUncounted").onchange=renderResult;$("#fUbic").onchange=renderResult;
-const detRow=r=>({"Código":r.cod,"Código barras":r.ean,"Descripción":r.desc,"Unidad":r.um,"Ubicación ERP":r.ubicErp,"Contado en":r.ubic,"Stock sistema":r.stock??"","Contado":r.cont??"","Diferencia":r.dif??"","Costo unitario":r.costo??"","Diferencia $":r.difv??"","Estado":STATES[r.st][0],"N° lecturas":r.n});
+const detRow=r=>({"Código":r.cod,"Código barras":r.ean,"Descripción":r.desc,"Unidad":r.um,"Ubicación ERP":r.ubicErp,"Contado en":r.ubic,"Stock sistema":r.stock??"","Contado":r.cont??"","Contado en unidades de conteo":r.cu||"","Diferencia":r.dif??"","Costo unitario":r.costo??"","Diferencia $":r.difv??"","Estado":STATES[r.st][0],"N° lecturas":r.n});
 $("#btnExpRes").onclick=()=>{
   const rows=compute(),k=kpis(rows),wb=XLSX.utils.book_new();
   const res=[["Resumen de inventario"],[],["Fecha exportación",fmtDT(new Date().toISOString())],["Archivo ERP",erp?erp.file:"—"],["Filtro ubicación",$("#fUbic").value||"Todas"],["No contados como faltantes",$("#optUncounted").checked?"Sí":"No"],[],
@@ -886,7 +925,7 @@ $("#btnExpRes").onclick=()=>{
   XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.map(detRow)),"Detalle");
   XLSX.utils.book_append_sheet(wb,sheetFrom(sorted.filter(r=>r.st==="falta"||r.st==="sobra"||r.st==="noerp").map(detRow)),"Diferencias");
   XLSX.utils.book_append_sheet(wb,recountSheet(sorted),"Reconteo");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>{const it=erp&&findItem(s.code);return {"Fecha hora":fmtDT(s.t),"Código leído":s.code,"Código ERP":it?it.cod:"","Descripción":it?it.desc:"","Ubicación":s.ubic,"Cantidad":s.qty,"Contador":s.user||"","Origen":s.src}})),"Lecturas");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(scans.map(s=>{const it=erp&&findItem(s.code);return {"Fecha hora":fmtDT(s.t),"Código leído":s.code,"Código ERP":it?it.cod:"","Descripción":it?it.desc:"","Ubicación":s.ubic,"Cantidad contada":s.qty,"Unidad contada":s.ce||s.um||"","Factor":s.f||1,"Cantidad (unidad ERP)":sq(s),"Contador":s.user||"","Origen":s.src}})),"Lecturas");
   if(erp)XLSX.utils.book_append_sheet(wb,sheetFrom(erpRows(erp.items)),"Stock ERP limpio");
   saveWb(wb,"Inventario_resultado_"+stamp()+".xlsx");
 };
@@ -925,6 +964,86 @@ async function saveData(name,blob,fallback){
 /* ================= inicio ================= */
 
 /* ================= maestro, modo operario, teclado ================= */
+/* ================= EQUIVALENCIAS (unidad de conteo → unidad ERP) ================= */
+function factItems(){return erpDraft&&erpDraft.items&&erpDraft.items.length?erpDraft.items:(erp&&!erp.maestro?erp.items:[])}
+let factFilter="pend";
+function saveFact(){store.set("inv_fact",FACT);for(const arr of [erpDraft&&erpDraft.items,erp&&!erp.maestro&&erp.items])if(arr)enrich(arr);if(erp&&!erp.maestro)store.set("inv_erp",erp);renderFactSum()}
+function setFact(cod,ce,f){const k=key(cod);ce=norm(ce).toUpperCase();f=num(f);
+  if(ce&&f!=null&&f>0&&!(ce==="UNIDAD"&&f===1))FACT[k]={ce,f};else delete FACT[k]}
+function renderFactSum(){
+  const it=enrich(factItems()), kg=it.filter(i=>UMN(i.um)==="kg"&&!FACT[key(i.cod)]), mm=it.filter(i=>UMN(i.um)==="m"), con=it.filter(i=>FACT[key(i.cod)]), pend=mm.filter(i=>!FACT[key(i.cod)]), un=it.filter(i=>UMN(i.um)==="un"&&!FACT[key(i.cod)]);
+  $("#factSum").innerHTML=`<span class="pill p-ok">${fmt(con.length)} con equivalencia</span><span class="pill p-info">${fmt(un.length)} por unidad (1 a 1)</span><span class="pill p-info">${fmt(kg.length)} en kg (se pesan)</span>${pend.length?`<span class="pill p-warn">${fmt(pend.length)} en metros sin rollo definido</span>`:""}`+
+    (it.length&&!it.some(i=>i.um)?`<span class="small muted">El informe no tiene columna de Unidad elegida: busca los productos a mano o carga la plantilla.</span>`:"");
+}
+function renderFact(){
+  const items=factItems(); $("#factCard").hidden=!items.length; if(!items.length)return;
+  if(typeof renderSg==="function")renderSg();
+  renderFactSum();
+  $$("#factChips .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.f===factFilter));
+  const q=deacc($("#factQ").value);
+  let list=items.filter(i=>factFilter==="todos"||(factFilter==="con"?!!FACT[key(i.cod)]:(UMN(i.um)==="m"&&!FACT[key(i.cod)])));
+  if(q)list=items.filter(i=>deacc(i.cod+" "+i.ean+" "+i.desc).includes(q));
+  const tot=list.length; list=list.slice(0,80);
+  $("#factTbl").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad ERP</th><th>El contador cuenta en</th><th class="num">1 equivale a</th><th></th></tr></thead><tbody>`+
+    (list.length?list.map((i,n)=>{const x=FACT[key(i.cod)]||{};return `<tr><td class="code">${esc(i.cod)}</td><td class="desc">${esc(i.desc)}${i.sg?`<div class="small muted">${esc(i.sg)}</div>`:""}</td><td>${esc(umTxt(i.um))}${UMN(i.um)==="kg"&&!FACT[key(i.cod)]?` <span class="pill p-info">pesar</span>`:""}</td>
+      <td><input list="ceList" data-n="${n}" data-k="ce" value="${esc(x.ce||"")}" placeholder="${UMN(i.um)==="un"?"UNIDAD":"ROLLO, SACO…"}" style="width:130px;padding:5px 8px;text-transform:uppercase"></td>
+      <td class="num"><input inputmode="decimal" data-n="${n}" data-k="f" value="${x.f!=null?String(x.f).replace(".",","):""}" placeholder="1" style="width:80px;padding:5px 8px;text-align:right"></td>
+      <td class="small muted">${esc(umTxt(i.um))}</td></tr>`}).join(""):`<tr><td colspan="6" class="muted">${factFilter==="pend"&&!q?"No hay productos pendientes. Todos los productos en metros tienen rollo definido. Busca uno o usa \"Todos\".":"Sin resultados."}</td></tr>`)+
+    (tot>80?`<tr><td colspan="6" class="muted">… ${fmt(tot-80)} más. Usa la búsqueda o la plantilla Excel.</td></tr>`:"")+"</tbody>";
+  $$("#factTbl input").forEach(inp=>inp.onchange=()=>{const i=list[+inp.dataset.n];const row=inp.closest("tr");
+    setFact(i.cod,row.querySelector("[data-k=ce]").value,row.querySelector("[data-k=f]").value);saveFact();
+    const x=FACT[key(i.cod)];const ci=row.querySelector("[data-k=ce]");ci.value=norm(ci.value).toUpperCase();if(x)toast(`1 ${x.ce} = ${fmt2(x.f)} ${umTxt(i.um)}`)});
+}
+$$("#factChips .chip").forEach(b=>b.onclick=()=>{factFilter=b.dataset.f;renderFact()});
+$("#factQ").oninput=renderFact;
+$("#btnFactTpl").onclick=()=>{
+  const it=factItems();if(!it.length)return;
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetFrom(it.map(i=>{const x=FACT[key(i.cod)];return {"Código":i.cod,"Descripción":i.desc,"Unidad ERP":umTxt(i.um),"Cuenta en":x?x.ce:(UMN(i.um)==="un"?"UNIDAD":""),"Factor":x?x.f:(UMN(i.um)==="un"?1:"")}})),"Equivalencias");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([["Cómo llenar"],["Cuenta en: lo que cuenta la persona en bodega (ROLLO, SACO, BARRA, CAJA…)."],["Factor: cuánto equivale 1 de eso en la unidad del ERP. Ej: ERP en metros, ROLLO de 50 m → Factor 50."],["Productos que se cuentan por unidad: deja UNIDAD y 1, o déjalos en blanco."]]),"Instrucciones");
+  saveWb(wb,"Equivalencias_"+stamp()+".xlsx");
+};
+$("#btnFactUp").onclick=()=>$("#fileFact").click();
+$("#fileFact").onchange=async e=>{const file=e.target.files[0];e.target.value="";if(!file)return;
+  try{const wb=await readFile(file);const aoa=sheetAoa(wb.Sheets[wb.SheetNames[0]]);
+    const h=detectHeader(aoa),hdr=(aoa[h]||[]).map(deacc);
+    const fx=re=>hdr.findIndex(x=>re.test(x));
+    const ci=fx(/^c[oó]d(igo)?\.?\s*(de\s*)?(prod|art|item)|^c[oó]digo$|^cod\.?$/), um=fx(/medida|^u\.?\s*m\.?$|^unidad$|unidad erp/), fi=fx(/conversi|factor|equival/),
+          ce=fx(/cuenta/), sg=fx(/sub\s*-?\s*grupo|^grupo|familia/), de=fx(/^producto$|descrip/);
+    if(ci<0||fi<0)throw new Error("El archivo debe tener una columna de código y una de conversión (o Factor).");
+    let nm=0,nu=0,nk=0,nkf=0,no=0,cnt=0;
+    const kgName=()=>"CAJA";   // KG con conversión: se cuentan CAJAS y se multiplica por los kg de la caja
+    for(const r of aoa.slice(h+1)){const c=codeStr(r[ci]);if(!c||JUNK.test(c))continue;cnt++;
+      const k=key(c), u=um>=0?norm(r[um]):"", U=UMN(u), f=num(r[fi]);
+      if(u||sg>=0)MASTER[k]={um:u||(MASTER[k]||{}).um||"",sg:sg>=0?norm(r[sg]):((MASTER[k]||{}).sg||""),desc:de>=0?norm(r[de]):((MASTER[k]||{}).desc||"")};
+      let name=ce>=0?norm(r[ce]).toUpperCase():"";
+      if(U==="kg"){                                            // kilos: con conversión se cuentan bultos; sin conversión se pesan
+        if(f!=null&&f>0&&f!==1){setFact(c,name||kgName(de>=0?r[de]:""),f);nkf++}else{delete FACT[k];nk++}continue}
+      if(f==null||f<=0||f===1){if(!name||name==="UNIDAD"){delete FACT[k]}else setFact(c,name,f||1);U==="m"?no++:nu++;continue}
+      if(!name)name=U==="m"?"ROLLO":"PAQUETE";
+      setFact(c,name,f);U==="m"?nm++:no++;
+    }
+    store.set("inv_master",MASTER);saveFact();renderFact();
+    const items=factItems(), miss=items.length?Object.keys(MASTER).filter(k=>!items.some(i=>key(i.cod)===k)).length:0;
+    $("#factLoadRes").innerHTML=`<div class="notice">Archivo <b>${esc(file.name)}</b>: ${fmt(cnt)} productos leídos · <b>${fmt(nm)}</b> en metros con ROLLO · <b>${fmt(nkf)}</b> en kg con conversión (se cuentan CAJAS) · <b>${fmt(nk)}</b> en kg sin conversión (se pesan) · <b>${fmt(nu)}</b> por unidad 1 a 1${no?` · ${fmt(no)} otros`:""}${miss?`<br><span class="small muted">${fmt(miss)} códigos del archivo no están en el informe ERP cargado ahora (se guardan igual para próximos conteos).</span>`:""}</div>`;
+    toast("Equivalencias cargadas");
+  }catch(err){toast(err.message||String(err))}};
+
+/* ---- subgrupos para crear conteos parciales ---- */
+let sgOff=new Set(store.get("inv_sgoff",[]));
+function sgAllList(){const m=new Map();for(const i of enrich(factItems())){const g=i.sg||"(sin subgrupo)";m.set(g,(m.get(g)||0)+1)}return [...m].sort((a,b)=>a[0].localeCompare(b[0]))}
+function sgSelected(){const all=sgAllList();if(all.length<2)return null;const on=all.filter(([g])=>!sgOff.has(g));return on.length===all.length?null:new Set(on.map(([g])=>g))}
+function renderSg(){
+  const all=sgAllList(); $("#sgBox").hidden=all.length<2; if(all.length<2)return;
+  const q=deacc($("#sgQ").value), on=all.filter(([g])=>!sgOff.has(g));
+  $("#sgInfo").textContent=on.length===all.length?`(todos: ${fmt(all.length)})`:`(${fmt(on.length)} de ${fmt(all.length)} · ${fmt(on.reduce((a,x)=>a+x[1],0))} productos)`;
+  $("#sgList").innerHTML=all.filter(([g])=>!q||deacc(g).includes(q)).map(([g,n])=>`<label class="small"><input type="checkbox" data-g="${esc(g)}" ${sgOff.has(g)?"":"checked"}> ${esc(g)} <span class="muted">(${fmt(n)})</span></label>`).join("");
+  $$("#sgList input").forEach(c=>c.onchange=()=>{c.checked?sgOff.delete(c.dataset.g):sgOff.add(c.dataset.g);store.set("inv_sgoff",[...sgOff]);renderSg()});
+}
+$("#sgAll").onclick=()=>{sgOff.clear();store.set("inv_sgoff",[]);renderSg()};
+$("#sgNone").onclick=()=>{sgAllList().forEach(([g])=>sgOff.add(g));store.set("inv_sgoff",[...sgOff]);renderSg()};
+$("#sgQ").oninput=renderSg;
+
 /* ================= PANEL: crear conteo y compartir link ================= */
 const GH="https://api.github.com", RAW="https://gist.githubusercontent.com/";
 const DEFAULT_APP="https://jorgecelpa1989-gif.github.io/Conteo--Bodega/";
@@ -968,7 +1087,10 @@ $("#btnCrear").onclick=async()=>{
   const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
   const vv=$("#cVence").value, ahora=new Date();
   const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
-  const m={app:"conteo-bodega",v:2,nombre,vence,creado:ahora.toISOString(),origen:d.file,productos:d.items.length,items:d.items.map(i=>[i.cod,i.ean,i.desc,i.um])};
+  enrich(d.items);
+  const sel=sgSelected(), its=sel?d.items.filter(i=>sel.has(i.sg||"(sin subgrupo)")):d.items;
+  if(!its.length)return toast("Elige al menos un subgrupo");
+  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
   try{
     const r=await fetch(GH+"/gists",{method:"POST",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json","Content-Type":"application/json"},
@@ -978,7 +1100,7 @@ $("#btnCrear").onclick=async()=>{
     const g=await r.json(), raw=g.files["conteo.json"].raw_url;
     const mm=raw.match(/^https:\/\/gist\.githubusercontent\.com\/([\w-]+)\/([0-9a-f]+)\/raw\/([0-9a-f]+)\/conteo\.json$/);
     if(!mm)throw new Error("Respuesta inesperada de GitHub");
-    const c={id:g.id,nombre,vence,creado:m.creado,productos:m.productos,link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
+    const c={id:g.id,nombre,vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
     conteos.unshift(c);store.set("inv_conteos",conteos);
     // en el PC queda cargado el stock completo para cruzar después
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
@@ -1000,7 +1122,7 @@ function showCreated(c){
   const box=$("#crearRes");box.dataset.id=c.id;
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
-    <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
+    <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
     <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div>
     <div class="small" style="border-top:1px solid var(--line);padding-top:8px">Cuando el contador te confirme que <b>ya lo abrió</b>, cierra el link para que no se pueda abrir en otro celular.</div>
@@ -1058,7 +1180,7 @@ function checkConteoLink(){
 function applyConteo(m,id){
   delete $("#conteoBanner").dataset.exp;
   erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null},
-    items:m.items.map(([cod,ean,desc,um])=>({cod,ean:ean||"",desc:desc||"",um:um||"",stock:null,costo:null,ubic:""}))};
+    items:m.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1,stock:null,costo:null,ubic:""}))};
   store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";store.set("inv_cfg",cfg);
   buildIndex();updStatus();applyMode();setUbic("",true);clearProduct();renderRecent();renderSess();
   $("#last").innerHTML=`<div class="d">Listo para contar</div><div class="c">${esc(m.nombre)} · ${fmt(erp.items.length)} productos</div>`;
@@ -1068,7 +1190,7 @@ function applyConteo(m,id){
 
 function setMaestro(m,silent){
   erp={file:"Maestro "+new Date(m.version).toLocaleDateString("es-CL"),at:m.version,version:m.version,maestro:true,
-    items:m.items.map(([cod,ean,desc,um])=>({cod,ean:ean||"",desc:desc||"",um:um||"",stock:null,costo:null,ubic:""}))};
+    items:m.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1,stock:null,costo:null,ubic:""}))};
   store.set("inv_erp",erp);buildIndex();updStatus();applyMode();
   if(!silent)toast("Lista de productos actualizada: "+fmt(erp.items.length));
 }
@@ -1106,7 +1228,7 @@ function checkExpiry(){
   return exp;
 }
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
-updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();
+updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();
 if(!checkConteoLink())loadMaestro();
 const h=(location.hash||"").slice(1);
 show(isOp()?"contar":["erp","contar","importar","resultado"].includes(h)?h:(erp?"contar":"erp"));
