@@ -1554,9 +1554,9 @@ function renderConteosOnly(){
   const hasN=conteos.some(c=>c.nube);
   $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
    (conteos.length?conteos.map((c,i)=>{
-     if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&x.finalizado)c.fin=true;
+     if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&(x.finalizado||x.terminado))c.fin=true;
        return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
-       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&!x.abierto&&!x.finalizado?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&!x.finalizado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
+       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&!x.abierto&&!x.finalizado?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
      return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
     <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
     <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
@@ -1632,7 +1632,7 @@ async function crearNube(m,its,sel,rot){
 let nubeLive=new Map(), nubeAt=null, nubeBusy=false;
 async function refreshNube(silent){
   if(!nubeOn()||nubeBusy)return;nubeBusy=true;
-  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();renderConteosOnly();renderLive()}
+  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}renderConteosOnly();renderLive()}
   catch(e){if(!silent)toast(sbMsg(e))}
   finally{nubeBusy=false}
 }
@@ -1643,8 +1643,8 @@ function hace(t){const m=Math.round((Date.now()-Date.parse(t))/60000);return m<1
 function liveEstado(x){
   if(!x)return ["","Consultando…",""];
   const ult=[x.visto,x.ultimo_envio,x.abierto].filter(Boolean).sort().at(-1);
-  if(x.finalizado)return ["end","Finalizado por ti",`el ${fmtDT(x.finalizado)}`];
   if(x.terminado)return ["end","Terminó el conteo",`a las ${hhmm(x.terminado)}`];
+  if(x.finalizado)return ["end","Finalizado por ti",`el ${fmtDT(x.finalizado)}`];
   if(!x.abierto)return isVenc(x.vence)?["off","Venció sin abrir",""]:["","Aún no abre el link",`vence ${fmtDT(x.vence)}`];
   const on=ult&&Date.now()-Date.parse(ult)<150000;
   if(isVenc(x.vence))return ["off","Conteo vencido",ult?`última señal ${hace(ult)}`:""];
@@ -1656,7 +1656,7 @@ function renderLive(){
   if(!nubeOn()){box.innerHTML="";return}
   let list;
   if(rSel&&rSel!=="*"&&rSel!=="local")list=conteos.filter(c=>c.nube&&(c.id===rSel||c.reconteoDe===rSel));
-  else if(rSel==="*")list=conteos.filter(c=>c.nube&&(!nubeLive.get(c.id)||!nubeLive.get(c.id).finalizado));
+  else if(rSel==="*")list=conteos.filter(c=>{if(!c.nube)return false;const x=nubeLive.get(c.id);return !x||!x.finalizado||(x.terminado&&Date.now()-Date.parse(x.terminado)<12*3600e3)});
   else list=[];
   if(!list.length){box.innerHTML="";return}
   const sinEstado=list.some(c=>{const x=nubeLive.get(c.id);return x&&x.abierto&&x.visto===undefined});
@@ -1681,6 +1681,8 @@ async function liveTick(force){
 setInterval(()=>{if(!document.hidden)liveTick(false)},20000);
 function nubeEstado(c,x){
   if(!x)return ['<span class="pill p-mut">…</span>',""];
+  const avT=()=>`${fmt(x.contados)} de ${fmt(x.productos)} productos · ${fmt(x.n_lecturas)} lecturas${x.contador?" · "+esc(x.contador):""}<br><span class="muted">terminó a las ${hhmm(x.terminado)}</span>`;
+  if(x.terminado)return ['<span class="pill p-ok">Terminado</span>',avT()];
   if(x.finalizado)return ['<span class="pill p-mut">Finalizado</span>',""];
   if(!x.abierto)return isVenc(x.vence)?['<span class="pill p-warn">Venció sin abrir</span>',""]:['<span class="pill p-info">Sin abrir</span>',""];
   const av=`${fmt(x.contados)} de ${fmt(x.productos)} productos · ${fmt(x.n_lecturas)} lecturas${x.contador?" · "+esc(x.contador):""}${x.ultimo_envio?`<br><span class="muted">último envío ${new Date(x.ultimo_envio).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}</span>`:""}`;
