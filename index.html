@@ -145,6 +145,15 @@ details summary{cursor:pointer;font-weight:600}
 body.op nav.tabs{display:none}
 body.op .supOnly{display:none!important}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.mpSides{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mpSide{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.mpSide .rl{font:700 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.rolBtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.rolBtn{display:flex;flex-direction:column;align-items:center;gap:6px;padding:22px 10px;border:2px solid var(--primary);border-radius:12px;background:var(--panel);font:700 17px var(--font);color:var(--ink);cursor:pointer;text-align:center}
+.rolBtn[disabled]{opacity:.45;cursor:not-allowed}.rolBtn .big{font-size:30px}
+td .sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
+body.mov nav.tabs,body.mov #status{display:none!important}
+@media (max-width:640px){.mpSides{grid-template-columns:1fr}}
 </style>
 
 <header class="top"><div class="in">
@@ -154,7 +163,8 @@ body.op .supOnly{display:none!important}
   </div>
   <nav class="tabs" role="tablist">
     <button role="tab" data-v="erp" aria-selected="true">1 · Panel</button>
-    <button role="tab" data-v="contar" aria-selected="false">2 · Contar<span class="n" id="nScans">0</span></button>
+    <button role="tab" data-v="contar" aria-selected="false" hidden>Contar<span class="n" id="nScans">0</span></button>
+    <button role="tab" data-v="mp" aria-selected="false">2 · Entrega MP</button>
     <button role="tab" data-v="resultado" aria-selected="false">3 · Resultados</button>
   </nav>
 </div></header>
@@ -461,6 +471,184 @@ begin
 end $$;
 
 grant execute on function public.cb_latido(uuid, text), public.cb_terminar(uuid, text) to anon, authenticated;
+
+-- =====================================================================
+--  CONTEO DE BODEGA · Grupo Vector
+--  Actualización: ENTREGA Y RECEPCIÓN DE MATERIA PRIMA
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No toca los conteos ni sus lecturas. Se puede ejecutar más de una vez.
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+create table if not exists public.cb_mov (
+  id          uuid primary key default gen_random_uuid(),
+  nombre      text not null,
+  creado      timestamptz not null default now(),
+  vence       timestamptz,
+  finalizado  timestamptz,
+  token_hash  text not null,
+  items       jsonb not null,
+  meta        jsonb
+);
+
+-- Un lado por rol: E = entrega, R = recepción. Cada lado queda en un solo celular.
+create table if not exists public.cb_mov_lado (
+  mov           uuid not null references public.cb_mov(id) on delete cascade,
+  rol           text not null check (rol in ('E','R')),
+  device        text not null,
+  secret_hash   text not null,
+  persona       text,
+  abierto       timestamptz not null default now(),
+  visto         timestamptz,
+  terminado     timestamptz,
+  ultimo_envio  timestamptz,
+  n_lecturas    int not null default 0,
+  primary key (mov, rol)
+);
+
+create table if not exists public.cb_mov_lect (
+  mov       uuid not null references public.cb_mov(id) on delete cascade,
+  rol       text not null,
+  lid       text not null,
+  data      jsonb not null,
+  recibido  timestamptz not null default now(),
+  primary key (mov, rol, lid)
+);
+
+alter table public.cb_mov      enable row level security;
+alter table public.cb_mov_lado enable row level security;
+alter table public.cb_mov_lect enable row level security;
+revoke all on public.cb_mov, public.cb_mov_lado, public.cb_mov_lect from anon, authenticated;
+
+-- ---------- Supervisor ----------
+create or replace function public.cb_mov_crear(p_clave text, p_nombre text, p_vence timestamptz, p_items jsonb, p_meta jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex'); v_id uuid;
+begin
+  perform cb_check(p_clave);
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'sin_productos'; end if;
+  insert into cb_mov(nombre, vence, token_hash, items, meta)
+  values (left(p_nombre, 120), p_vence, extensions.crypt(v_token, extensions.gen_salt('bf')), p_items, p_meta)
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'token', v_token);
+end $$;
+
+create or replace function public.cb_mov_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'finalizado', m.finalizado, 'meta', m.meta,
+      'lados', coalesce((select jsonb_object_agg(l.rol, jsonb_build_object(
+          'persona', l.persona, 'abierto', l.abierto, 'visto', l.visto, 'terminado', l.terminado,
+          'ultimo_envio', l.ultimo_envio, 'n_lecturas', l.n_lecturas)) from cb_mov_lado l where l.mov = m.id), '{}'::jsonb)
+    ) order by m.creado desc)
+    from cb_mov m where m.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_lecturas(p_clave text, p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_agg(data || jsonb_build_object('rol', rol) order by data->>'t') from cb_mov_lect where mov = p_id), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_finalizar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_mov set finalizado = coalesce(finalizado, now()) where id = p_id;
+end $$;
+
+create or replace function public.cb_mov_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  delete from cb_mov where id = p_id;
+end $$;
+
+-- ---------- Celulares (quien entrega y quien recibe) ----------
+-- Sin p_rol: solo informa qué roles están tomados (para elegir). Con p_rol: toma ese rol en este celular.
+create or replace function public.cb_mov_abrir(p_id uuid, p_token text, p_device text, p_rol text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; l cb_mov_lado; v_secret text := encode(extensions.gen_random_bytes(16), 'hex'); v_mio text;
+begin
+  select * into m from cb_mov where id = p_id;
+  if not found or m.token_hash <> extensions.crypt(coalesce(p_token,''), m.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() then raise exception 'vencido'; end if;
+  select rol into v_mio from cb_mov_lado where mov = p_id and device = p_device limit 1;
+  if p_rol is null then
+    return jsonb_build_object('nombre', m.nombre, 'meta', m.meta, 'mio', v_mio,
+      'tomados', coalesce((select jsonb_object_agg(rol, coalesce(persona,'')) from cb_mov_lado where mov = p_id), '{}'::jsonb));
+  end if;
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if v_mio is not null and v_mio <> p_rol then raise exception 'otro_rol'; end if;
+  select * into l from cb_mov_lado where mov = p_id and rol = p_rol for update;
+  if found and l.device <> p_device then raise exception 'rol_tomado'; end if;
+  if found then
+    update cb_mov_lado set secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')), visto = now(), terminado = null where mov = p_id and rol = p_rol;
+  else
+    insert into cb_mov_lado(mov, rol, device, secret_hash, visto) values (p_id, p_rol, p_device, extensions.crypt(v_secret, extensions.gen_salt('bf')), now());
+  end if;
+  return jsonb_build_object('nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'items', m.items, 'meta', m.meta, 'secret', v_secret, 'rol', p_rol,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_mov_lect where mov = p_id and rol = p_rol), '[]'::jsonb));
+end $$;
+
+create or replace function public.cb_mov_lado_ok(p_id uuid, p_rol text, p_secret text) returns cb_mov_lado
+language plpgsql security definer set search_path = public, extensions as $$
+declare l cb_mov_lado;
+begin
+  select * into l from cb_mov_lado where mov = p_id and rol = p_rol;
+  if not found or l.secret_hash <> extensions.crypt(coalesce(p_secret,''), l.secret_hash) then
+    perform pg_sleep(0.5); raise exception 'no_autorizado';
+  end if;
+  return l;
+end $$;
+
+create or replace function public.cb_mov_enviar(p_id uuid, p_rol text, p_secret text, p_persona text, p_lecturas jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; n int;
+begin
+  perform cb_mov_lado_ok(p_id, p_rol, p_secret);
+  select * into m from cb_mov where id = p_id;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() - interval '24 hours' then raise exception 'vencido'; end if;
+  if jsonb_typeof(p_lecturas) <> 'array' or jsonb_array_length(p_lecturas) > 20000 then raise exception 'datos_invalidos'; end if;
+  delete from cb_mov_lect where mov = p_id and rol = p_rol;
+  insert into cb_mov_lect(mov, rol, lid, data)
+    select p_id, p_rol, coalesce(e->>'lid', md5(e::text)), e from jsonb_array_elements(p_lecturas) e
+    on conflict (mov, rol, lid) do update set data = excluded.data;
+  get diagnostics n = row_count;
+  update cb_mov_lado set n_lecturas = n, ultimo_envio = now(), visto = now(), persona = left(p_persona, 80) where mov = p_id and rol = p_rol;
+  return jsonb_build_object('n', n, 'at', now());
+end $$;
+
+create or replace function public.cb_mov_latido(p_id uuid, p_rol text, p_secret text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_mov_lado_ok(p_id, p_rol, p_secret);
+  update cb_mov_lado set visto = now() where mov = p_id and rol = p_rol;
+end $$;
+
+create or replace function public.cb_mov_terminar(p_id uuid, p_rol text, p_secret text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_mov_lado_ok(p_id, p_rol, p_secret);
+  update cb_mov_lado set terminado = now(), visto = now() where mov = p_id and rol = p_rol;
+end $$;
+
+revoke execute on function public.cb_mov_lado_ok(uuid, text, text) from public, anon, authenticated;
+grant execute on function
+  public.cb_mov_crear(text, text, timestamptz, jsonb, jsonb), public.cb_mov_listar(text), public.cb_mov_lecturas(text, uuid),
+  public.cb_mov_finalizar(text, uuid), public.cb_mov_eliminar(text, uuid),
+  public.cb_mov_abrir(uuid, text, text, text), public.cb_mov_enviar(uuid, text, text, text, jsonb),
+  public.cb_mov_latido(uuid, text, text), public.cb_mov_terminar(uuid, text, text)
+to anon, authenticated;
 </script>
   </div>
 
@@ -569,6 +757,86 @@ grant execute on function public.cb_latido(uuid, text), public.cb_terminar(uuid,
 </section>
 
 <!-- ============ 3 IMPORTAR ============ -->
+<!-- ============ ENTREGA Y RECEPCIÓN DE MP (supervisor) ============ -->
+<section class="view" id="v-mp" hidden>
+  <div class="card">
+    <div class="eyebrow">Entrega y recepción de materia prima</div>
+    <h2>Nueva entrega</h2>
+    <p>Un solo link para dos personas: <b>quien entrega</b> escanea lo que sale y <b>quien recibe</b> escanea lo que llega, cada uno en su celular. Aquí ves las dos columnas lado a lado, en tiempo real y con las conversiones aplicadas.</p>
+    <div class="notice" id="mpNote" hidden></div>
+    <div class="row">
+      <label class="f" style="flex:1 1 240px">Nombre<input id="mpNombre" placeholder="Ej: Entrega MP a Producción · Turno mañana"></label>
+      <label class="f" style="flex:1 1 180px">Documento / referencia (opcional)<input id="mpRef" placeholder="Ej: OT 4512 · Vale 889"></label>
+      <label class="f" style="flex:0 1 170px">Vigencia del link<select id="mpVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label>
+    </div>
+    <div class="row"><button class="btn accent" id="btnMpCrear" style="font-size:16px;padding:12px 18px">OK · Crear entrega</button><span class="small muted" id="mpMsg"></span></div>
+    <div id="mpCreated"></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><h2>Entregas creadas</h2><span class="sep"></span><span class="small muted" id="mpAt"></span><button class="btn sm" id="btnMpRefresh">Actualizar</button></div>
+    <div class="tbl"><table id="mpTbl"></table></div>
+    <div id="mpConfirm"></div>
+  </div>
+
+  <div class="card" id="mpCard" hidden>
+    <div class="eyebrow">Entrega vs Recepción</div>
+    <div class="row"><h2 id="mpTitle" style="margin:0"></h2><span class="sep"></span><button class="btn primary" id="btnMpTraer">Actualizar lecturas</button><button class="btn" id="btnMpExp">Excel</button></div>
+    <div class="mpSides" id="mpSides"></div>
+    <div class="kpis" id="mpKpis"></div>
+    <div class="row"><div class="chips" id="mpChips"></div><span class="sep"></span><input id="mpQ" placeholder="Buscar código o descripción" style="flex:0 1 260px"></div>
+    <div class="tbl"><table id="mpRes"></table></div>
+    <div class="small muted">Diferencia = recibido − entregado, en la unidad del ERP. Cuando el producto tiene equivalencia (rollos, cajas…), debajo se muestra también en esa unidad.</div>
+    <details id="mpDetBox"><summary class="small" style="cursor:pointer;font-weight:600">Detalle de lecturas</summary>
+      <div class="tbl" style="margin-top:8px"><table id="mpDet"></table></div>
+    </details>
+  </div>
+</section>
+
+<!-- ============ ENTREGA / RECEPCIÓN (celular) ============ -->
+<section class="view" id="v-opmov" hidden>
+  <div id="omBanner"></div>
+  <div id="omPick"></div>
+  <div id="omWork" hidden>
+    <div class="cbox" id="omHead"></div>
+    <div class="card contarCard">
+      <div id="omCamWrap" class="camWrap" hidden>
+        <div class="row" style="justify-content:space-between"><span class="camTarget">Leyendo producto</span><button class="btn sm" id="omCamStop">Cerrar cámara</button></div>
+        <div id="omReader"></div>
+        <div class="small muted" id="omCamMsg"></div>
+      </div>
+      <label class="f"><span id="omUserLbl">Tu nombre</span><input id="omUser" placeholder="Tu nombre" autocapitalize="characters"></label>
+      <div class="step">
+        <div class="eyebrow">1 · Producto</div>
+        <div class="scanbox">
+          <input id="omScan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea o digita el código">
+          <button class="btn accent" id="omCam">Cámara</button>
+        </div>
+        <div class="pending" id="omPending" hidden></div>
+        <div class="sugg" id="omSugg" hidden></div>
+      </div>
+      <div class="step">
+        <div class="eyebrow" id="omQtyEb">2 · Cantidad</div>
+        <div class="scanbox">
+          <input id="omQty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off">
+          <button class="btn primary" id="omOk" style="padding-inline:26px;font-size:18px;min-width:84px;justify-content:center">OK</button>
+        </div>
+      </div>
+    </div>
+    <div class="card contarCard">
+      <div class="row"><h2 style="margin:0">Mis lecturas</h2><span class="sep"></span><span class="small muted" id="omInfo"></span></div>
+      <div class="tbl"><table id="omList"></table></div>
+    </div>
+    <div class="card contarCard">
+      <div class="eyebrow">Al terminar</div>
+      <div id="omSync"></div>
+      <p class="small">Tus lecturas se envían solas al supervisor. Cuando termines, toca el botón: tus lecturas quedan guardadas y este celular se libera.</p>
+      <button class="btn danger" id="omFin" style="justify-content:center">Terminar en este celular…</button>
+      <div id="omConfirm"></div>
+    </div>
+  </div>
+</section>
+
 <section class="view" id="v-importar" hidden>
   <div class="card" id="nubeImp" hidden>
     <div class="eyebrow">Envío automático</div>
@@ -752,6 +1020,8 @@ function show(v){
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
   if(v==="importar")renderImpDone();
   if(v!=="contar")stopCam();
+  if(v==="mp"&&typeof mpEnter==="function")mpEnter();
+  if(v!=="opmov"&&typeof omStopCam==="function")omStopCam();
   try{history.replaceState(null,"","#"+v)}catch(e){}
 }
 $$("nav.tabs button").forEach(b=>b.onclick=()=>show(b.dataset.v));
@@ -1859,7 +2129,7 @@ const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.log
 /* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
 function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(typeof gh!=="undefined"&&gh.login)||(erp&&!erp.maestro))}
 function lockScreen(msg,title,icon){
-  if(isOp()||isSupDevice())return false;
+  if(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn()))return false;
   if(typeof stopCam==="function")stopCam();
   document.body.classList.add("locked");
   $("#lockBox").innerHTML=`<div class="lockCard"><div class="big">${icon||"🔒"}</div><h2>${esc(title||"Esta app se usa con el link de tu supervisor")}</h2><p>${msg||"Abre el link de conteo que te enviaron por WhatsApp."}</p></div>`;
@@ -1867,6 +2137,8 @@ function lockScreen(msg,title,icon){
 }
 function lockFromBanner(title){const t=($("#conteoBanner").textContent||"").trim();lockScreen(esc(t),title||"No se puede abrir este link","⚠️")}
 function applyMode(){
+  if(typeof movOn==="function"&&movOn()){document.body.classList.add("mov");document.body.classList.remove("op");if($("#v-opmov").hidden)show("opmov");return}
+  document.body.classList.remove("mov");
   const op=isOp();
   document.body.classList.toggle("op",op);
   if(op&&$("#v-contar").hidden)show("contar");
@@ -1897,14 +2169,316 @@ function checkExpiry(){
   return exp;
 }
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
+/*MP-START*/
+/* =====================================================================
+   ENTREGA Y RECEPCIÓN DE MATERIA PRIMA
+   Supervisor: crea la entrega (un link para dos personas) y ve Entrega vs Recepción en vivo.
+   Celulares: cada uno elige su rol (entrega / recepción) y escanea con las mismas conversiones del conteo.
+   ===================================================================== */
+var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
+    movLect={}, movSeen={}, mpFilter="todos";
+const ROL={E:"Entrega",R:"Recepción"};
+const movMsg=e=>({rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que revise.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script supabase_entrega.sql en Supabase.":sbMsg(e)));
+function movCatalog(){
+  let its=(typeof erpDraft!=="undefined"&&erpDraft&&erpDraft.items&&erpDraft.items.length)?erpDraft.items:(erp&&!erp.maestro?erp.items:null);
+  if(!its||!its.length)return null;
+  enrich(its);return its;
+}
+function movLink(id,token){const ref=sbRef(SB.url);return appUrl()+"?mov="+id+"."+token+(ref?"&p="+ref:"&u="+encodeURIComponent(SB.url))+"&k="+encodeURIComponent(SB.key)}
+const movWa=m=>"https://wa.me/?text="+encodeURIComponent(`Entrega de materia prima: ${m.nombre}${m.ref?" ("+m.ref+")":""}\nAbre este link en tu celular y elige si ENTREGAS o RECIBES:\n${m.link}`);
+
+/* ---------- Panel: crear ---------- */
+function mpNote(){
+  const n=$("#mpNote");
+  if(!nubeOn()){n.hidden=false;n.innerHTML="Para usar entregas, conecta primero el envío automático (Supabase) en <b>1 · Panel</b>.";return false}
+  if(!movCatalog()){n.hidden=false;n.innerHTML="Carga el informe del ERP en <b>1 · Panel</b>: de ahí salen las descripciones, unidades y equivalencias que usan los celulares.";return false}
+  n.hidden=true;return true;
+}
+$("#btnMpCrear").onclick=async()=>{
+  if(!mpNote())return toast("Falta preparar el Panel (ver aviso)");
+  const its=movCatalog(), ahora=new Date(), vv=$("#mpVence").value;
+  const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+  const nombre=norm($("#mpNombre").value)||("Entrega MP "+ahora.toLocaleDateString("es-CL")+" "+hhmm(ahora)), ref=norm($("#mpRef").value);
+  const items=its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um]);
+  $("#btnMpCrear").disabled=true;$("#mpMsg").textContent="Creando…";
+  try{
+    const r=await rpc(SB,"cb_mov_crear",{p_clave:SB.admin,p_nombre:nombre,p_vence:vence,p_items:items,p_meta:{ref,productos:items.length}});
+    const m={id:r.id,nombre,ref,creado:ahora.toISOString(),vence,link:movLink(r.id,r.token)};
+    movs.unshift(m);store.set("inv_movs",movs);movSel=m.id;store.set("inv_movsel",movSel);
+    $("#mpNombre").value="";$("#mpRef").value="";
+    mpShowCreated(m);await refreshMov(true);
+  }catch(e){toast(movMsg(e))}
+  finally{$("#btnMpCrear").disabled=false;$("#mpMsg").textContent=""}
+};
+function mpShowCreated(m){
+  $("#mpCreated").innerHTML=`<div class="cbox" style="max-width:none">
+    <div><b>Entrega creada: ${esc(m.nombre)}</b>${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}</div>
+    <div class="small">Envía <b>este mismo link</b> a las dos personas. Al abrirlo, cada una elige <b>Entrego</b> o <b>Recibo</b>; cada rol queda amarrado a un solo celular.</div>
+    <input readonly id="mpLinkOut" value="${esc(m.link)}">
+    <div class="row"><a class="btn primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="mpCopy">Copiar link</button><button class="btn sm" id="mpCreatedX">Listo</button></div></div>`;
+  $("#mpCopy").onclick=()=>copyText(m.link,$("#mpLinkOut"));$("#mpCreatedX").onclick=()=>$("#mpCreated").innerHTML="";
+}
+
+/* ---------- Panel: estado en vivo ---------- */
+function ladoEstado(l,x){
+  if(!l)return x&&isVenc(x.vence)?["off","Venció sin abrir",""]:["","Aún no abre el link",""];
+  if(l.terminado)return ["end","Terminó",`a las ${hhmm(l.terminado)}`];
+  if(x&&x.finalizado)return ["end","Cerrado por ti",""];
+  const ult=[l.visto,l.ultimo_envio,l.abierto].filter(Boolean).sort().at(-1);
+  if(x&&isVenc(x.vence))return ["off","Vencido",ult?`última señal ${hace(ult)}`:""];
+  if(ult&&Date.now()-Date.parse(ult)<150000)return ["on",l.n_lecturas?"En línea · escaneando":"En línea · abrió el link",l.ultimo_envio?`último envío ${hace(l.ultimo_envio)}`:`abrió ${hace(l.abierto)}`];
+  return ["off","Sin señal",ult?`última señal ${hace(ult)}`:""];
+}
+function movEstado(x){
+  if(!x)return '<span class="pill p-mut">…</span>';
+  const L=x.lados||{};
+  if(L.E&&L.E.terminado&&L.R&&L.R.terminado)return '<span class="pill p-ok">Terminada</span>';
+  if(x.finalizado)return '<span class="pill p-mut">Cerrada</span>';
+  if(isVenc(x.vence))return '<span class="pill p-warn">Vencida</span>';
+  if(!L.E&&!L.R)return '<span class="pill p-info">Sin abrir</span>';
+  return '<span class="pill p-ok">En curso</span>';
+}
+const ladoCell=(l,x)=>{const [d,t,det]=ladoEstado(l,x);return `<div><span class="dot ${d}"></span><b>${t}</b></div><div class="small muted">${l&&l.persona?esc(l.persona)+" · ":""}${l?fmt(l.n_lecturas)+" lecturas":""}${det?" · "+det:""}</div>`};
+async function refreshMov(force){
+  if(!nubeOn()||movBusy)return;movBusy=true;
+  try{
+    const arr=await rpc(SB,"cb_mov_listar",{p_clave:SB.admin});
+    movLive=new Map((arr||[]).map(x=>[x.id,x]));movAt=new Date();
+    for(const x of movLive.values()){const L=x.lados||{};if(L.E&&L.E.terminado&&L.R&&L.R.terminado&&!x.finalizado&&movs.some(m=>m.id===x.id)){x.finalizado=new Date().toISOString();rpc(SB,"cb_mov_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}}
+    if(movSel){const x=movLive.get(movSel),L=(x&&x.lados)||{},sig=["E","R"].map(r=>L[r]?(L[r].ultimo_envio||"")+"|"+L[r].n_lecturas:"-").join("/");
+      if(force||movSeen[movSel]!==sig||!movLect[movSel]){try{movLect[movSel]=await rpc(SB,"cb_mov_lecturas",{p_clave:SB.admin,p_id:movSel})||[];movSeen[movSel]=sig}catch(e){}}}
+    renderMp();
+  }catch(e){if(force)toast(movMsg(e))}
+  finally{movBusy=false}
+}
+setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-mp").hidden)refreshMov(false)},15000);
+$("#btnMpRefresh").onclick=()=>refreshMov(true);
+$("#btnMpTraer").onclick=()=>refreshMov(true);
+function mpEnter(){mpNote();renderMp();refreshMov(true)}
+
+function renderMp(){
+  if($("#v-mp").hidden)return;
+  $("#mpAt").textContent=movAt?`actualizado ${hhmm(movAt)} · se refresca cada 15 s`:"";
+  $("#mpTbl").innerHTML=`<thead><tr><th>Entrega</th><th>Creada</th><th>Vence</th><th>Estado</th><th>Quien entrega</th><th>Quien recibe</th><th></th></tr></thead><tbody>`+
+    (movs.length?movs.map((m,i)=>{const x=movLive.get(m.id),L=(x&&x.lados)||{},open=x&&!x.finalizado&&!isVenc(x.vence);
+      return `<tr${m.id===movSel?' style="background:var(--info-bg)"':""}><td><b>${esc(m.nombre)}</b>${m.ref?`<div class="small muted">${esc(m.ref)}</div>`:""}</td><td>${fmtDT(m.creado)}</td><td>${fmtDT(m.vence)}</td><td>${movEstado(x)}</td>
+      <td class="small" style="white-space:normal;min-width:170px">${x?ladoCell(L.E,x):""}</td><td class="small" style="white-space:normal;min-width:170px">${x?ladoCell(L.R,x):""}</td>
+      <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm primary" data-mv="${i}">Ver</button>${open?`<a class="btn sm" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-mc="${i}">Copiar link</button><button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}">Quitar</button></div></td></tr>`}).join("")
+    :`<tr><td colspan="7" class="muted">Todavía no creas entregas.</td></tr>`)+"</tbody>";
+  $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=movs[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
+  $$("#mpTbl [data-mc]").forEach(b=>b.onclick=()=>copyText(movs[+b.dataset.mc].link));
+  $$("#mpTbl [data-mf]").forEach(b=>b.onclick=()=>{const m=movs[+b.dataset.mf];confirmBox(`Cerrar "${esc(m.nombre)}": los celulares ya no podrán enviar más lecturas.`,async()=>{try{await rpc(SB,"cb_mov_finalizar",{p_clave:SB.admin,p_id:m.id});await refreshMov(true);toast("Entrega cerrada")}catch(e){toast(movMsg(e))}},"#mpConfirm")});
+  $$("#mpTbl [data-mr]").forEach(b=>b.onclick=()=>{const m=movs[+b.dataset.mr];confirmBox(`Quitar "${esc(m.nombre)}" de esta lista (en Supabase queda guardada).`,()=>{movs=movs.filter(z=>z.id!==m.id);store.set("inv_movs",movs);if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}renderMp()},"#mpConfirm")});
+  renderMpCmp();
+}
+function mpRows(id){
+  const ls=movLect[id]||[], map=new Map();
+  for(const d of ls){const k=key(d.k||d.code);const r=map.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0};
+    if(!r.desc&&d.desc)r.desc=d.desc;const t=(+d.qty||0)*(+d.f||1);
+    if(d.rol==="E"){r.E=(r.E||0)+t;r.qE+=+d.qty||0;r.nE++}else{r.R=(r.R||0)+t;r.qR+=+d.qty||0;r.nR++}map.set(k,r)}
+  const x=movLive.get(id),L=(x&&x.lados)||{},rTerm=!!(L.R&&L.R.terminado);
+  return [...map.values()].map(r=>{r.dif=r.E!=null&&r.R!=null?r.R-r.E:null;
+    r.st=r.E!=null&&r.R==null?(rTerm?"norec":"porrec"):r.E==null?"noent":Math.abs(r.dif)<1e-9?"ok":r.dif<0?"falta":"sobra";return r});
+}
+const MPST={ok:["Cuadra","p-ok"],falta:["Recibió menos","p-bad"],sobra:["Recibió más","p-warn"],porrec:["Por recibir","p-info"],norec:["No recibido","p-bad"],noent:["Recibido sin entrega","p-bad"]};
+function mpQty(t,r,n){if(t==null)return "";const u=esc(umTxt(r.um));return `${fmt2(t)} <span class="small muted">${u}</span>${r.ce&&r.f!==1?`<span class="sub">${fmt2(n)} ${esc(plural(r.ce))}</span>`:""}`}
+function renderMpCmp(){
+  const card=$("#mpCard"), m=movs.find(z=>z.id===movSel);
+  if(!m){card.hidden=true;return}card.hidden=false;
+  const x=movLive.get(m.id),L=(x&&x.lados)||{};
+  $("#mpTitle").innerHTML=`${esc(m.nombre)}${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}`;
+  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div></div>`}).join("");
+  const rows=mpRows(m.id), cnt=s=>rows.filter(r=>s.includes(r.st)).length;
+  $("#mpKpis").innerHTML=[["Productos entregados",rows.filter(r=>r.E!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt(["ok"])],["Con diferencia",cnt(["falta","sobra","norec","noent"])],["Por recibir",cnt(["porrec"])]].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["falta","sobra","norec","noent"])],["ok","Cuadran",cnt(["ok"])],["porrec","Por recibir",cnt(["porrec"])]];
+  $("#mpChips").innerHTML=F.map(([f,l,n])=>`<button class="chip" data-f="${f}" aria-pressed="${mpFilter===f}">${l} · ${fmt(n)}</button>`).join("");
+  $$("#mpChips .chip").forEach(b=>b.onclick=()=>{mpFilter=b.dataset.f;renderMpCmp()});
+  const q=deacc($("#mpQ").value), ord={falta:0,norec:1,noent:2,sobra:3,porrec:4,ok:5};
+  let f=rows.filter(r=>mpFilter==="todos"||(mpFilter==="dif"?["falta","sobra","norec","noent"].includes(r.st):r.st===mpFilter));
+  if(q)f=f.filter(r=>deacc(r.cod+" "+r.desc).includes(q));
+  f.sort((a,b)=>ord[a.st]-ord[b.st]||Math.abs(b.dif||0)-Math.abs(a.dif||0)||String(a.cod).localeCompare(String(b.cod)));
+  $("#mpRes").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Entregado</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
+    (f.length?f.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)||'<span class="muted">(no está en el maestro)</span>'}</td><td>${esc(umTxt(r.um))}${r.ce&&r.f!==1?`<span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:""}</td>
+      <td class="num">${mpQty(r.E,r,r.qE)}</td><td class="num">${mpQty(r.R,r,r.qR)}</td>
+      <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${MPST[r.st][1]}">${MPST[r.st][0]}</span></td></tr>`).join("")
+    :`<tr><td colspan="7" class="muted">${rows.length?"Nada con este filtro.":"Todavía no llegan lecturas de los celulares."}</td></tr>`)+"</tbody>";
+  const ls=[...(movLect[m.id]||[])].sort((a,b)=>String(b.t).localeCompare(String(a.t)));
+  $("#mpDetBox").querySelector("summary").textContent=`Detalle de lecturas (${fmt(ls.length)})`;
+  $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Cantidad leída</th><th class="num">Total</th></tr></thead><tbody>`+
+    ls.map(d=>`<tr><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}</td><td class="num">${fmt2(d.qty)} <span class="small muted">${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))}</span></td><td class="num" style="font-weight:600">${fmt2((+d.qty||0)*(+d.f||1))} <span class="small muted">${esc(umTxt(d.um))}</span></td></tr>`).join("")+"</tbody>";
+}
+$("#mpQ").addEventListener("input",()=>renderMpCmp());
+$("#btnMpExp").onclick=()=>{
+  const m=movs.find(z=>z.id===movSel);if(!m)return;const rows=mpRows(m.id);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Equivalencia":r.ce&&r.f!==1?`1 ${r.ce} = ${r.f} ${umTxt(r.um)}`:"","Entregado":r.E??"","Entregado (equiv.)":r.ce&&r.f!==1&&r.E!=null?r.qE:"","Recibido":r.R??"","Recibido (equiv.)":r.ce&&r.f!==1&&r.R!=null?r.qR:"","Diferencia":r.dif??"","Estado":MPST[r.st][0]}))),"Entrega vs Recepción");
+  XLSX.utils.book_append_sheet(wb,sheetFrom((movLect[m.id]||[]).map(d=>({"Rol":ROL[d.rol]||d.rol,"Fecha hora":fmtDT(d.t),"Persona":d.user||"","Código":d.code,"Descripción":d.desc||"","Cantidad leída":d.qty,"Unidad leída":d.ce&&+d.f!==1?d.ce:umTxt(d.um),"Factor":+d.f||1,"Total (unidad ERP)":(+d.qty||0)*(+d.f||1),"Unidad ERP":umTxt(d.um)}))),"Lecturas");
+  saveWb(wb,("Entrega_MP_"+m.nombre).replace(/[^\w\-]+/g,"_").slice(0,60)+".xlsx");
+};
+
+/* =================== CELULAR =================== */
+var om=store.get("inv_om",null), omIdx=new Map(), omForce=false, omSyncing=false, omT=null, omHold=false, omCamI=null, omLast={c:"",miss:99};
+const omSave=()=>store.set("inv_om",om);
+const movOn=()=>!!(om&&om.rol&&!om.fin&&(omForce||!isSupDevice()));
+function omIndex(){omIdx=new Map();if(!om||!om.items)return;om.items.forEach((it,i)=>{if(it.cod)omIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!omIdx.has(k))omIdx.set(k,i)})})}
+const omFind=c=>{const i=omIdx.get(key(c));return i==null?null:om.items[i]};
+function omItems(arr){return arr.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}
+async function checkMovLink(){
+  let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
+  const mv=q.get("mov");if(!mv)return false;
+  try{history.replaceState(null,"",location.pathname+"#opmov")}catch(e){}
+  omForce=true;document.body.classList.add("mov");document.body.classList.remove("locked","op");$("#lockBox").innerHTML="";show("opmov");
+  const [id,token]=mv.split(".");
+  const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), k=q.get("k")||"";
+  const ban=$("#omBanner");$("#omWork").hidden=true;$("#omPick").innerHTML="";
+  if(!/^[0-9a-f-]{36}$/.test(id||"")||!token||!url||!k){ban.innerHTML=`<div class="lockCard"><div class="big">⚠️</div><h2>El link está incompleto</h2><p>Pide que te lo reenvíen.</p></div>`;return true}
+  if(om&&om.id===id&&om.rol&&!om.fin){ban.innerHTML="";omEnter();omSync();return true}
+  ban.innerHTML=`<div class="notice">Abriendo la entrega…</div>`;
+  try{
+    const info=await rpc({url,key:k},"cb_mov_abrir",{p_id:id,p_token:token,p_device:cfg.dev});
+    if(info.mio){await omTake(id,token,url,k,info.mio);return true}
+    ban.innerHTML="";
+    const T=info.tomados||{}, ref=info.meta&&info.meta.ref;
+    $("#omPick").innerHTML=`<div class="cbox"><div class="eyebrow">Entrega de materia prima</div><h2 style="margin:0">${esc(info.nombre)}</h2>${ref?`<div class="small muted">${esc(ref)}</div>`:""}
+      <p style="margin:0">¿Qué vas a hacer en este celular?</p>
+      <div class="rolBtns">${["E","R"].map(r=>`<button class="rolBtn" data-rol="${r}" ${T[r]!==undefined?"disabled":""}><span class="big">${r==="E"?"📦":"📥"}</span>${r==="E"?"Yo ENTREGO":"Yo RECIBO"}<span class="small muted" style="font-weight:500">${T[r]!==undefined?"Ya lo tomó "+(esc(T[r])||"otro celular"):r==="E"?"Escaneo lo que sale":"Escaneo lo que llega"}</span></button>`).join("")}</div></div>`;
+    $$("#omPick [data-rol]").forEach(b=>b.onclick=async()=>{b.disabled=true;await omTake(id,token,url,k,b.dataset.rol)});
+  }catch(e){ban.innerHTML=`<div class="lockCard"><div class="big">⚠️</div><h2>No se puede abrir esta entrega</h2><p>${esc(movMsg(e))}</p></div>`}
+  return true;
+}
+async function omTake(id,token,url,k,rol){
+  const ban=$("#omBanner");
+  try{
+    if(om&&om.id!==id&&om.dirty&&!om.fin){await omSync();}
+    const m=await rpc({url,key:k},"cb_mov_abrir",{p_id:id,p_token:token,p_device:cfg.dev,p_rol:rol});
+    const loc=om&&om.id===id&&om.rol===rol&&!om.fin&&om.lect?om.lect:null, srv=Array.isArray(m.lect)?m.lect:[], keep=loc&&(loc.length>=srv.length||om.dirty)?loc:srv;
+    om={id,rol,nombre:m.nombre,ref:(m.meta&&m.meta.ref)||"",vence:m.vence,conf:{url,key:k,secret:m.secret},items:omItems(m.items),lect:keep||[],persona:(om&&om.persona)||cfg.user||"",dirty:keep!==srv,ver:0,syncAt:null,syncErr:"",fin:false};
+    omSave();ban.innerHTML="";$("#omPick").innerHTML="";omEnter();if(om.dirty)omSync();omLatido();
+    toast(rol==="E"?"Listo: escanea lo que entregas":"Listo: escanea lo que recibes");
+  }catch(e){ban.innerHTML=`<div class="lockCard"><div class="big">⚠️</div><h2>No se pudo tomar el rol</h2><p>${esc(movMsg(e))}</p></div>`;$("#omPick").innerHTML=""}
+}
+function omEnter(){
+  omIndex();document.body.classList.add("mov");document.body.classList.remove("locked","op");$("#lockBox").innerHTML="";
+  $("#omWork").hidden=false;$("#omUser").value=om.persona||"";
+  $("#omUserLbl").textContent=om.rol==="E"?"Quien entrega":"Quien recibe";
+  if($("#v-opmov").hidden)show("opmov");
+  omRender();
+}
+function omRender(){
+  if(!om)return;
+  const prods=new Set(om.lect.map(l=>key(l.k||l.code))).size, venc=isVenc(om.vence);
+  $("#omHead").innerHTML=`<div class="row"><span class="pill ${om.rol==="E"?"p-info":"p-ok"}" style="font-size:13px">${om.rol==="E"?"📦 ENTREGO":"📥 RECIBO"}</span><b style="flex:1;min-width:0">${esc(om.nombre)}</b></div>${om.ref?`<div class="small muted">${esc(om.ref)}</div>`:""}<div class="small muted">${fmt(prods)} productos · ${fmt(om.lect.length)} lecturas${om.vence?" · vence "+fmtDT(om.vence):""}</div>${venc?`<div class="notice">Esta entrega venció. Ya no se pueden registrar lecturas; toca Terminar.</div>`:""}`;
+  $("#omInfo").textContent=`${fmt(om.lect.length)} lecturas`;
+  const ls=[...om.lect].reverse();
+  $("#omList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td>
+     <td class="num" style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td>
+     <td><button class="btn sm" data-ol="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $$("#omList [data-ol]").forEach(b=>b.onclick=()=>{const lid=b.dataset.ol,l=om.lect.find(z=>z.lid===lid);if(!l)return;
+    confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{om.lect=om.lect.filter(z=>z.lid!==lid);omDirty();omRender();toast("Lectura quitada")},"#omConfirm");
+    $("#omConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
+  omRenderSync();
+}
+function omRenderSync(){
+  if(!om)return;let h;
+  if(omSyncing)h=`<span class="sync s-run">☁ Enviando…</span>`;
+  else if(om.syncErr)h=`<span class="sync s-bad">⚠ ${esc(om.syncErr)}</span> <button class="btn sm" id="omGo">Reintentar</button>`;
+  else if(om.dirty)h=`<span class="sync s-wait">⏳ ${navigator.onLine===false?"Sin señal: se enviará solo al volver":"Pendiente de envío"}</span> <button class="btn sm" id="omGo">Enviar ahora</button>`;
+  else h=`<span class="sync s-ok">☁ Enviado al supervisor${om.syncAt?" · "+hhmm(om.syncAt):""}</span>`;
+  $("#omSync").innerHTML=h;const g=$("#omGo");if(g)g.onclick=()=>{om.syncErr="";omSync()};
+}
+$("#omUser").onchange=e=>{const v=norm(e.target.value).toUpperCase();e.target.value=v;if(om){om.persona=v;omDirty()}cfg.user=v;store.set("inv_cfg",cfg)};
+function omPending(code){
+  const it=omFind(code),p=$("#omPending");p.hidden=false;p.className="pending"+(it?"":" bad");
+  const tot=om.lect.filter(l=>key(l.k||l.code)===key(it?it.cod:code)).reduce((a,l)=>a+(+l.qty||0),0);
+  p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${tot?` · ya registrado: ${fmt2(tot)} ${esc(it&&conv(it)?plural(it.ce):umTxt(it?it.um:""))}`:""}</div>`+
+    (it&&conv(it)?`<div class="conv">Ingresa en <b>${esc(plural(it.ce))}</b> · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</div>`:(it&&UMN(it.um)==="kg"?`<div class="conv">⚖ <b>Pesar.</b> Digita los <b>kg</b> de la balanza. Si pesas por partes, ingresa cada pesada con OK.</div>`:(it&&UMN(it.um)!=="un"?`<div class="conv">Digita la cantidad en <b>${esc(umTxt(it.um))}</b></div>`:"")));
+  $("#omQtyEb").textContent=it&&conv(it)?"2 · Cantidad de "+plural(it.ce):(it&&UMN(it.um)==="kg"?"2 · Kilos (pesar)":(it&&UMN(it.um)!=="un"?"2 · Cantidad en "+umTxt(it.um):"2 · Cantidad"));
+  return it;
+}
+function omRead(raw){
+  if(!om||isVenc(om.vence))return toast("Esta entrega venció");
+  let v=norm(raw);if(!v)return;
+  const it0=omFind(v);
+  if(!it0&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){omSearch(v);return}
+  $("#omSugg").hidden=true;v=codeStr(v);$("#omScan").value=v;
+  const it=omPending(v);audio.beep(!!it);
+  if(omCamI){omHold=true;$("#omCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
+  focusSel($("#omQty"));
+}
+function omSearch(v){
+  const w=deacc(v).split(" ").filter(Boolean), res=om.items.filter(i=>{const d=deacc(i.desc+" "+i.cod);return w.every(x=>d.includes(x))}).slice(0,12), box=$("#omSugg");box.hidden=false;
+  if(!res.length){box.innerHTML=`<button><span>No encontré "${esc(v)}". ¿Usarlo como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;omRead(v.replace(/\s+/g,""))};return}
+  box.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
+  $$("#omSugg button").forEach(b=>b.onclick=()=>{box.hidden=true;omRead(res[+b.dataset.n].cod)});
+}
+function omAdd(){
+  if(!om)return;if(isVenc(om.vence))return toast("Esta entrega venció");
+  const code=codeStr($("#omScan").value);if(!code){toast("Primero escanea o digita un producto");return focusSel($("#omScan"))}
+  const q=num($("#omQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#omQty"))}
+  if(!om.persona){const v=norm($("#omUser").value).toUpperCase();if(!v){toast("Escribe tu nombre arriba");return $("#omUser").focus()}om.persona=v}
+  const it=omFind(code);
+  const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:om.persona,t:new Date().toISOString()};
+  if(conv(it)){l.f=+it.f;l.ce=it.ce}
+  om.lect.push(l);omDirty();audio.beep(true);
+  $("#omQty").value="";omPending(code);
+  const pe=$("#omPending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${l.f?`${fmt2(q)} ${esc(plural(l.ce))} = ${fmt2(q*l.f)} ${esc(l.um)}`:fmt2(q)+(l.um&&l.um!=="un"?" "+esc(l.um):"")}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
+  omHold=false;omRender();
+  if(omCamI)$("#omCamMsg").textContent="Listo. Apunta al siguiente producto.";else focusSel($("#omScan"));
+}
+$("#omOk").onclick=omAdd;
+$("#omQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();omAdd()}});
+$("#omScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();omRead(e.target.value)}});
+$("#omScan").addEventListener("input",()=>{$("#omPending").hidden=true});
+document.addEventListener("keydown",e=>{if($("#v-opmov").hidden||$("#omWork").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#omScan"))},true);
+function omDirty(){om.dirty=true;om.ver=(om.ver||0)+1;omSave();clearTimeout(omT);omT=setTimeout(omSync,1500);omRenderSync()}
+async function omSync(){
+  if(!om||!om.conf||omSyncing||!om.dirty)return;
+  if(navigator.onLine===false){omRenderSync();return}
+  omSyncing=true;omRenderSync();const v=om.ver||0;
+  try{await rpc(om.conf,"cb_mov_enviar",{p_id:om.id,p_rol:om.rol,p_secret:om.conf.secret,p_persona:om.persona||"",p_lecturas:om.lect});
+    if((om.ver||0)===v)om.dirty=false;else{clearTimeout(omT);omT=setTimeout(omSync,1200)}
+    om.syncAt=new Date().toISOString();om.syncErr="";
+  }catch(e){om.syncErr=e.net?"":movMsg(e)}
+  finally{omSyncing=false;omSave();omRenderSync()}
+}
+async function omLatido(){if(!om||!om.conf||om.fin||document.hidden||navigator.onLine===false)return;try{await rpc(om.conf,"cb_mov_latido",{p_id:om.id,p_rol:om.rol,p_secret:om.conf.secret})}catch(e){}}
+setInterval(omLatido,60000);document.addEventListener("visibilitychange",()=>{if(!document.hidden&&movOn())omLatido()});
+setInterval(()=>{if(om&&om.dirty&&!omSyncing&&!om.fin)omSync()},20000);
+addEventListener("online",()=>{if(om&&om.dirty)omSync()});
+$("#omFin").onclick=async()=>{
+  if(!om)return;
+  if(om.dirty){await omSync();if(om.dirty)return toast("Aún hay lecturas sin enviar. Busca señal y toca Enviar ahora.")}
+  confirmBox(`Tus ${fmt(om.lect.length)} lecturas ya llegaron al supervisor. Se dará por terminada tu parte (${om.rol==="E"?"entrega":"recepción"}) y se borrará la lista de este celular.`,async()=>{
+    try{await rpc(om.conf,"cb_mov_terminar",{p_id:om.id,p_rol:om.rol,p_secret:om.conf.secret})}catch(e){}
+    omStopCam();const r=om.rol;om={id:om.id,rol:om.rol,fin:true,nombre:om.nombre};omSave();
+    $("#omWork").hidden=true;$("#omPick").innerHTML="";
+    $("#omBanner").innerHTML=`<div class="lockCard"><div class="big">✅</div><h2>${r==="E"?"Entrega":"Recepción"} terminada</h2><p>Tus lecturas llegaron al supervisor. Ya puedes cerrar esta página.</p></div>`;
+  },"#omConfirm");
+};
+/* cámara del celular de entrega */
+async function omOpenCam(){
+  if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
+  if(omCamI){$("#omCamWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
+  $("#omCamWrap").hidden=false;$("#omCamMsg").textContent="Pidiendo permiso de cámara…";
+  try{const F=Html5QrcodeSupportedFormats;
+    omCamI=new Html5Qrcode("omReader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.CODE_93,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
+    await omCamI.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.5,180)})},txt=>{txt=norm(txt);if(!txt||omHold)return;if(txt===omLast.c&&omLast.miss<10)return;omLast={c:txt,miss:0};omRead(txt)},()=>{omLast.miss++});
+    $("#omCamMsg").textContent="Apunta al código del producto.";$("#omCamWrap").scrollIntoView({block:"start",behavior:"smooth"});
+  }catch(e){omCamI=null;$("#omCamWrap").hidden=true;toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.")}
+}
+async function omStopCam(){if(omCamI){try{await omCamI.stop();omCamI.clear()}catch(e){}omCamI=null}omHold=false;const w=$("#omCamWrap");if(w)w.hidden=true}
+$("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
+
+/*MP-END*/
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
-{let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c"))}catch(e){}
+{let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
  if(!isOp()&&!isSupDevice())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
-checkNubeLink().then(x=>{if(!x&&!checkConteoLink())loadMaestro()});
+var _qMov=false;try{_qMov=!!new URLSearchParams(location.search).get("mov")}catch(e){}
+checkMovLink().then(mv=>{if(mv)return;if(movOn()){omEnter();omSync();return}checkNubeLink().then(x=>{if(!x&&!checkConteoLink())loadMaestro()})});
 if(nubeOn())refreshNube(true);
 if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
-show(isOp()?"contar":["erp","contar","resultado"].includes(h)?h:(erp?"contar":"erp"));
+if(!movOn()&&!_qMov)show(isOp()?"contar":["erp","mp","resultado"].includes(h)?h:"erp");
 </script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){const had=!!navigator.serviceWorker.controller;let rl=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(had&&!rl){rl=true;location.reload()}});addEventListener("load",()=>navigator.serviceWorker.register("sw.js").then(r=>{r.update();setInterval(()=>r.update(),30*60*1000)}).catch(()=>{}))}</script></body></html>
