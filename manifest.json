@@ -1,6 +1,6 @@
 {
-  "name": "Conteo de Bodega · Grupo Vector",
-  "short_name": "Conteo",
+  "name": "Control de Operaciones · Grupo Vector",
+  "short_name": "Operaciones",
   "description": "Inventario con pistola o cámara y cruce contra el ERP en Excel",
   "start_url": "./index.html#contar",
   "scope": "./",
