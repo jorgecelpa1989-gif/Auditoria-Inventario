@@ -784,7 +784,6 @@ to anon, authenticated;
   </div>
 </section>
 
-<!-- ============ 3 IMPORTAR ============ -->
 <!-- ============ ENTREGA Y RECEPCIÓN DE MP (supervisor) ============ -->
 <section class="view" id="v-mp" hidden>
  <div class="mpGrid">
@@ -888,27 +887,6 @@ to anon, authenticated;
       <button class="btn danger" id="omFin" style="justify-content:center">Terminar en este celular…</button>
       <div id="omConfirm"></div>
     </div>
-  </div>
-</section>
-
-<section class="view" id="v-importar" hidden>
-  <div class="card" id="nubeImp" hidden>
-    <div class="eyebrow">Envío automático</div>
-    <h2>Lecturas de los celulares</h2>
-    <p>Los conteos creados con envío automático llegan solos. Tráelos aquí para cruzarlos con el stock (reemplaza la versión anterior de cada conteo, no duplica).</p>
-    <div class="row"><button class="btn primary" id="btnTraerImp">Traer lecturas de la nube</button></div>
-  </div>
-  <div class="card">
-    <div class="eyebrow">Pistola con memoria · otros celulares</div>
-    <h2>Carga los archivos de conteo</h2>
-    <p>El Excel/CSV/TXT que baja la pistola al computador, o los archivos exportados desde otros celulares. Si el archivo trae solo códigos (uno por lectura), cada fila cuenta 1. Si trae cantidad, se usa.</p>
-    <div class="drop" id="dropImp" tabindex="0"><b>Arrastra uno o varios archivos aquí</b><span class="small">.xlsx · .xls · .csv · .txt · .dat</span></div>
-    <input type="file" id="fileImp" accept=".xlsx,.xls,.csv,.txt,.dat,.ods" multiple hidden>
-  </div>
-  <div id="impList" style="display:flex;flex-direction:column;gap:16px"></div>
-  <div class="card">
-    <h2>Archivos ya cargados</h2>
-    <div class="tbl"><table id="impDone"></table></div>
   </div>
 </section>
 
@@ -1046,14 +1024,36 @@ function codeStr(v){
   return s.toUpperCase();
 }
 let cfg=Object.assign({zeros:true,ubic:"",blind:true,keepQty:false,user:"",kbd:"num",operator:null},store.get("inv_cfg",{}));
-const qtyVal=()=>{const n=num($("#qty").value);return n==null?1:n};
 const key=c=>{let s=codeStr(c).replace(/\s+/g,""); if(cfg.zeros)s=s.replace(/^0+(?=.)/,""); return s};
 const isSci=v=>typeof v==="string"&&/^\d[.,]?\d*E\+\d+$/i.test(norm(v));
 
+
+/* ================= piezas compartidas (conteo, entregas, panel) ================= */
+// Vencimiento de un link: "hoy" = hoy a las 23:59; si no, N horas desde ahora.
+const venceDesde=(vv,ahora=new Date())=>vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+// Mensaje de WhatsApp listo para enviar.
+const waLink=t=>"https://wa.me/?text="+encodeURIComponent(t);
+// Búsqueda de productos por nombre o código (todas las palabras deben aparecer).
+const buscarNombre=(items,v)=>{const w=deacc(v).split(" ").filter(Boolean);return (items||[]).filter(i=>{const d=deacc(i.desc+" "+i.cod);return w.every(x=>d.includes(x))}).slice(0,12)};
+// Ayuda de conversión que ve el operario al leer un producto (rollos, cajas, pesar en kg…).
+function convHint(it,verbo,kgTxt){
+  return it&&conv(it)?`<div class="conv">${verbo} en <b>${esc(plural(it.ce))}</b> · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</div>`:(it&&UMN(it.um)==="kg"?`<div class="conv">⚖ <b>Pesar.</b> ${kgTxt}</div>`:(it&&UMN(it.um)!=="un"?`<div class="conv">Digita la cantidad en <b>${esc(umTxt(it.um))}</b></div>`:""));
+}
+const qtyLabel=(it,n)=>it&&conv(it)?n+" · Cantidad de "+plural(it.ce):(it&&UMN(it.um)==="kg"?n+" · Kilos (pesar)":(it&&UMN(it.um)!=="un"?n+" · Cantidad en "+umTxt(it.um):n+" · Cantidad"));
+// Lector de códigos con la cámara trasera (mismos formatos en conteo y entregas).
+async function iniciarLector(elId,onCode,onMiss){
+  const F=Html5QrcodeSupportedFormats;
+  const c=new Html5Qrcode(elId,{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.CODE_93,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
+  await c.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.5,180)})},onCode,onMiss);
+  return c;
+}
+async function detenerLector(c){if(c){try{await c.stop();c.clear()}catch(e){}}}
+// Señal de un celular: última vez que se supo de él y si está "en línea" (menos de 2,5 min).
+const ultimaSenal=x=>[x.visto,x.ultimo_envio,x.abierto].filter(Boolean).sort().at(-1);
+const enLinea=ult=>!!ult&&Date.now()-Date.parse(ult)<150000;
 /* ================= estado ================= */
 let erp=store.get("inv_erp",null);   // {file, at, items:[{cod,ean,desc,stock,costo,ubic,um}], merged}
 let scans=store.get("inv_scans",[]); // [{code,qty,ubic,t,src}]
-let imported=store.get("inv_imported",[]); // [{name,size,rows,qty,at}]
 let idx=new Map();
 function buildIndex(){idx=new Map(); if(!erp)return; erp.items.forEach((it,i)=>{ if(it.cod)idx.set(key(it.cod),i); if(it.ean){String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e); if(k&&!idx.has(k))idx.set(k,i)})}})}
 buildIndex();
@@ -1080,7 +1080,6 @@ function show(v){
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
   if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult)}
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
-  if(v==="importar")renderImpDone();
   if(v!=="contar")stopCam();
   if(v==="mp"&&typeof mpEnter==="function")mpEnter();
   if(v!=="opmov"&&typeof omStopCam==="function")omStopCam();
@@ -1256,7 +1255,6 @@ $("#btnDemo").onclick=()=>{
 /* ================= CONTAR ================= */
 const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||window.webkitAudioContext)();const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.frequency.value=ok?1600:320;o.type=ok?"sine":"square";g.gain.value=.08;o.connect(g);g.connect(this.ctx.destination);o.start();o.stop(this.ctx.currentTime+(ok?.08:.28))}catch(e){}
   try{navigator.vibrate&&navigator.vibrate(ok?40:[80,60,80])}catch(e){}}};
-cfg.mode="cant";
 let lastSrc="teclado", unsaved=false, nextArmed=0;
 const camOpen=()=>!!cam;
 $("#blind").checked=cfg.blind;cfg.keepQty=false;
@@ -1293,8 +1291,8 @@ function showPending(code){
   const [tot,here]=totalFor(code);
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):(erp?"Este código NO existe en la lista de productos":"Código leído")}</div>
     <div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${cfg.ubic?"":" · <b style=\"color:var(--warn)\">sin ubicación</b>"}${tot?` · ya contado: ${fmt2(here)}${it&&conv(it)?" "+esc(plural(it.ce)):(it&&UMN(it.um)!=="un"?" "+esc(umTxt(it.um)):"")} aquí${cfg.ubic?`, ${fmt2(tot)} en total`:""}`:""}</div>`+
-    (it&&conv(it)?`<div class="conv">Cuenta en <b>${esc(plural(it.ce))}</b> · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</div>`:(it&&UMN(it.um)==="kg"?`<div class="conv">⚖ <b>Pesar.</b> Digita los <b>kg</b> que marca la balanza. Si pesas por partes, ingresa cada pesada con OK: se van sumando.</div>`:(it&&UMN(it.um)!=="un"?`<div class="conv">Digita la cantidad en <b>${esc(umTxt(it.um))}</b></div>`:"")));
-  $("#stepQty .eyebrow").textContent=it&&conv(it)?"3 · Cantidad de "+plural(it.ce):(it&&UMN(it.um)==="kg"?"3 · Kilos (pesar)":(it&&UMN(it.um)!=="un"?"3 · Cantidad en "+umTxt(it.um):"3 · Cantidad"));
+    convHint(it,"Cuenta","Digita los <b>kg</b> que marca la balanza. Si pesas por partes, ingresa cada pesada con OK: se van sumando.");
+  $("#stepQty .eyebrow").textContent=qtyLabel(it,3);
   return it;
 }
 /* lee un producto (pistola, cámara, teclado o búsqueda). En "Con cantidad" espera la cantidad; en "Uno por uno" suma al tiro */
@@ -1307,14 +1305,13 @@ function productRead(raw,src){
   $("#sugg").hidden=true;
   v=codeStr(v); $("#scan").value=v; lastSrc=src;
   const it=showPending(v);
-  if(cfg.mode==="uno"){addScan(v,qtyVal(),src);if(!camOpen())focusSel($("#scan"));return}
   audio.beep(!!it||!erp); unsaved=true;
   if(camOpen()){camHold=true;$("#camMsg").textContent="Leído. Digita la cantidad y toca OK."}
   focusSel($("#qty"));
 }
 function nameSearch(v){
   const words=deacc(v).split(" ").filter(Boolean);
-  const res=(erp?erp.items:[]).filter(i=>{const d=deacc(i.desc+" "+i.cod);return words.every(w=>d.includes(w))}).slice(0,12);
+  const res=buscarNombre(erp?erp.items:[],v);
   const box=$("#sugg");box.hidden=false;
   if(!res.length){box.innerHTML=`<button><span>No encontré "${esc(v)}" por nombre. ¿Usarlo como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;productRead(v.replace(/\s+/g,""),"teclado")};return}
   box.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
@@ -1392,13 +1389,6 @@ $("#btnExpScans").onclick=()=>{
 };
 
 /* ---- modo y teclado ---- */
-function applyModeSeg(){
-  $$("#modeSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.m===cfg.mode));
-  $("#stepQty .eyebrow").textContent=cfg.mode==="uno"?"3 · Cantidad por lectura":"3 · Cantidad";
-  if(cfg.mode==="uno"&&!$("#qty").value)$("#qty").value="1";
-  applyKbd();
-}
-$$("#modeSeg button").forEach(b=>b.onclick=()=>{cfg.mode=b.dataset.m;store.set("inv_cfg",cfg);resetQty();applyModeSeg()});
 const KBD={num:["numeric","[0-9]*","Teclado numérico. Si el código tiene letras, cambia a ABC."],txt:["text","","Puedes escribir el código o parte del nombre del producto."],none:["none","","Modo pistola: no aparece el teclado del celular al escanear. Dispara la pistola Bluetooth."]};
 function applyKbd(){
   const k=KBD[cfg.kbd]?cfg.kbd:"num", el=$("#scan");
@@ -1435,9 +1425,7 @@ async function openCam(target){
   $("#camWrap").hidden=false;$("#camMsg").textContent="Pidiendo permiso de cámara…";
   document.activeElement&&document.activeElement.blur();
   try{
-    const F=Html5QrcodeSupportedFormats;
-    cam=new Html5Qrcode("reader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.CODE_93,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
-    await cam.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.5,180)})},onCamCode,()=>{lastCam.miss++});
+    cam=await iniciarLector("reader",onCamCode,()=>{lastCam.miss++});
     setCamTarget(target);
     $("#camWrap").scrollIntoView({block:"start",behavior:"smooth"});
   }catch(e){
@@ -1445,75 +1433,13 @@ async function openCam(target){
     toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.");
   }
 }
-async function stopCam(){if(cam){try{await cam.stop();cam.clear()}catch(e){}cam=null}camHold=false;$("#camWrap").hidden=true}
+async function stopCam(){if(cam){await detenerLector(cam);cam=null}camHold=false;$("#camWrap").hidden=true}
 $("#camUbic").onclick=()=>openCam("ubic");
 $("#camSku").onclick=()=>openCam("sku");
 $("#btnCamStop").onclick=stopCam;
 document.addEventListener("keydown",e=>{if($("#v-contar").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#scan"))},true);
-applyModeSeg();
+applyKbd();
 
-
-/* ================= IMPORTAR ================= */
-dropZone($("#dropImp"),$("#fileImp"),files=>files.forEach(importFile));
-async function importFile(file){
-  try{
-    const wb=await readFile(file);
-    let aoa=[];for(const n of wb.SheetNames){const a=sheetAoa(wb.Sheets[n]);if(a.length>aoa.length)aoa=a}
-    aoa=aoa.filter(r=>r.some(c=>norm(c)));
-    if(!aoa.length)return toast(file.name+": archivo vacío");
-    const ncol=Math.max(...aoa.map(r=>r.length));
-    // encabezado?
-    const first=aoa[0].map(deacc);
-    const hasHdr=first.some(c=>/(cod|barra|ean|cant|qty|item|sku|fecha|ubic)/.test(c))&&!first.some(c=>idx.has(key(c)));
-    const data=hasHdr?aoa.slice(1):aoa;
-    const hdr=hasHdr?aoa[0].map((c,i)=>norm(c)||"Col "+(i+1)):Array.from({length:ncol},(_,i)=>"Col "+(i+1));
-    // columna código: más coincidencias con ERP; si no, más dígitos largos
-    let codeCol=0,best=-1;
-    for(let i=0;i<ncol;i++){const vals=data.slice(0,500).map(r=>codeStr(r[i])).filter(Boolean);if(!vals.length)continue;
-      let sc=erp?vals.filter(v=>idx.has(key(v))).length*10:0; sc+=vals.filter(v=>/^[0-9A-Z\-]{4,}$/.test(v)).length; if(hasHdr&&/(cod|barra|ean|sku|item)/.test(deacc(hdr[i])))sc+=50;
-      if(vals.some(v=>/[\/:]/.test(v)))sc-=vals.length; if(sc>best){best=sc;codeCol=i}}
-    let qtyCol=-1;
-    for(let i=0;i<ncol;i++){if(i===codeCol)continue;const h=deacc(hdr[i]);const vals=data.slice(0,500).map(r=>r[i]);const nn=vals.filter(v=>{const n=num(v);return n!=null&&Math.abs(n)<1e6&&!/[\/:]/.test(String(v))}).length;
-      if(hasHdr&&/(cant|qty|conteo|unid|total)/.test(h)&&nn>vals.length*.7){qtyCol=i;break}
-      if(!hasHdr&&nn===vals.length&&vals.every(v=>String(v).length<=7)&&qtyCol<0)qtyCol=i;}
-    const eq=hasHdr?hdr.findIndex(h=>/unidad erp\)/.test(deacc(h))):-1;
-    if(eq>=0)qtyCol=eq;
-    const job={id:Math.random().toString(36).slice(2),file:file.name,size:file.size,hdr,data,codeCol,qtyCol,ubicCol:-1,ubic:"",applyF:eq<0};
-    if(hasHdr){const u=hdr.findIndex(h=>/ubic|bodega|zona|pasillo/i.test(deacc(h)));if(u>=0&&u!==codeCol&&u!==qtyCol)job.ubicCol=u}
-    renderJob(job);
-  }catch(e){console.error(e);toast(file.name+": no se pudo leer ("+(e.message||e)+")")}
-}
-function jobRows(j){const out=[];for(const r of j.data){const c=codeStr(r[j.codeCol]);if(!c||JUNK.test(c))continue;let q=j.qtyCol>=0?num(r[j.qtyCol]):1;if(q==null)q=1;
-  const it=erp&&findItem(c),row={code:c,qty:q,ubic:(j.ubicCol>=0?norm(r[j.ubicCol]).toUpperCase():"")||j.ubic};
-  if(j.applyF&&conv(it)){row.f=+it.f;row.ce=it.ce}if(it)row.um=umTxt(it.um);out.push(row)}return out}
-function renderJob(j){
-  let el=document.getElementById("job-"+j.id);
-  if(!el){el=document.createElement("div");el.className="card";el.id="job-"+j.id;$("#impList").prepend(el)}
-  const rows=jobRows(j), dup=imported.find(x=>x.name===j.file&&x.size===j.size);
-  const found=erp?rows.filter(r=>idx.has(key(r.code))).length:null;
-  const sel=(name,val,none)=>`<select data-k="${name}">${none?`<option value="-1">${none}</option>`:""}${j.hdr.map((h,i)=>`<option value="${i}" ${val===i?"selected":""}>${esc(h)}</option>`).join("")}</select>`;
-  el.innerHTML=`<div class="row"><h2>${esc(j.file)}</h2><span class="sep"></span><span class="small muted">${fmt(j.data.length)} filas</span></div>
-   ${dup?`<div class="confirm small">Este archivo ya se cargó el ${fmtDT(dup.at)}. Si lo agregas de nuevo, se duplican los conteos.</div>`:""}
-   <div class="row"><label class="f">Columna código${sel("codeCol",j.codeCol)}</label><label class="f">Columna cantidad${sel("qtyCol",j.qtyCol,"(cada fila = 1)")}</label>
-   <label class="f">Columna ubicación${sel("ubicCol",j.ubicCol,"(ninguna)")}</label><label class="f">Ubicación para todo el archivo<input data-k="ubic" value="${esc(j.ubic)}" placeholder="opcional"></label></div>
-   <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-k="applyF" ${j.applyF?"checked":""}> Aplicar equivalencias (el archivo trae rollos, sacos, cajas… y hay que convertir a la unidad del ERP)</label>
-   <div class="small">${fmt(rows.length)} lecturas · ${fmt(rows.filter(r=>r.f).length)} con equivalencia${found!=null?` · <b>${fmt(found)}</b> códigos encontrados en ERP, <span style="color:var(--bad)">${fmt(rows.length-found)}</span> no encontrados`:""}</div>
-   <div class="tbl" style="max-height:200px"><table><thead><tr><th>Código</th><th class="num">Cant.</th><th>Ubicación</th><th>ERP</th></tr></thead><tbody>${rows.slice(0,8).map(r=>{const it=erp&&findItem(r.code);return `<tr><td class="code">${esc(r.code)}</td><td class="num">${fmt2(r.qty)}${r.f?` ${esc(r.ce)} = ${fmt2(sq(r))} ${esc(r.um)}`:""}</td><td>${esc(r.ubic)}</td><td class="desc">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está</span>':"")}</td></tr>`}).join("")}</tbody></table></div>
-   <div class="row"><button class="btn primary" data-act="add">Agregar ${fmt(rows.length)} lecturas</button><button class="btn" data-act="x">Descartar</button></div>`;
-  el.querySelectorAll("select[data-k]").forEach(s=>s.onchange=()=>{j[s.dataset.k]=+s.value;renderJob(j)});
-  el.querySelector("input[data-k=applyF]").onchange=e=>{j.applyF=e.target.checked;renderJob(j)};
-  el.querySelector("input[data-k=ubic]").onchange=e=>{j.ubic=norm(e.target.value).toUpperCase();renderJob(j)};
-  el.querySelector("[data-act=x]").onclick=()=>el.remove();
-  el.querySelector("[data-act=add]").onclick=()=>{
-    const t=new Date().toISOString();const rs=jobRows(j);
-    rs.forEach(r=>{const s={code:r.code,qty:r.qty,ubic:r.ubic,t,src:"archivo: "+j.file};if(r.f){s.f=r.f;s.ce=r.ce}if(r.um)s.um=r.um;scans.push(s)});
-    saveScans();imported.push({name:j.file,size:j.size,rows:rs.length,qty:rs.reduce((a,r)=>a+sq(r),0),at:t});store.set("inv_imported",imported);
-    el.remove();renderImpDone();toast(`${fmt(rs.length)} lecturas agregadas de ${j.file}`);
-  };
-}
-function renderImpDone(){$("#impDone").innerHTML=`<thead><tr><th>Archivo</th><th>Cargado</th><th class="num">Lecturas</th><th class="num">Unidades</th><th></th></tr></thead><tbody>`+
-  (imported.length?imported.map((x,i)=>`<tr><td>${esc(x.name)}</td><td>${fmtDT(x.at)}</td><td class="num">${fmt(x.rows)}</td><td class="num">${fmt2(x.qty)}</td><td><button class="btn sm danger" data-un="${i}">Quitar</button></td></tr>`).join(""):`<tr><td colspan="5" class="muted">Ningún archivo importado.</td></tr>`)+"</tbody>";
-  $$("#impDone [data-un]").forEach(b=>b.onclick=()=>{const x=imported[+b.dataset.un];scans=scans.filter(s=>!(s.src==="archivo: "+x.name&&s.t===x.at));imported.splice(+b.dataset.un,1);store.set("inv_imported",imported);saveScans();renderImpDone();toast("Lecturas de "+x.name+" quitadas")});}
 
 /* ================= RESULTADOS (panel de control) ================= */
 let rFilter="todos",rLimit=300,dLimit=300,rSel=store.get("inv_rsel","");
@@ -1628,7 +1554,7 @@ $("#btnReconteo").onclick=async()=>{
   const padre=rSel&&rSel!=="*"&&rSel!=="local"?conteos.find(c=>c.id===rSel):null;
   const raiz=padre&&padre.reconteoDe?conteos.find(c=>c.id===padre.reconteoDe)||padre:padre;
   const ahora=new Date(), vv=$("#reVence").value;
-  const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+  const vence=venceDesde(vv,ahora);
   const nombre="Reconteo · "+(raiz?raiz.nombre:ahora.toLocaleDateString("es-CL"));
   const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnReconteo").disabled=true;
@@ -1657,8 +1583,8 @@ $("#btnExpRes").onclick=()=>{
   saveWb(wb,"Resultado_"+sc.label.normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^\w-]+/g,"_").slice(0,40)+"_"+stamp()+".xlsx");
 };
 function confirmBox(msg,fn,target){const b=$(target||"#confirmBox");b.innerHTML=`<div class="confirm"><span>${msg}</span><span class="sep"></span><button class="btn sm danger" id="cYes">Sí, continuar</button><button class="btn sm" id="cNo">Cancelar</button></div>`;$("#cNo").onclick=()=>b.innerHTML="";$("#cYes").onclick=()=>{fn();b.innerHTML=""}}
-$("#btnReset").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas guardadas en este equipo (las de la nube se pueden volver a traer).`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",imported);renderResult();toast("Lecturas borradas")});
-$("#btnResetAll").onclick=()=>confirmBox("Se borrarán lecturas y stock ERP de este equipo.",()=>{scans=[];imported=[];erp=null;saveScans();store.set("inv_imported",[]);try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();renderResult();toast("Todo borrado")});
+$("#btnReset").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas guardadas en este equipo (las de la nube se pueden volver a traer).`,()=>{scans=[];saveScans();renderResult();toast("Lecturas borradas")});
+$("#btnResetAll").onclick=()=>confirmBox("Se borrarán lecturas y stock ERP de este equipo.",()=>{scans=[];erp=null;saveScans();try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();renderResult();toast("Todo borrado")});
 
 /* ================= Excel ================= */
 const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`};
@@ -1686,9 +1612,6 @@ async function saveData(name,blob,fallback){
   try{if(fallback)fallback();else{const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}toast("Descargando "+name)}catch(e){toast("No se pudo descargar: "+e.message)}
 }
 
-/* ================= inicio ================= */
-
-/* ================= maestro, modo operario, teclado ================= */
 /* ================= EQUIVALENCIAS (unidad de conteo → unidad ERP) ================= */
 function factItems(){return erpDraft&&erpDraft.items&&erpDraft.items.length?erpDraft.items:(erp&&!erp.maestro?erp.items:[])}
 let factFilter="pend";
@@ -1816,7 +1739,7 @@ $("#btnGhSave").onclick=async()=>{
 };
 
 function conteoMsg(c){return `Conteo: ${c.nombre}\nAbre este link en el celular para empezar a contar:\n${c.link}`}
-const waHref=c=>"https://wa.me/?text="+encodeURIComponent(conteoMsg(c));
+const waHref=c=>waLink(conteoMsg(c));
 async function copyText(t,inp){try{await navigator.clipboard.writeText(t);toast("Link copiado")}catch(e){if(inp){inp.focus();inp.select()}toast("Selecciona el link y cópialo")}}
 
 $("#btnCrear").onclick=async()=>{
@@ -1826,7 +1749,7 @@ $("#btnCrear").onclick=async()=>{
   if(!nubeOn()&&!gh.token){$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático o GitHub (una sola vez, más abajo)")}
   const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
   const vv=$("#cVence").value, ahora=new Date();
-  const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+  const vence=venceDesde(vv,ahora);
   enrich(d.items);
   const rot=rotParse();
   const sel=rot?null:sgSelected(), its=rot?rot.found:(sel?d.items.filter(i=>sel.has(i.sg||"(sin subgrupo)")):d.items);
@@ -1909,6 +1832,8 @@ function renderConteosOnly(){
 /* ================= NUBE (Supabase): los conteos llegan solos ================= */
 let SB=store.get("inv_sb",{url:"",key:"",admin:"",ok:false});
 const nubeOn=()=>!!(SB.ok&&SB.url&&SB.key&&SB.admin);
+// Parámetros de Supabase que viajan en cada link (proyecto + clave pública).
+const sbLinkParams=()=>{const ref=sbRef(SB.url);return (ref?"&p="+ref:"&u="+encodeURIComponent(SB.url))+"&k="+encodeURIComponent(SB.key)};
 const sbRef=u=>{const m=String(u||"").match(/^https:\/\/([a-z0-9]{10,40})\.supabase\.co\/?$/i);return m?m[1]:""};
 const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a-z0-9]{10,40}$/i.test(u))u="https://"+u+".supabase.co";return u};
 async function rpc(conf,fn,args){
@@ -1936,7 +1861,6 @@ function renderSB(){
   $("#sbHelp").open=!nubeOn();
   $("#ghCard").classList.toggle("dim",nubeOn());
   $("#ghOptional").hidden=!nubeOn();
-  $("#nubeImp").hidden=!nubeOn();
 }
 $("#btnSbSave").onclick=async()=>{
   const url=sbUrl($("#sbUrl").value), key=norm($("#sbKey").value), admin=norm($("#sbAdmin").value);
@@ -1956,8 +1880,7 @@ $("#btnSbOff").onclick=()=>{SB.ok=false;store.set("inv_sb",SB);renderSB();render
 /* ---- crear conteo en la nube ---- */
 async function crearNube(m,its,sel,rot){
   const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo}});
-  const ref=sbRef(SB.url);
-  const link=appUrl()+"?nube="+r.id+"."+r.token+(ref?"&p="+ref:"&u="+encodeURIComponent(SB.url))+"&k="+encodeURIComponent(SB.key);
+  const link=appUrl()+"?nube="+r.id+"."+r.token+sbLinkParams();
   return {id:r.id,nube:true,codes:its.map(i=>i.cod),nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
 }
 
@@ -1969,17 +1892,17 @@ async function refreshNube(silent){
   catch(e){if(!silent)toast(sbMsg(e))}
   finally{nubeBusy=false}
 }
-setInterval(()=>{if(nubeOn()&&!document.hidden&&(!$("#v-erp").hidden||!$("#v-importar").hidden)&&conteos.some(c=>c.nube&&!c.fin))refreshNube(true)},20000);
+setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-erp").hidden&&conteos.some(c=>c.nube&&!c.fin))refreshNube(true)},20000);
 const hhmm=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});
 function hace(t){const m=Math.round((Date.now()-Date.parse(t))/60000);return m<1?"hace segundos":m<60?`hace ${m} min`:hhmm(t)}
 /* estado en vivo del contador de un link: [clase del punto, texto, detalle] */
 function liveEstado(x){
   if(!x)return ["","Consultando…",""];
-  const ult=[x.visto,x.ultimo_envio,x.abierto].filter(Boolean).sort().at(-1);
+  const ult=ultimaSenal(x);
   if(x.terminado)return ["end","Terminó el conteo",`a las ${hhmm(x.terminado)}`];
   if(x.finalizado)return ["end","Finalizado por ti",`el ${fmtDT(x.finalizado)}`];
   if(!x.abierto)return isVenc(x.vence)?["off","Venció sin abrir",""]:["","Aún no abre el link",`vence ${fmtDT(x.vence)}`];
-  const on=ult&&Date.now()-Date.parse(ult)<150000;
+  const on=enLinea(ult);
   if(isVenc(x.vence))return ["off","Conteo vencido",ult?`última señal ${hace(ult)}`:""];
   if(on)return ["on",x.n_lecturas?"En línea · contando":"En línea · abrió el link",x.ultimo_envio?`último envío ${hace(x.ultimo_envio)}`:`abrió ${hace(x.abierto)}`];
   return ["off","Sin señal",ult?`última señal ${hace(ult)}`:""];
@@ -2029,13 +1952,6 @@ async function traerLecturas(c,silent){
   if(!silent)toast(`${fmt((arr||[]).length)} lecturas de "${c.nombre}" listas para el cruce`);
   return (arr||[]).length;
 }
-async function traerTodas(){
-  if(!nubeOn())return;let n=0,k=0;
-  for(const c of conteos.filter(c=>c.nube)){try{n+=await traerLecturas(c,true);k++}catch(e){toast(sbMsg(e));return}}
-  toast(`${fmt(n)} lecturas traídas de ${fmt(k)} conteos`);
-  if(!$("#v-resultado").hidden)renderResult();
-}
-$("#btnTraerImp").onclick=traerTodas;
 
 /* ---- celular: abrir link de la nube y enviar lecturas ---- */
 if(!cfg.dev){cfg.dev=rndKey(16);store.set("inv_cfg",cfg)}
@@ -2060,7 +1976,7 @@ async function checkNubeLink(){
         <div class="row"><button class="btn primary" id="cbExp">Exportar lecturas anteriores</button><button class="btn danger" id="cbNew">Empezar conteo nuevo</button></div></div>`;
       $("#cbExp").onclick=()=>$("#btnExpScans").click();
       $("#cbNew").onclick=async()=>{if(nubeConf()&&cfg.dirty){await syncNow();if(cfg.dirty)return toast("No se pudieron enviar las lecturas anteriores. Exporta antes de seguir.")}
-        scans=[];imported=[];store.set("inv_scans",scans);store.set("inv_imported",[]);go()};
+        scans=[];store.set("inv_scans",scans);go()};
       return true;
     }
     go();
@@ -2119,7 +2035,7 @@ function checkConteoLink(){
         <span class="small">Este celular tiene ${fmt(scans.length)} lecturas de un conteo anterior${erp&&erp.conteo?" ("+esc(erp.conteo.nombre)+")":""}. Expórtalas antes de empezar, o se borrarán.</span>
         <div class="row"><button class="btn primary" id="cbExp">Exportar lecturas anteriores</button><button class="btn danger" id="cbNew">Empezar conteo nuevo</button></div></div>`;
       $("#cbExp").onclick=()=>$("#btnExpScans").click();
-      $("#cbNew").onclick=()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);applyConteo(m,id)};
+      $("#cbNew").onclick=()=>{scans=[];saveScans();applyConteo(m,id)};
       return;
     }
     applyConteo(m,id);
@@ -2170,23 +2086,6 @@ function applyConteo(m,id,sb){
   show("contar");
 }
 
-function setMaestro(m,silent){
-  erp={file:"Maestro "+new Date(m.version).toLocaleDateString("es-CL"),at:m.version,version:m.version,maestro:true,
-    items:m.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1,stock:null,costo:null,ubic:""}))};
-  store.set("inv_erp",erp);buildIndex();updStatus();applyMode();
-  if(!silent)toast("Lista de productos actualizada: "+fmt(erp.items.length));
-}
-async function loadMaestro(){
-  if(!/^https?:$/.test(location.protocol)||/claude\.ai|claudeusercontent/.test(location.hostname))return;
-  try{
-    const r=await fetch("maestro.json",{cache:"no-store"}); if(!r.ok)return;
-    const m=await r.json(); if(!m||!Array.isArray(m.items))return;
-    if(erp&&erp.conteo)return;              // hay un conteo abierto desde link
-    if(erp&&!erp.maestro)return;            // el supervisor cargó un ERP a mano: no se pisa
-    if(erp&&erp.version===m.version)return; // ya está al día
-    setMaestro(m);
-  }catch(e){}
-}
 if((location.hash||"")==="#panel"){cfg.sup=true;store.set("inv_cfg",cfg)}
 const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.login);
 /* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
@@ -2214,11 +2113,11 @@ $("#btnClearScans").onclick=async()=>{
     const cfin=nubeConf(), idfin=erp.conteo.id;
     return confirmBox(`Todas tus lecturas (${fmt(scans.length)}) ya llegaron al supervisor. Se borrarán de este celular junto con la lista de productos.`,async()=>{
       try{await rpc(cfin,"cb_terminar",{p_id:idfin,p_secret:cfin.secret})}catch(e){}
-      scans=[];imported=[];store.set("inv_scans",scans);store.set("inv_imported",[]);erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}cfg.dirty=false;store.set("inv_cfg",cfg);
+      scans=[];store.set("inv_scans",scans);erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}cfg.dirty=false;store.set("inv_cfg",cfg);
       buildIndex();updStatus();renderRecent();renderSess();renderConteoBox();clearProduct();setUbic("",true);
       $("#conteoBanner").innerHTML='<div class="notice">Conteo terminado y enviado. ¡Gracias!</div>';lockScreen("Tus lecturas llegaron al supervisor. Ya puedes cerrar esta página.","Conteo terminado","✅");},"#confirmScans");
   }
-  confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];imported=[];saveScans();store.set("inv_imported",[]);if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>';lockScreen("Este celular ya no tiene la lista de productos.","Conteo terminado","✅")}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");};
+  confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];saveScans();if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>';lockScreen("Este celular ya no tiene la lista de productos.","Conteo terminado","✅")}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");};
 applyKbd();
 function checkExpiry(){
   const v=erp&&erp.conteo&&erp.conteo.vence, exp=isVenc(v);
@@ -2232,7 +2131,6 @@ function checkExpiry(){
   return exp;
 }
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
-/*MP-START*/
 /* =====================================================================
    ENTREGA Y RECEPCIÓN DE MATERIA PRIMA
    Supervisor: crea la entrega (un link para dos personas) y ve Entrega vs Recepción en vivo.
@@ -2247,8 +2145,8 @@ function movCatalog(){
   if(!its||!its.length)return null;
   enrich(its);return its;
 }
-function movLink(id,token){const ref=sbRef(SB.url);return appUrl()+"?mov="+id+"."+token+(ref?"&p="+ref:"&u="+encodeURIComponent(SB.url))+"&k="+encodeURIComponent(SB.key)}
-const movWa=m=>"https://wa.me/?text="+encodeURIComponent(`Entrega de materia prima: ${m.nombre}${m.ref?" ("+m.ref+")":""}\nAbre este link en tu celular y elige si ENTREGAS o RECIBES:\n${m.link}`);
+function movLink(id,token){return appUrl()+"?mov="+id+"."+token+sbLinkParams()}
+const movWa=m=>waLink(`Entrega de materia prima: ${m.nombre}${m.ref?" ("+m.ref+")":""}\nAbre este link en tu celular y elige si ENTREGAS o RECIBES:\n${m.link}`);
 
 /* ---------- Panel: crear ---------- */
 function mpNote(){
@@ -2260,7 +2158,7 @@ function mpNote(){
 $("#btnMpCrear").onclick=async()=>{
   if(!mpNote())return toast("Falta preparar el Panel (ver aviso)");
   const its=movCatalog(), ahora=new Date(), vv=$("#mpVence").value;
-  const vence=vv==="hoy"?new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),23,59,0).toISOString():new Date(ahora.getTime()+(+vv)*3600e3).toISOString();
+  const vence=venceDesde(vv,ahora);
   const nombre=norm($("#mpNombre").value)||("Entrega MP "+ahora.toLocaleDateString("es-CL")+" "+hhmm(ahora)), ref=norm($("#mpRef").value);
   const items=its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um]);
   $("#btnMpCrear").disabled=true;$("#mpMsg").textContent="Creando…";
@@ -2322,9 +2220,9 @@ function ladoEstado(l,x){
   if(!l)return x&&isVenc(x.vence)?["off","Venció sin abrir",""]:["","Aún no abre el link",""];
   if(l.terminado)return ["end","Terminó",`a las ${hhmm(l.terminado)}`];
   if(x&&x.finalizado)return ["end","Cerrado por ti",""];
-  const ult=[l.visto,l.ultimo_envio,l.abierto].filter(Boolean).sort().at(-1);
+  const ult=ultimaSenal(l);
   if(x&&isVenc(x.vence))return ["off","Vencido",ult?`última señal ${hace(ult)}`:""];
-  if(ult&&Date.now()-Date.parse(ult)<150000)return ["on",l.n_lecturas?"En línea · escaneando":"En línea · abrió el link",l.ultimo_envio?`último envío ${hace(l.ultimo_envio)}`:`abrió ${hace(l.abierto)}`];
+  if(enLinea(ult))return ["on",l.n_lecturas?"En línea · escaneando":"En línea · abrió el link",l.ultimo_envio?`último envío ${hace(l.ultimo_envio)}`:`abrió ${hace(l.abierto)}`];
   return ["off","Sin señal",ult?`última señal ${hace(ult)}`:""];
 }
 function movEstado(x){
@@ -2336,7 +2234,6 @@ function movEstado(x){
   if(!L.E&&!L.R)return '<span class="pill p-info">Sin abrir</span>';
   return '<span class="pill p-ok">En curso</span>';
 }
-const ladoCell=(l,x)=>{const [d,t,det]=ladoEstado(l,x);return `<div><span class="dot ${d}"></span><b>${t}</b></div><div class="small muted">${l&&l.persona?esc(l.persona)+" · ":""}${l?fmt(l.n_lecturas)+" lecturas":""}${det?" · "+det:""}</div>`};
 async function refreshMov(force){
   if(!nubeOn()||movBusy)return;movBusy=true;
   try{
@@ -2502,8 +2399,8 @@ function omPending(code){
   const it=omFind(code),p=$("#omPending");p.hidden=false;p.className="pending"+(it?"":" bad");
   const tot=om.lect.filter(l=>key(l.k||l.code)===key(it?it.cod:code)).reduce((a,l)=>a+(+l.qty||0),0);
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${tot?` · ya registrado: ${fmt2(tot)} ${esc(it&&conv(it)?plural(it.ce):umTxt(it?it.um:""))}`:""}</div>`+
-    (it&&conv(it)?`<div class="conv">Ingresa en <b>${esc(plural(it.ce))}</b> · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</div>`:(it&&UMN(it.um)==="kg"?`<div class="conv">⚖ <b>Pesar.</b> Digita los <b>kg</b> de la balanza. Si pesas por partes, ingresa cada pesada con OK.</div>`:(it&&UMN(it.um)!=="un"?`<div class="conv">Digita la cantidad en <b>${esc(umTxt(it.um))}</b></div>`:"")));
-  $("#omQtyEb").textContent=it&&conv(it)?"2 · Cantidad de "+plural(it.ce):(it&&UMN(it.um)==="kg"?"2 · Kilos (pesar)":(it&&UMN(it.um)!=="un"?"2 · Cantidad en "+umTxt(it.um):"2 · Cantidad"));
+    convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza. Si pesas por partes, ingresa cada pesada con OK.");
+  $("#omQtyEb").textContent=qtyLabel(it,2);
   return it;
 }
 function omRead(raw){
@@ -2517,7 +2414,7 @@ function omRead(raw){
   focusSel($("#omQty"));
 }
 function omSearch(v){
-  const w=deacc(v).split(" ").filter(Boolean), res=om.items.filter(i=>{const d=deacc(i.desc+" "+i.cod);return w.every(x=>d.includes(x))}).slice(0,12), box=$("#omSugg");box.hidden=false;
+  const res=buscarNombre(om.items,v), box=$("#omSugg");box.hidden=false;
   if(!res.length){box.innerHTML=`<button><span>No encontré "${esc(v)}". ¿Usarlo como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;omRead(v.replace(/\s+/g,""))};return}
   box.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
   $$("#omSugg button").forEach(b=>b.onclick=()=>{box.hidden=true;omRead(res[+b.dataset.n].cod)});
@@ -2571,22 +2468,20 @@ async function omOpenCam(){
   if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
   if(omCamI){$("#omCamWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
   $("#omCamWrap").hidden=false;$("#omCamMsg").textContent="Pidiendo permiso de cámara…";
-  try{const F=Html5QrcodeSupportedFormats;
-    omCamI=new Html5Qrcode("omReader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.CODE_93,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
-    await omCamI.start({facingMode:"environment"},{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.5,180)})},txt=>{txt=norm(txt);if(!txt||omHold)return;if(txt===omLast.c&&omLast.miss<10)return;omLast={c:txt,miss:0};omRead(txt)},()=>{omLast.miss++});
+  try{
+    omCamI=await iniciarLector("omReader",txt=>{txt=norm(txt);if(!txt||omHold)return;if(txt===omLast.c&&omLast.miss<10)return;omLast={c:txt,miss:0};omRead(txt)},()=>{omLast.miss++});
     $("#omCamMsg").textContent="Apunta al código del producto.";$("#omCamWrap").scrollIntoView({block:"start",behavior:"smooth"});
   }catch(e){omCamI=null;$("#omCamWrap").hidden=true;toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.")}
 }
-async function omStopCam(){if(omCamI){try{await omCamI.stop();omCamI.clear()}catch(e){}omCamI=null}omHold=false;const w=$("#omCamWrap");if(w)w.hidden=true}
+async function omStopCam(){if(omCamI){await detenerLector(omCamI);omCamI=null}omHold=false;const w=$("#omCamWrap");if(w)w.hidden=true}
 $("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
 
-/*MP-END*/
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
  if(!isOp()&&!isSupDevice())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
 var _qMov=false;try{_qMov=!!new URLSearchParams(location.search).get("mov")}catch(e){}
-checkMovLink().then(mv=>{if(mv)return;if(movOn()){omEnter();omSync();return}checkNubeLink().then(x=>{if(!x&&!checkConteoLink())loadMaestro()})});
+checkMovLink().then(mv=>{if(mv)return;if(movOn()){omEnter();omSync();return}checkNubeLink().then(x=>{if(!x)checkConteoLink()})});
 if(nubeOn())refreshNube(true);
 if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
