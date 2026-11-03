@@ -153,7 +153,16 @@ body.op .supOnly{display:none!important}
 body:has(#v-resultado:not([hidden])) .wrap{max-width:1720px}
 @media (max-width:1250px){.resGrid{grid-template-columns:minmax(220px,260px) minmax(0,1fr);grid-template-areas:"l c" "r c";grid-template-rows:auto 1fr}.resLeft{position:static}}
 @media (max-width:820px){.resGrid{grid-template-columns:1fr;grid-template-areas:"l" "c" "r"}}
-.mpGrid{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr) minmax(260px,320px);gap:16px;align-items:start}
+.mpGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:16px;align-items:start}
+.mpFold{display:block}.mpFold>*+*{margin-top:8px}.mpFold>summary{cursor:pointer;list-style:revert;font-size:15px}.mpFold[open]>summary{margin-bottom:4px}
+.solMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.linkBtn{background:none;border:0;color:var(--primary);text-decoration:underline;cursor:pointer;padding:2px 0;font:inherit;align-self:center}
+.solAlert{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+.actBox{display:flex;flex-direction:column;gap:6px;border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px}
+nav.tabs .n.alert{background:var(--warn);color:#fff}
+.stk{font-size:12px;font-weight:600;padding:1px 7px;border-radius:9px;white-space:nowrap}
+body.prodv nav.tabs button:not([data-v="mp"]),body.prodv #status{display:none!important}
+body.prodv .supOnly{display:none!important}
 .mpRight{display:flex;flex-direction:column;gap:16px;min-width:0}
 .solAdd{display:grid;grid-template-columns:minmax(0,1fr) 76px auto;gap:6px}
 .solList{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;max-height:280px;overflow:auto}
@@ -171,8 +180,7 @@ body:has(#v-mp:not([hidden])) .wrap{max-width:1720px}
 .mpItem .acts{display:flex;gap:6px;flex-wrap:wrap}
 #mpCreated .cbox{max-width:none}
 #mpCreated input{font-size:12px}
-@media (max-width:1250px){.mpGrid{grid-template-columns:minmax(260px,320px) minmax(0,1fr);grid-template-rows:auto 1fr}.mpMain{grid-column:2;grid-row:1 / span 2}.mpRight{grid-column:1}}
-@media (max-width:900px){.mpGrid{grid-template-columns:1fr}.mpRight{grid-column:auto}}
+@media (max-width:980px){.mpGrid{grid-template-columns:1fr}}
 .mpSides{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .mpSide{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
 .mpSide .rl{font:700 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
@@ -192,7 +200,7 @@ body.mov nav.tabs,body.mov #status{display:none!important}
   <nav class="tabs" role="tablist">
     <button role="tab" data-v="erp" aria-selected="true">1 · Panel</button>
     <button role="tab" data-v="contar" aria-selected="false" hidden>Contar<span class="n" id="nScans">0</span></button>
-    <button role="tab" data-v="mp" aria-selected="false">2 · Entrega MP</button>
+    <button role="tab" data-v="mp" aria-selected="false">2 · Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
     <button role="tab" data-v="resultado" aria-selected="false">3 · Resultados</button>
   </nav>
 </div></header>
@@ -677,6 +685,216 @@ grant execute on function
   public.cb_mov_abrir(uuid, text, text, text), public.cb_mov_enviar(uuid, text, text, text, jsonb),
   public.cb_mov_latido(uuid, text, text), public.cb_mov_terminar(uuid, text, text)
 to anon, authenticated;
+
+
+-- =====================================================================
+--  CONTROL DE OPERACIONES · Grupo Vector
+--  Actualización 03: ACCESO DE PRODUCCIÓN + SOLICITUDES + STOCK PARA QUIEN ENTREGA
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No borra datos. Se puede ejecutar más de una vez.
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+-- Clave de acceso de producción (solo ve y crea entregas; nunca conteos ni costos).
+create table if not exists public.cb_acceso (
+  id      text primary key check (id in ('produccion')),
+  hash    text not null,
+  creado  timestamptz not null default now()
+);
+
+-- Catálogo de productos que sube el supervisor al cargar el ERP (sin costos).
+-- stock: { "<código>": [disponible, stock total] } — solo lo ve quien entrega el material.
+create table if not exists public.cb_catalogo (
+  id          int primary key default 1 check (id = 1),
+  items       jsonb not null,
+  stock       jsonb,
+  origen      text,
+  actualizado timestamptz not null default now()
+);
+
+-- El link de producción se amarra al PRIMER equipo que lo abre (si se reenvía, no abre en otro).
+alter table public.cb_acceso add column if not exists usado timestamptz;
+alter table public.cb_acceso add column if not exists sesion_hash text;
+alter table public.cb_acceso add column if not exists equipo text;
+alter table public.cb_acceso add column if not exists visto timestamptz;
+
+-- El link de cada entrega queda guardado para que el supervisor pueda reenviarlo.
+alter table public.cb_mov add column if not exists link_token text;
+
+alter table public.cb_acceso   enable row level security;
+alter table public.cb_catalogo enable row level security;
+revoke all on public.cb_acceso, public.cb_catalogo from anon, authenticated;
+
+-- ¿Quién es? 'admin' (clave de supervisor) o 'prod' (clave de producción). Si no, error.
+create or replace function public.cb_rol(p_clave text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if cb_es_admin(p_clave) then return 'admin'; end if;
+  if exists (select 1 from cb_acceso where id = 'produccion' and sesion_hash is not null and sesion_hash = extensions.crypt(coalesce(p_clave,''), sesion_hash)) then
+    update cb_acceso set visto = now() where id = 'produccion';
+    return 'prod';
+  end if;
+  perform pg_sleep(0.5);
+  raise exception 'acceso_produccion';
+end $$;
+
+-- Equipo del jefe de producción: el primer equipo que abre el link queda vinculado y recibe su llave de sesión.
+create or replace function public.cb_prod_vincular(p_token text, p_equipo text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare a cb_acceso; v_ses text := encode(extensions.gen_random_bytes(24), 'hex');
+begin
+  select * into a from cb_acceso where id = 'produccion' for update;
+  if not found or a.hash <> extensions.crypt(coalesce(p_token,''), a.hash) then perform pg_sleep(0.5); raise exception 'acceso_produccion'; end if;
+  if a.usado is not null then raise exception 'prod_usado'; end if;
+  update cb_acceso set usado = now(), visto = now(), equipo = left(p_equipo, 120), sesion_hash = extensions.crypt(v_ses, extensions.gen_salt('bf')) where id = 'produccion';
+  return v_ses;
+end $$;
+
+-- Supervisor: ver si el link de producción ya está vinculado y a qué equipo.
+create or replace function public.cb_prod_estado(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return (select jsonb_build_object('creado', creado, 'usado', usado, 'equipo', equipo, 'visto', visto) from cb_acceso where id = 'produccion');
+end $$;
+
+-- Supervisor: crea o cambia la clave de producción (la anterior deja de funcionar).
+create or replace function public.cb_prod_clave(p_clave text, p_nueva text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if length(coalesce(p_nueva,'')) < 16 then raise exception 'clave_corta'; end if;
+  insert into cb_acceso(id, hash) values ('produccion', extensions.crypt(p_nueva, extensions.gen_salt('bf')))
+  on conflict (id) do update set hash = excluded.hash, creado = now(), usado = null, sesion_hash = null, equipo = null, visto = null;
+end $$;
+
+-- Supervisor: sube el catálogo y el stock del ERP.
+create or replace function public.cb_catalogo_subir(p_clave text, p_items jsonb, p_stock jsonb, p_origen text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'sin_productos'; end if;
+  insert into cb_catalogo(id, items, stock, origen, actualizado) values (1, p_items, p_stock, left(p_origen, 200), now())
+  on conflict (id) do update set items = excluded.items, stock = excluded.stock, origen = excluded.origen, actualizado = now();
+end $$;
+
+-- Supervisor o producción: catálogo para buscar códigos (sin stock).
+create or replace function public.cb_catalogo_ver(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return (select jsonb_build_object('items', items, 'actualizado', actualizado, 'origen', origen) from cb_catalogo where id = 1);
+end $$;
+
+-- ---------- Entregas: ahora también para producción ----------
+create or replace function public.cb_mov_crear(p_clave text, p_nombre text, p_vence timestamptz, p_items jsonb, p_meta jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex'); v_id uuid; v_items jsonb := p_items; r text := cb_rol(p_clave);
+begin
+  if v_items is null or jsonb_typeof(v_items) <> 'array' or jsonb_array_length(v_items) = 0 then
+    select items into v_items from cb_catalogo where id = 1;
+  end if;
+  if v_items is null or jsonb_array_length(v_items) = 0 then raise exception 'sin_productos'; end if;
+  if r = 'prod' then
+    -- Producción solo envía la SOLICITUD: no hay link hasta que bodega (supervisor) lo genere.
+    if jsonb_typeof(p_meta -> 'sol') <> 'array' or jsonb_array_length(p_meta -> 'sol') = 0 then raise exception 'sin_productos'; end if;
+    insert into cb_mov(nombre, vence, token_hash, link_token, items, meta)
+    values (left(p_nombre, 120), null, extensions.crypt(encode(extensions.gen_random_bytes(16), 'hex'), extensions.gen_salt('bf')), null, v_items,
+            coalesce(p_meta, '{}'::jsonb) || jsonb_build_object('creado_por', r, 'estado', 'solicitada'))
+    returning id into v_id;
+    return jsonb_build_object('id', v_id);
+  end if;
+  insert into cb_mov(nombre, vence, token_hash, link_token, items, meta)
+  values (left(p_nombre, 120), p_vence, extensions.crypt(v_token, extensions.gen_salt('bf')), v_token, v_items,
+          coalesce(p_meta, '{}'::jsonb) || jsonb_build_object('creado_por', r, 'estado', 'activa'))
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'token', v_token);
+end $$;
+
+-- Supervisor: convierte una solicitud de producción en entrega con link para los operarios.
+create or replace function public.cb_mov_activar(p_clave text, p_id uuid, p_vence timestamptz) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex');
+begin
+  perform cb_check(p_clave);
+  update cb_mov set token_hash = extensions.crypt(v_token, extensions.gen_salt('bf')), link_token = v_token, vence = p_vence,
+         meta = coalesce(meta, '{}'::jsonb) || jsonb_build_object('estado', 'activa', 'activada', now())
+   where id = p_id and finalizado is null;
+  if not found then raise exception 'no_existe'; end if;
+  return jsonb_build_object('id', p_id, 'token', v_token);
+end $$;
+
+create or replace function public.cb_mov_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'finalizado', m.finalizado, 'meta', m.meta, 'token', case when r = 'admin' then m.link_token end,
+      'lados', coalesce((select jsonb_object_agg(l.rol, jsonb_build_object(
+          'persona', l.persona, 'abierto', l.abierto, 'visto', l.visto, 'terminado', l.terminado,
+          'ultimo_envio', l.ultimo_envio, 'n_lecturas', l.n_lecturas)) from cb_mov_lado l where l.mov = m.id), '{}'::jsonb)
+    ) order by m.creado desc)
+    from cb_mov m where m.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_lecturas(p_clave text, p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return coalesce((select jsonb_agg(data || jsonb_build_object('rol', rol) order by data->>'t') from cb_mov_lect where mov = p_id), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_finalizar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  update cb_mov set finalizado = coalesce(finalizado, now()) where id = p_id;
+end $$;
+
+-- Celular: igual que antes, y quien ENTREGA recibe además el stock de lo solicitado.
+create or replace function public.cb_mov_abrir(p_id uuid, p_token text, p_device text, p_rol text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; l cb_mov_lado; v_secret text := encode(extensions.gen_random_bytes(16), 'hex'); v_mio text; v_stock jsonb; v_at timestamptz;
+begin
+  select * into m from cb_mov where id = p_id;
+  if not found or m.token_hash <> extensions.crypt(coalesce(p_token,''), m.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if coalesce(m.meta ->> 'estado', 'activa') = 'solicitada' then perform pg_sleep(0.5); raise exception 'no_existe'; end if;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() then raise exception 'vencido'; end if;
+  select rol into v_mio from cb_mov_lado where mov = p_id and device = p_device limit 1;
+  if p_rol is null then
+    return jsonb_build_object('nombre', m.nombre, 'meta', m.meta, 'mio', v_mio,
+      'tomados', coalesce((select jsonb_object_agg(rol, coalesce(persona,'')) from cb_mov_lado where mov = p_id), '{}'::jsonb));
+  end if;
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if v_mio is not null and v_mio <> p_rol then raise exception 'otro_rol'; end if;
+  select * into l from cb_mov_lado where mov = p_id and rol = p_rol for update;
+  if found and l.device <> p_device then raise exception 'rol_tomado'; end if;
+  if found then
+    update cb_mov_lado set secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')), visto = now(), terminado = null where mov = p_id and rol = p_rol;
+  else
+    insert into cb_mov_lado(mov, rol, device, secret_hash, visto) values (p_id, p_rol, p_device, extensions.crypt(v_secret, extensions.gen_salt('bf')), now());
+  end if;
+  if p_rol = 'E' then
+    select c.actualizado,
+           (select jsonb_object_agg(k, c.stock -> k) from (select s ->> 0 as k from jsonb_array_elements(coalesce(m.meta -> 'sol', '[]'::jsonb)) s) q where c.stock ? k)
+      into v_at, v_stock from cb_catalogo c where c.id = 1;
+  end if;
+  return jsonb_build_object('nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'items', m.items, 'meta', m.meta, 'secret', v_secret, 'rol', p_rol,
+    'stock', v_stock, 'stock_at', v_at,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_mov_lect where mov = p_id and rol = p_rol), '[]'::jsonb));
+end $$;
+
+revoke execute on function public.cb_rol(text) from public, anon, authenticated;
+grant execute on function
+  public.cb_prod_clave(text, text), public.cb_prod_vincular(text, text), public.cb_prod_estado(text), public.cb_mov_activar(text, uuid, timestamptz), public.cb_catalogo_subir(text, jsonb, jsonb, text), public.cb_catalogo_ver(text),
+  public.cb_mov_crear(text, text, timestamptz, jsonb, jsonb), public.cb_mov_listar(text), public.cb_mov_lecturas(text, uuid),
+  public.cb_mov_finalizar(text, uuid), public.cb_mov_abrir(uuid, text, text, text)
+to anon, authenticated;
 </script>
   </div>
 
@@ -784,47 +1002,17 @@ to anon, authenticated;
   </div>
 </section>
 
-<!-- ============ ENTREGA Y RECEPCIÓN DE MP (supervisor) ============ -->
+<!-- ============ ENTREGA Y RECEPCIÓN DE MP (supervisor y jefe de producción) ============ -->
 <section class="view" id="v-mp" hidden>
  <div class="mpGrid">
-  <div class="mpLeft">
-  <div class="card">
-    <div class="eyebrow">Entrega y recepción de MP</div>
-    <h2 style="margin:0">Nueva entrega</h2>
-    <p class="small" style="margin:0">Un solo link para dos personas: <b>quien entrega</b> y <b>quien recibe</b>, cada uno en su celular.</p>
-    <div class="notice" id="mpNote" hidden></div>
-    <label class="f">Nombre<input id="mpNombre" placeholder="Ej: Entrega MP a Producción"></label>
-    <label class="f">Documento / referencia (opcional)<input id="mpRef" placeholder="Ej: OT 4512 · Vale 889"></label>
-    <label class="f">Vigencia del link<select id="mpVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label>
-    <button class="btn accent" id="btnMpCrear" style="font-size:15px;padding:11px 16px;justify-content:center">OK · Crear entrega</button><span class="small muted" id="mpMsg"></span>
-    <div class="small" id="mpSolNote"></div>
-    <div id="mpCreated"></div>
-  </div>
-
-  <div class="card">
-    <div class="eyebrow">Paso previo (opcional)</div>
-    <h2 style="margin:0">Solicitud de materiales</h2>
-    <p class="small" style="margin:0">Lo que pide producción. Se adjunta a la próxima entrega que crees y se compara contra lo entregado.</p>
-    <div class="solAdd">
-      <input id="solCod" placeholder="Código" autocomplete="off" autocapitalize="characters">
-      <input id="solQty" placeholder="Cant." inputmode="decimal" autocomplete="off">
-      <button class="btn sm primary" id="solAddBtn">Agregar</button>
-    </div>
-    <div class="small" id="solHint"></div>
-    <details><summary class="small" style="cursor:pointer;font-weight:600">Pegar varios desde Excel</summary>
-      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad, una línea por producto" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
-      <button class="btn sm" id="solPasteBtn" style="margin-top:6px">Agregar lista</button>
-    </details>
-    <div class="solList" id="solList"></div>
-    <div class="row" style="gap:6px"><span class="small muted" id="solInfo"></span><span class="sep"></span><button class="btn sm" id="solClear">Vaciar</button></div>
-  </div>
-  </div>
-
   <div class="mpMain">
-  <div class="card mpEmpty" id="mpEmpty"><div class="eyebrow">Entrega vs Recepción</div><p class="muted" style="margin:0">Crea una entrega o toca una de la lista para ver aquí, en tiempo real, lo entregado contra lo recibido.</p></div>
+  <div class="notice" id="mpNote" hidden></div>
+  <div id="mpAlert"></div>
+  <div class="card mpEmpty" id="mpEmpty"><div class="eyebrow">Entrega vs Recepción</div><p class="muted" style="margin:0">Genera una solicitud o elige una entrega de la lista para ver aquí, en tiempo real, lo solicitado, entregado y recibido.</p></div>
   <div class="card" id="mpCard" hidden>
     <div class="eyebrow">Entrega vs Recepción</div>
     <div class="row"><h2 id="mpTitle" style="margin:0"></h2><span class="sep"></span><button class="btn primary" id="btnMpTraer">Actualizar lecturas</button><button class="btn" id="btnMpExp">Excel</button></div>
+    <div id="mpAct"></div>
     <div class="mpSides" id="mpSides"></div>
     <div class="kpis" id="mpKpis"></div>
     <div class="row"><div class="chips" id="mpChips"></div><span class="sep"></span><input id="mpQ" placeholder="Buscar código o descripción" style="flex:0 1 260px"></div>
@@ -835,17 +1023,52 @@ to anon, authenticated;
     </details>
   </div>
   </div>
+
  <div class="mpRight">
   <div class="card">
-    <div class="row"><h2 style="margin:0">Entregas creadas</h2><span class="sep"></span><button class="btn sm" id="btnMpRefresh">Actualizar</button></div>
-    <div class="small muted" id="mpAt"></div>
+    <div class="eyebrow">Entrega y recepción de MP</div>
+    <h2 style="margin:0">Solicitud de materiales</h2>
+    <p class="small" style="margin:0" id="solTxt">Agrega los códigos y cantidades que necesitas y toca <b>Generar solicitud</b>.</p>
+    <label class="f">Solicita<input id="solPor" placeholder="Tu nombre" autocapitalize="characters"></label>
+    <div class="solAdd">
+      <input id="solCod" placeholder="Código o nombre" autocomplete="off" autocapitalize="characters">
+      <input id="solQty" placeholder="Cant." inputmode="decimal" autocomplete="off">
+      <button class="btn sm primary" id="solAddBtn">Agregar</button>
+    </div>
+    <div class="small" id="solHint"></div>
+    <div class="sugg" id="solSugg" hidden></div>
+    <details><summary class="small" style="cursor:pointer;font-weight:600">Pegar varios desde Excel</summary>
+      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad, una línea por producto" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
+      <button class="btn sm" id="solPasteBtn" style="margin-top:6px">Agregar lista</button>
+    </details>
+    <div class="solList" id="solList"></div>
+    <div class="row" style="gap:6px"><span class="small muted" id="solInfo"></span><span class="sep"></span><button class="btn sm" id="solClear">Vaciar</button></div>
+    <div class="solMeta">
+      <label class="f">OT / referencia (opcional)<input id="mpRef" placeholder="Ej: OT 4512"></label>
+      <label class="f supOnly">Vigencia del link<select id="mpVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label>
+    </div>
+    <button class="btn accent" id="btnSolGen" style="font-size:15px;padding:11px 16px;justify-content:center">Generar solicitud</button>
+    <button class="linkBtn small supOnly" id="btnMpSinSol">Crear entrega sin solicitud</button>
+    <span class="small muted" id="mpMsg"></span>
+    <div id="mpCreated"></div>
+  </div>
+
+  <details class="card mpFold" id="mpListBox">
+    <summary><b>Entregas creadas</b> <span class="small muted" id="mpListSum"></span></summary>
+    <div class="row" style="margin-top:8px"><span class="small muted" id="mpAt"></span><span class="sep"></span><button class="btn sm" id="btnMpRefresh">Actualizar</button></div>
     <div class="mpList" id="mpTbl"></div>
     <div id="mpConfirm"></div>
-  </div>
-  </div>
+  </details>
+
+  <details class="card mpFold" id="mpAcc">
+    <summary><b>Acceso para producción</b> <span class="small muted" id="mpAccSum"></span></summary>
+    <p class="small" style="margin:8px 0 0">Un link para que el jefe de producción vea y use <b>solo esta pestaña</b> desde su computador, en tiempo real. No ve conteos, stock ni costos.</p>
+    <div id="mpAccBox"></div>
+    <div class="small muted" id="catInfo"></div>
+  </details>
+ </div>
  </div>
 </section>
-
 <!-- ============ ENTREGA / RECEPCIÓN (celular) ============ -->
 <section class="view" id="v-opmov" hidden>
   <div id="omBanner"></div>
@@ -1075,6 +1298,7 @@ function updStatus(){
 
 /* ================= pestañas ================= */
 function show(v){
+  if(typeof prodMode==="function"&&prodMode()&&v!=="mp")v="mp";   // el jefe de producción solo ve Entrega MP
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
@@ -1846,7 +2070,7 @@ async function rpc(conf,fn,args){
   if(!r.ok)throw new Error((j&&(j.message||j.msg||j.error))||("error_"+r.status));
   return j;
 }
-const SBMSG={clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
+const SBMSG={acceso_produccion:"La clave no es válida o fue cambiada. Pide un link nuevo al supervisor.",clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
   usado:"Este link ya se abrió en otro celular. Pide uno nuevo al supervisor.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
   no_existe:"El link no es válido o el conteo fue eliminado. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para enviar este conteo.",sin_conexion:"Sin conexión a internet.",sin_productos:"El conteo no tiene productos."};
 const sbMsg=e=>SBMSG[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script SQL en Supabase (paso 2 de las instrucciones).":/Invalid API key|401|JWT|apikey/i.test(e.message)?"La clave pública (anon / publishable) no es válida.":e.message);
@@ -1888,7 +2112,7 @@ async function crearNube(m,its,sel,rot){
 let nubeLive=new Map(), nubeAt=null, nubeBusy=false;
 async function refreshNube(silent){
   if(!nubeOn()||nubeBusy)return;nubeBusy=true;
-  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}renderConteosOnly();renderLive()}
+  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();if(typeof catSync==="function")catSync(false);for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}renderConteosOnly();renderLive()}
   catch(e){if(!silent)toast(sbMsg(e))}
   finally{nubeBusy=false}
 }
@@ -2090,8 +2314,8 @@ if((location.hash||"")==="#panel"){cfg.sup=true;store.set("inv_cfg",cfg)}
 const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.login);
 /* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
 function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(typeof gh!=="undefined"&&gh.login)||(erp&&!erp.maestro))}
-function lockScreen(msg,title,icon){
-  if(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn()))return false;
+function lockScreen(msg,title,icon,force){
+  if(!force&&(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn())||(typeof prodMode==="function"&&prodMode())))return false;
   if(typeof stopCam==="function")stopCam();
   document.body.classList.add("locked");
   $("#lockBox").innerHTML=`<div class="lockCard"><div class="big">${icon||"🔒"}</div><h2>${esc(title||"Esta app se usa con el link de tu supervisor")}</h2><p>${msg||"Abre el link de conteo que te enviaron por WhatsApp."}</p></div>`;
@@ -2099,6 +2323,8 @@ function lockScreen(msg,title,icon){
 }
 function lockFromBanner(title){const t=($("#conteoBanner").textContent||"").trim();lockScreen(esc(t),title||"No se puede abrir este link","⚠️")}
 function applyMode(){
+  if(typeof prodApply==="function"&&prodApply()){if($("#v-mp").hidden)show("mp");return}
+  document.body.classList.remove("prodv");
   if(typeof movOn==="function"&&movOn()){document.body.classList.add("mov");document.body.classList.remove("op");if($("#v-opmov").hidden)show("opmov");return}
   document.body.classList.remove("mov");
   const op=isOp();
@@ -2133,45 +2359,97 @@ function checkExpiry(){
 setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkExpiry()});
 /* =====================================================================
    ENTREGA Y RECEPCIÓN DE MATERIA PRIMA
-   Supervisor: crea la entrega (un link para dos personas) y ve Entrega vs Recepción en vivo.
+   Panel (supervisor o jefe de producción): solicitud de materiales → entrega con link → Entrega vs Recepción en vivo.
    Celulares: cada uno elige su rol (entrega / recepción) y escanea con las mismas conversiones del conteo.
    ===================================================================== */
 var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
-    movLect={}, movSeen={}, mpFilter="todos";
+    movLect={}, movSeen={}, mpFilter="todos", movHide=store.get("inv_movhide",[]);
 const ROL={E:"Entrega",R:"Recepción"};
-const movMsg=e=>({rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que revise.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script supabase_entrega.sql en Supabase.":sbMsg(e)));
+const movMsg=e=>({rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que revise.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
+
+/* ---------- ¿Quién usa esta pestaña? supervisor (clave de Supabase) o jefe de producción (link propio) ---------- */
+// PRD = {url,key,tok,ses} en el PC del jefe de producción: tok viene en su link, ses es la llave que recibe ESE equipo al vincularse.
+var PRD=store.get("inv_prod",null), prodForce=false, movCat=null, prodReady=Promise.resolve();
+const prodMode=()=>!!(PRD&&PRD.url&&PRD.key&&(PRD.ses||PRD.tok))&&(prodForce||!nubeOn());
+const movOk=()=>prodMode()||nubeOn();
+const movC=()=>prodMode()?{url:PRD.url,key:PRD.key,clave:PRD.ses||""}:{url:SB.url,key:SB.key,clave:SB.admin};
+const mrpc=async(fn,args)=>{await prodReady;const c=movC();return rpc(c,fn,Object.assign({p_clave:c.clave},args||{}))};
+
+/* ---------- Catálogo de productos: el supervisor lo sube al cargar el ERP; producción lo descarga ---------- */
 function movCatalog(){
+  if(prodMode())return movCat;
   let its=(typeof erpDraft!=="undefined"&&erpDraft&&erpDraft.items&&erpDraft.items.length)?erpDraft.items:(erp&&!erp.maestro?erp.items:null);
   if(!its||!its.length)return null;
   enrich(its);return its;
 }
+const catRow=i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um];
+var catBusy=false;
+async function catSync(force){        // supervisor: sube catálogo + stock si cambió
+  if(prodMode()||!nubeOn()||catBusy)return;
+  const its=movCatalog();if(!its)return;
+  const items=its.map(catRow), stock={};
+  for(const i of its)stock[i.cod]=[i.disp!=null?+i.disp:(i.stock!=null?+i.stock:null),i.stock!=null?+i.stock:null];
+  const sig=JSON.stringify(items).length+"|"+JSON.stringify(stock).length+"|"+items.length+"|"+(erp&&erp.at||"");
+  if(!force&&store.get("inv_catsig","")===sig)return;
+  catBusy=true;
+  try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:(erp&&erp.file)||"ERP"});
+    store.set("inv_catsig",sig);store.set("inv_catat",new Date().toISOString());renderAcc();if(force)toast("Catálogo y stock enviados")}
+  catch(e){if(force)toast(movMsg(e))}
+  finally{catBusy=false}
+}
+async function catLoad(force){        // producción: descarga el catálogo (sin stock)
+  if(!prodMode()||(movCat&&!force))return;
+  try{const r=await mrpc("cb_catalogo_ver");movCat=r&&r.items?r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1})):null;mpNote()}
+  catch(e){toast(movMsg(e))}
+}
 function movLink(id,token){return appUrl()+"?mov="+id+"."+token+sbLinkParams()}
 const movWa=m=>waLink(`Entrega de materia prima: ${m.nombre}${m.ref?" ("+m.ref+")":""}\nAbre este link en tu celular y elige si ENTREGAS o RECIBES:\n${m.link}`);
 
-/* ---------- Panel: crear ---------- */
+/* ---------- Lista de entregas: sale de Supabase (la ven igual el supervisor y producción) ---------- */
+function movList(){
+  const loc=new Map(movs.map(m=>[m.id,m])), out=[];
+  for(const x of movLive.values()){if(movHide.includes(x.id))continue;const l=loc.get(x.id)||{},mt=x.meta||{};
+    out.push({id:x.id,nombre:x.nombre,ref:mt.ref||l.ref||"",por:mt.por||"",creado:x.creado,vence:x.vence,sol:mt.sol||l.sol||null,link:x.token?movLink(x.id,x.token):(l.link||"")})}
+  if(!movLive.size)for(const l of movs)if(!movHide.includes(l.id))out.push(l);
+  return out.sort((a,b)=>String(b.creado).localeCompare(String(a.creado))).slice(0,40);
+}
+const movById=id=>movList().find(m=>m.id===id)||null;
+
+/* ---------- Avisos ---------- */
 function mpNote(){
   const n=$("#mpNote");
-  if(!nubeOn()){n.hidden=false;n.innerHTML="Para usar entregas, conecta primero el envío automático (Supabase) en <b>1 · Panel</b>.";return false}
-  if(!movCatalog()){n.hidden=false;n.innerHTML="Carga el informe del ERP en <b>1 · Panel</b>: de ahí salen las descripciones, unidades y equivalencias que usan los celulares.";return false}
+  if(!movOk()){n.hidden=false;n.innerHTML="Para usar entregas, conecta primero el envío automático (Supabase) en <b>1 · Panel</b>.";return false}
+  if(!movCatalog()){n.hidden=false;n.innerHTML=prodMode()?"Todavía no hay lista de productos. Pide al supervisor que cargue el informe del ERP.":"Carga el informe del ERP en <b>1 · Panel</b>: de ahí salen las descripciones, unidades, equivalencias y el stock que ve quien entrega.";return false}
   n.hidden=true;return true;
 }
-$("#btnMpCrear").onclick=async()=>{
+
+/* ---------- Crear: solicitud (con productos) o entrega sin solicitud ---------- */
+async function crearMov(conSol){
   if(!mpNote())return toast("Falta preparar el Panel (ver aviso)");
-  const its=movCatalog(), ahora=new Date(), vv=$("#mpVence").value;
-  const vence=venceDesde(vv,ahora);
-  const nombre=norm($("#mpNombre").value)||("Entrega MP "+ahora.toLocaleDateString("es-CL")+" "+hhmm(ahora)), ref=norm($("#mpRef").value);
-  const items=its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um]);
-  $("#btnMpCrear").disabled=true;$("#mpMsg").textContent="Creando…";
+  if(conSol&&!mpSol.length){toast("Agrega al menos un producto a la solicitud");return $("#solCod").focus()}
+  const ahora=new Date(), vence=venceDesde($("#mpVence").value,ahora), ref=norm($("#mpRef").value), por=norm($("#solPor").value).toUpperCase();
+  const cuando=String(ahora.getDate()).padStart(2,"0")+"-"+String(ahora.getMonth()+1).padStart(2,"0")+" · "+hhmm(ahora);
+  const nombre=(conSol?"Solicitud ":"Entrega ")+cuando;
+  const sol=conSol?solMeta():null, items=prodMode()?null:movCatalog().map(catRow), prod=prodMode();
+  const bs=[$("#btnSolGen"),$("#btnMpSinSol")];bs.forEach(b=>b.disabled=true);$("#mpMsg").textContent="Creando…";
   try{
-    const r=await rpc(SB,"cb_mov_crear",{p_clave:SB.admin,p_nombre:nombre,p_vence:vence,p_items:items,p_meta:{ref,productos:items.length,sol:solMeta()}});
-    const m={id:r.id,nombre,ref,creado:ahora.toISOString(),vence,link:movLink(r.id,r.token),sol:solMeta()};
-    if(mpSol.length){mpSol=[];solSave();renderSol()}
-    movs.unshift(m);store.set("inv_movs",movs);movSel=m.id;store.set("inv_movsel",movSel);
-    $("#mpNombre").value="";$("#mpRef").value="";
-    mpShowCreated(m);await refreshMov(true);
+    const r=await mrpc("cb_mov_crear",{p_nombre:nombre,p_vence:prod?null:vence,p_items:items,p_meta:{ref,por,sol,tipo:conSol?"solicitud":"entrega",productos:movCatalog().length}});
+    const m={id:r.id,nombre,ref,por,creado:ahora.toISOString(),vence:prod?null:vence,link:r.token?movLink(r.id,r.token):"",sol};
+    if(conSol){mpSol=[];solSave();renderSol()}
+    if(!prod){movs.unshift(m);movs=movs.slice(0,60);store.set("inv_movs",movs)}
+    movSel=m.id;store.set("inv_movsel",movSel);
+    $("#mpRef").value="";
+    if(prod){$("#mpCreated").innerHTML=`<div class="cbox" style="max-width:none"><b>Solicitud enviada a bodega</b><div class="small">Bodega la ve al instante y genera el link para quien entrega y quien recibe. Aquí verás el avance en vivo.</div></div>`;toast("Solicitud enviada a bodega")}
+    else mpShowCreated(m);
+    await refreshMov(true);
   }catch(e){toast(movMsg(e))}
-  finally{$("#btnMpCrear").disabled=false;$("#mpMsg").textContent=""}
-};
+  finally{bs.forEach(b=>b.disabled=false);$("#mpMsg").textContent=""}
+}
+$("#btnSolGen").onclick=()=>crearMov(true);
+$("#btnMpSinSol").onclick=()=>crearMov(false);
+$("#solPor").value=store.get("inv_solpor","");
+$("#solPor").onchange=e=>{e.target.value=norm(e.target.value).toUpperCase();store.set("inv_solpor",e.target.value)};
+
 /* ---------- Solicitud de materiales ---------- */
 var mpSol=store.get("inv_mpsol",[]);
 const solSave=()=>store.set("inv_mpsol",mpSol);
@@ -2184,15 +2462,22 @@ function solAdd(code,q,silent){
   if(ex)ex.q+=q;else mpSol.push({cod,q,desc:it?it.desc:"",um:it?umTxt(it.um):"",ce:it&&conv(it)?it.ce:"",f:it&&conv(it)?+it.f:1,ok:!!it});
   solSave();return true;
 }
-function solHint(){const c=norm($("#solCod").value),h=$("#solHint");if(!c){h.innerHTML="";return}
-  const it=solFind(c);h.innerHTML=it?`<b>${esc(it.desc)}</b> <span class="muted">· cantidad en ${esc(umTxt(it.um))}${conv(it)?` (1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))})`:""}</span>`:(movCatalog()?'<span style="color:var(--warn)">Código no está en el informe del ERP</span>':'<span class="muted">Carga el ERP en 1 · Panel para ver descripciones</span>')}
+function solHint(){const c=norm($("#solCod").value),h=$("#solHint"),sg=$("#solSugg");sg.hidden=true;if(!c){h.innerHTML="";return}
+  const it=solFind(c);
+  if(!it&&/[a-záéíóúñ]{3,}/i.test(c)){const res=buscarNombre(movCatalog(),c);h.innerHTML="";if(res.length){sg.hidden=false;
+      sg.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
+      $$("#solSugg button").forEach(b=>b.onclick=()=>{$("#solCod").value=res[+b.dataset.n].cod;solHint();$("#solQty").focus()})}
+    else h.innerHTML='<span style="color:var(--warn)">No encontré productos con ese nombre</span>';return}
+  h.innerHTML=it?`<b>${esc(it.desc)}</b> <span class="muted">· cantidad en ${esc(umTxt(it.um))}${conv(it)?` (1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))})`:""}</span>`:(movCatalog()?'<span style="color:var(--warn)">Código no está en la lista de productos</span>':'<span class="muted">Falta la lista de productos (ver aviso)</span>')}
 function renderSol(){
   $("#solList").innerHTML=mpSol.map((x,i)=>`<div class="solRow"><div class="sd"><b title="${esc(x.desc)}">${esc(x.desc||"(no está en el ERP)")}</b><span class="muted code">${esc(x.cod)}</span></div>
     <span style="white-space:nowrap"><input data-sq="${i}" value="${fmt2(x.q)}" inputmode="decimal" aria-label="Cantidad"> <span class="muted">${esc(x.um||"")}</span>${x.ce&&x.f!==1?`<span class="sub">${fmt2(x.q/x.f)} ${esc(plural(x.ce))}</span>`:""}</span>
     <button class="btn sm" data-sr="${i}" aria-label="Quitar">✕</button></div>`).join("");
-  $("#solInfo").textContent=mpSol.length?`${fmt(mpSol.length)} productos solicitados`:"Sin solicitud";
+  $("#solInfo").textContent=mpSol.length?`${fmt(mpSol.length)} productos en la solicitud`:"Sin productos todavía";
   $("#solClear").hidden=!mpSol.length;
-  $("#mpSolNote").innerHTML=mpSol.length?`<span class="pill p-info">Incluye solicitud de ${fmt(mpSol.length)} productos</span>`:"";
+  const pm=prodMode();
+  $("#btnSolGen").textContent=(pm?"Enviar solicitud a bodega":"Generar solicitud")+(mpSol.length?` (${fmt(mpSol.length)} productos)`:"");
+  $("#solTxt").innerHTML=pm?"Agrega los códigos y cantidades que necesitas y toca <b>Enviar solicitud a bodega</b>. Bodega la recibe al instante y prepara la entrega.":"Agrega códigos y cantidades y toca <b>Generar solicitud</b>: se crea la entrega con su link. Las solicitudes de producción llegan como aviso arriba.";
   $$("#solList [data-sr]").forEach(b=>b.onclick=()=>{mpSol.splice(+b.dataset.sr,1);solSave();renderSol()});
   $$("#solList [data-sq]").forEach(inp=>inp.onchange=()=>{const v=num(inp.value),x=mpSol[+inp.dataset.sq];if(v!=null&&v>0){x.q=v;solSave()}renderSol()});
 }
@@ -2208,11 +2493,64 @@ $("#solClear").onclick=()=>{mpSol=[];solSave();renderSol()};
 renderSol();
 function mpShowCreated(m){
   $("#mpCreated").innerHTML=`<div class="cbox" style="max-width:none">
-    <div><b>Entrega creada: ${esc(m.nombre)}</b>${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}</div>
-    <div class="small">Envía <b>este mismo link</b> a las dos personas. Al abrirlo, cada una elige <b>Entrego</b> o <b>Recibo</b>; cada rol queda amarrado a un solo celular.</div>
+    <div><b>Creada: ${esc(m.nombre)}</b></div>
+    <div class="small">Envía <b>este mismo link</b> a quien entrega en bodega y a quien recibe. Al abrirlo, cada uno elige <b>Entrego</b> o <b>Recibo</b>.</div>
     <input readonly id="mpLinkOut" value="${esc(m.link)}">
     <div class="row"><a class="btn primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="mpCopy">Copiar link</button><button class="btn sm" id="mpCreatedX">Listo</button></div></div>`;
   $("#mpCopy").onclick=()=>copyText(m.link,$("#mpLinkOut"));$("#mpCreatedX").onclick=()=>$("#mpCreated").innerHTML="";
+}
+
+/* ---------- Acceso para producción (solo el supervisor) ---------- */
+function renderAcc(){
+  const box=$("#mpAccBox");if(!box)return;
+  $("#mpAcc").hidden=prodMode()||!nubeOn();
+  const at=store.get("inv_catat",null);
+  $("#catInfo").innerHTML=`Lista de productos y stock en la nube: ${at?"enviada "+fmtDT(at):"aún no enviada"} · <button class="linkBtn" id="catGo">Enviar ahora</button>`;
+  $("#catGo").onclick=()=>catSync(true);
+  $("#mpAccSum").textContent=SB.prod?"· activo":"";
+  if(!SB.prod){box.innerHTML=`<button class="btn primary" id="accNew" style="justify-content:center;width:100%">Crear link para producción</button>`;$("#accNew").onclick=()=>accSet();return}
+  const link=appUrl()+"?prod="+encodeURIComponent(SB.prod)+sbLinkParams();
+  box.innerHTML=`<input readonly id="accLink" value="${esc(link)}">
+    <div class="row" style="gap:6px"><a class="btn sm primary" href="${esc(waLink("Panel de Entrega de MP (producción). Ábrelo en el computador:\n"+link))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" id="accCopy">Copiar link</button><button class="btn sm danger" id="accRot">Cambiar clave…</button></div>
+    <div class="small" id="accEstado"></div>
+    <div id="accConfirm"></div>`;
+  $("#accCopy").onclick=()=>copyText(link,$("#accLink"));
+  rpc(SB,"cb_prod_estado",{p_clave:SB.admin}).then(e=>{const el=$("#accEstado");if(!el||!e)return;
+    el.innerHTML=e.usado?`🔒 Vinculado a <b>${esc(e.equipo||"un equipo")}</b> desde ${fmtDT(e.usado)}${e.visto?` · última conexión ${hace(e.visto)}`:""}. Si se reenvía, no abre en otro equipo.`:"Aún no se abre. Quedará amarrado al primer equipo que lo abra."}).catch(()=>{});
+  $("#accRot").onclick=()=>confirmBox("Se crea un link nuevo y el anterior deja de funcionar (también en el equipo vinculado).",()=>accSet(),"#accConfirm");
+}
+async function accSet(){
+  const k=rndKey(24);
+  try{await rpc(SB,"cb_prod_clave",{p_clave:SB.admin,p_nueva:k});SB.prod=k;store.set("inv_sb",SB);renderAcc();catSync(true);toast("Link de producción listo")}
+  catch(e){toast(movMsg(e))}
+}
+
+/* ---------- Abrir el panel de producción desde su link ---------- */
+function checkProdLink(){
+  let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
+  const k=q.get("prod");if(!k)return false;
+  const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), pk=q.get("k")||"";
+  try{history.replaceState(null,"",location.pathname+"#mp")}catch(e){}
+  if(!url||!pk){lockScreen("El link está incompleto. Pide uno nuevo al supervisor.","No se puede abrir este link","⚠️",true);return true}
+  prodForce=true;
+  if(PRD&&PRD.tok===k&&PRD.ses)return true;            // este equipo ya está vinculado a este link
+  PRD={url,key:pk,tok:k,ses:""};
+  prodReady=(async()=>{
+    try{const ses=await rpc({url,key:pk},"cb_prod_vincular",{p_token:k,p_equipo:equipoDesc()});PRD.ses=ses;store.set("inv_prod",PRD)}
+    catch(e){PRD=null;store.set("inv_prod",null);prodForce=false;
+      lockScreen(e.message==="prod_usado"?"Este link ya se abrió en otro equipo y quedó amarrado a ese equipo. Si eres el jefe de producción y cambiaste de computador, pide un link nuevo al supervisor.":movMsg(e),e.message==="prod_usado"?"Link ya usado en otro equipo":"No se puede abrir este link","🔒",true);
+      throw e}
+  })();
+  prodReady.catch(()=>{});
+  return true;
+}
+function equipoDesc(){const u=navigator.userAgent;const os=/Windows/.test(u)?"Windows":/Mac OS/.test(u)?"Mac":/Android/.test(u)?"Android":/iPhone|iPad/.test(u)?"iPhone/iPad":/Linux/.test(u)?"Linux":"Equipo";
+  const br=/Edg\//.test(u)?"Edge":/Chrome\//.test(u)?"Chrome":/Firefox\//.test(u)?"Firefox":/Safari\//.test(u)?"Safari":"navegador";return os+" · "+br}
+function prodApply(){
+  if(!prodMode())return false;
+  document.body.classList.add("prodv");document.body.classList.remove("op","locked","mov");$("#lockBox").innerHTML="";
+  $("#status").textContent="";
+  return true;
 }
 
 /* ---------- Panel: estado en vivo ---------- */
@@ -2225,8 +2563,10 @@ function ladoEstado(l,x){
   if(enLinea(ult))return ["on",l.n_lecturas?"En línea · escaneando":"En línea · abrió el link",l.ultimo_envio?`último envío ${hace(l.ultimo_envio)}`:`abrió ${hace(l.abierto)}`];
   return ["off","Sin señal",ult?`última señal ${hace(ult)}`:""];
 }
+const esSolicitada=x=>!!(x&&x.meta&&x.meta.estado==="solicitada"&&!x.finalizado);
 function movEstado(x){
   if(!x)return '<span class="pill p-mut">…</span>';
+  if(esSolicitada(x))return '<span class="pill p-warn">Solicitada</span>';
   const L=x.lados||{};
   if(L.E&&L.E.terminado&&L.R&&L.R.terminado)return '<span class="pill p-ok">Terminada</span>';
   if(x.finalizado)return '<span class="pill p-mut">Cerrada</span>';
@@ -2235,39 +2575,44 @@ function movEstado(x){
   return '<span class="pill p-ok">En curso</span>';
 }
 async function refreshMov(force){
-  if(!nubeOn()||movBusy)return;movBusy=true;
+  if(!movOk()||movBusy)return;movBusy=true;
   try{
-    const arr=await rpc(SB,"cb_mov_listar",{p_clave:SB.admin});
+    const arr=await mrpc("cb_mov_listar");
     movLive=new Map((arr||[]).map(x=>[x.id,x]));movAt=new Date();
-    for(const x of movLive.values()){const L=x.lados||{};if(L.E&&L.E.terminado&&L.R&&L.R.terminado&&!x.finalizado&&movs.some(m=>m.id===x.id)){x.finalizado=new Date().toISOString();rpc(SB,"cb_mov_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}}
+    for(const x of movLive.values()){const L=x.lados||{};if(L.E&&L.E.terminado&&L.R&&L.R.terminado&&!x.finalizado){x.finalizado=new Date().toISOString();mrpc("cb_mov_finalizar",{p_id:x.id}).catch(()=>{})}}
+    if(!movSel){const f=movList()[0];if(f){movSel=f.id;store.set("inv_movsel",movSel)}}
     if(movSel){const x=movLive.get(movSel),L=(x&&x.lados)||{},sig=["E","R"].map(r=>L[r]?(L[r].ultimo_envio||"")+"|"+L[r].n_lecturas:"-").join("/");
-      if(force||movSeen[movSel]!==sig||!movLect[movSel]){try{movLect[movSel]=await rpc(SB,"cb_mov_lecturas",{p_clave:SB.admin,p_id:movSel})||[];movSeen[movSel]=sig}catch(e){}}}
-    renderMp();
-  }catch(e){if(force)toast(movMsg(e))}
+      if(force||movSeen[movSel]!==sig||!movLect[movSel]){try{movLect[movSel]=await mrpc("cb_mov_lecturas",{p_id:movSel})||[];movSeen[movSel]=sig}catch(e){}}}
+    renderMp();avisoSolicitudes();catSync(false);
+  }catch(e){if(force)toast(movMsg(e));if(prodMode()&&/acceso_produccion/.test(e.message))lockScreen(movMsg(e),"Acceso de producción no válido","🔒",true)}
   finally{movBusy=false}
 }
-setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-mp").hidden)refreshMov(false)},15000);
+setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-mp").hidden)refreshMov(false)},15000);
 $("#btnMpRefresh").onclick=()=>refreshMov(true);
 $("#btnMpTraer").onclick=()=>refreshMov(true);
-function mpEnter(){mpNote();renderMp();refreshMov(true)}
+function mpEnter(){mpNote();renderAcc();renderSol();renderMp();catLoad(false).then(()=>{mpNote();solHint()});refreshMov(true)}
 
 function renderMp(){
   if($("#v-mp").hidden)return;
+  const L0=movList(), pen=L0.filter(m=>esSolicitada(movLive.get(m.id))).length, act=L0.filter(m=>{const x=movLive.get(m.id);return x&&!x.finalizado&&!isVenc(x.vence)&&!esSolicitada(x)}).length;
   $("#mpAt").textContent=movAt?`actualizado ${hhmm(movAt)} · se refresca cada 15 s`:"";
-  $("#mpTbl").innerHTML=movs.length?movs.map((m,i)=>{const x=movLive.get(m.id),L=(x&&x.lados)||{},open=x&&!x.finalizado&&!isVenc(x.vence);
+  $("#mpListSum").textContent=`${pen?`· ${fmt(pen)} por generar link `:""}· ${fmt(act)} en curso · ${fmt(L0.length)} en total`;
+  $("#mpTbl").innerHTML=L0.length?L0.map((m,i)=>{const x=movLive.get(m.id),L=(x&&x.lados)||{},open=x&&!x.finalizado&&!isVenc(x.vence);
       const side=r=>{const [d,t]=ladoEstado(L[r],x);return `<div class="ms"><span class="dot ${d}"></span><span>${r==="E"?"Entrega":"Recibe"}: <b style="color:var(--ink)">${t}</b>${L[r]&&L[r].persona?" · "+esc(L[r].persona):""}${L[r]?" · "+fmt(L[r].n_lecturas):""}</span></div>`};
       return `<div class="mpItem${m.id===movSel?" sel":""}" data-mv="${i}"><div class="mh"><b>${esc(m.nombre)}${m.ref?`<span class="small muted" style="font-weight:500"> · ${esc(m.ref)}</span>`:""}</b>${movEstado(x)}</div>
-      <div class="ms">Creada ${fmtDT(m.creado)}</div>${x?side("E")+side("R"):""}
-      <div class="acts">${open?`<a class="btn sm" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-mc="${i}">Copiar link</button><button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}">Quitar</button></div></div>`}).join("")
-    :`<div class="muted small">Todavía no creas entregas.</div>`;
+      <div class="ms">${m.por?"Solicita "+esc(m.por)+" · ":""}${m.sol?fmt(m.sol.length)+" productos · ":""}creada ${fmtDT(m.creado)}</div>${esSolicitada(x)?`<div class="ms" style="color:var(--warn)">${prodMode()?"Esperando que bodega genere el link":"Falta generar el link para bodega"}</div>`:x?side("E")+side("R"):""}
+      <div class="acts">${open&&m.link?`<a class="btn sm" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-mc="${i}">Copiar link</button>`:""}${open?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}">Quitar</button></div></div>`}).join("")
+    :`<div class="muted small">Todavía no hay entregas.</div>`;
   $$("#mpTbl .acts").forEach(a=>a.onclick=e=>e.stopPropagation());
-  $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=movs[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();if(innerWidth<=900)setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
-  $$("#mpTbl [data-mc]").forEach(b=>b.onclick=()=>copyText(movs[+b.dataset.mc].link));
-  $$("#mpTbl [data-mf]").forEach(b=>b.onclick=()=>{const m=movs[+b.dataset.mf];confirmBox(`Cerrar "${esc(m.nombre)}": los celulares ya no podrán enviar más lecturas.`,async()=>{try{await rpc(SB,"cb_mov_finalizar",{p_clave:SB.admin,p_id:m.id});await refreshMov(true);toast("Entrega cerrada")}catch(e){toast(movMsg(e))}},"#mpConfirm")});
-  $$("#mpTbl [data-mr]").forEach(b=>b.onclick=()=>{const m=movs[+b.dataset.mr];confirmBox(`Quitar "${esc(m.nombre)}" de esta lista (en Supabase queda guardada).`,()=>{movs=movs.filter(z=>z.id!==m.id);store.set("inv_movs",movs);if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}renderMp()},"#mpConfirm")});
+  $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=L0[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();if(innerWidth<=980)setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
+  $$("#mpTbl [data-mc]").forEach(b=>b.onclick=()=>copyText(L0[+b.dataset.mc].link));
+  $$("#mpTbl [data-mf]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mf];confirmBox(`Cerrar "${esc(m.nombre)}": los celulares ya no podrán enviar más lecturas.`,async()=>{try{await mrpc("cb_mov_finalizar",{p_id:m.id});await refreshMov(true);toast("Entrega cerrada")}catch(e){toast(movMsg(e))}},"#mpConfirm")});
+  $$("#mpTbl [data-mr]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mr];confirmBox(`Quitar "${esc(m.nombre)}" de esta lista en este equipo (en Supabase queda guardada).`,()=>{movHide.push(m.id);store.set("inv_movhide",movHide.slice(-300));if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}renderMp()},"#mpConfirm")});
   renderMpCmp();
 }
-function mpSolOf(id){const m=movs.find(z=>z.id===id),x=movLive.get(id);return (m&&m.sol)||(x&&x.meta&&x.meta.sol)||null}
+$("#mpListBox").open=store.get("inv_mplist",false);
+$("#mpListBox").addEventListener("toggle",()=>store.set("inv_mplist",$("#mpListBox").open));
+function mpSolOf(id){const m=movById(id);return (m&&m.sol)||null}
 function mpRows(id){
   const ls=movLect[id]||[], map=new Map(), sol=mpSolOf(id);
   for(const [cod,q,desc,um,ce,f] of sol||[]){const k=key(cod),r=map.get(k)||{cod,desc:desc||"",um:um||"",ce:ce||"",f:+f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0,S:null};r.S=(r.S||0)+(+q||0);map.set(k,r)}
@@ -2280,11 +2625,40 @@ function mpRows(id){
 }
 const MPST={porent:["Por entregar","p-mut"],ok:["Cuadra","p-ok"],falta:["Recibió menos","p-bad"],sobra:["Recibió más","p-warn"],porrec:["Por recibir","p-info"],norec:["No recibido","p-bad"],noent:["Recibido sin entrega","p-bad"]};
 function mpQty(t,r,n){if(t==null)return "";const u=esc(umTxt(r.um));return `${fmt2(t)} <span class="small muted">${u}</span>${r.ce&&r.f!==1?`<span class="sub">${fmt2(n)} ${esc(plural(r.ce))}</span>`:""}`}
+async function activarMov(m){
+  const b=$("#btnAct");b.disabled=true;
+  try{const r=await rpc(SB,"cb_mov_activar",{p_clave:SB.admin,p_id:m.id,p_vence:venceDesde($("#actVence").value)});
+    const mm=Object.assign({},m,{link:movLink(m.id,r.token)});movs.unshift(mm);store.set("inv_movs",movs.slice(0,60));
+    $("#mpCreated").innerHTML="";await refreshMov(true);mpShowCreated(mm);$("#mpCreated").scrollIntoView({behavior:"smooth",block:"center"});toast("Link generado: envíalo a bodega y a quien recibe")}
+  catch(e){toast(movMsg(e));b.disabled=false}
+}
+// Aviso de solicitudes nuevas (solo el supervisor): número en la pestaña, banner y sonido.
+var solVistas=store.get("inv_solvistas",[]);
+function avisoSolicitudes(){
+  if(prodMode()||!nubeOn())return;
+  const pend=[...movLive.values()].filter(x=>esSolicitada(x)&&!movHide.includes(x.id)).sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));
+  const n=$("#nSol");n.hidden=!pend.length;n.textContent=pend.length;
+  const nuevas=pend.filter(x=>!solVistas.includes(x.id));
+  if(nuevas.length){solVistas=solVistas.concat(nuevas.map(x=>x.id)).slice(-200);store.set("inv_solvistas",solVistas);
+    audio.beep(true);setTimeout(()=>audio.beep(true),220);toast(`🔔 Nueva solicitud de materiales${nuevas[0].meta.por?" de "+nuevas[0].meta.por:""}`)}
+  const al=$("#mpAlert");if(!al)return;
+  al.innerHTML=pend.map(x=>`<div class="solAlert"><span>🔔 <b>Solicitud de ${esc(x.meta.por||"producción")}</b> · ${fmt((x.meta.sol||[]).length)} productos${x.meta.ref?" · "+esc(x.meta.ref):""} · ${hace(x.creado)}</span><span class="sep"></span><button class="btn sm accent" data-sa="${x.id}">Revisar y generar link</button></div>`).join("");
+  $$("#mpAlert [data-sa]").forEach(b=>b.onclick=()=>{movSel=b.dataset.sa;store.set("inv_movsel",movSel);if($("#v-mp").hidden)show("mp");else{refreshMov(true);renderMp()}setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),80)});
+}
+setInterval(()=>{if(nubeOn()&&!prodMode()&&!document.hidden&&$("#v-mp").hidden)refreshMov(false)},30000);
 function renderMpCmp(){
-  const card=$("#mpCard"), m=movs.find(z=>z.id===movSel);
+  const card=$("#mpCard"), m=movById(movSel);
   $("#mpEmpty").hidden=!!m;
   if(!m){card.hidden=true;return}card.hidden=false;
   const x=movLive.get(m.id),L=(x&&x.lados)||{};
+  const sol=esSolicitada(x), open=x&&!x.finalizado&&!isVenc(x.vence);
+  $("#mpAct").innerHTML=sol?(prodMode()?`<div class="notice">Solicitud enviada a bodega${x.meta.por?" por "+esc(x.meta.por):""} ${hace(x.creado)}. Bodega genera el link para quien entrega y quien recibe; aquí verás el avance en vivo.</div>`
+    :`<div class="actBox"><div><b>🔔 Solicitud de ${esc(x.meta.por||"producción")}</b> <span class="small muted">· ${fmt((x.meta.sol||[]).length)} productos · ${hace(x.creado)}</span><div class="small">Revisa lo solicitado y genera el link para el operario de bodega y quien recibe.</div></div>
+       <div class="row" style="gap:8px"><label class="f" style="flex:0 1 170px">Vigencia del link<select id="actVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label><button class="btn accent" id="btnAct" style="margin-top:16px">Generar link para bodega</button></div></div>`)
+    :(!prodMode()&&open&&m.link?`<div class="row" style="gap:6px"><span class="small muted">Link para bodega y quien recibe:</span><a class="btn sm primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" id="actCopy">Copiar link</button></div>`:"");
+  if($("#btnAct"))$("#btnAct").onclick=()=>activarMov(m);
+  if($("#actCopy"))$("#actCopy").onclick=()=>copyText(m.link);
+  $("#mpSides").hidden=sol;
   $("#mpTitle").innerHTML=`${esc(m.nombre)}${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}`;
   $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div></div>`}).join("");
   const rows=mpRows(m.id), cnt=s=>rows.filter(r=>s.includes(r.st)).length, hasS=rows.some(r=>r.S!=null);
@@ -2308,13 +2682,15 @@ function renderMpCmp(){
 }
 $("#mpQ").addEventListener("input",()=>renderMpCmp());
 $("#btnMpExp").onclick=()=>{
-  const m=movs.find(z=>z.id===movSel);if(!m)return;const rows=mpRows(m.id);
+  const m=movById(movSel);if(!m)return;const rows=mpRows(m.id);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Equivalencia":r.ce&&r.f!==1?`1 ${r.ce} = ${r.f} ${umTxt(r.um)}`:"","Solicitado":r.S??"","Entregado":r.E??"","Entregado (equiv.)":r.ce&&r.f!==1&&r.E!=null?r.qE:"","Recibido":r.R??"","Recibido (equiv.)":r.ce&&r.f!==1&&r.R!=null?r.qR:"","Diferencia":r.dif??"","Estado":MPST[r.st][0]}))),"Entrega vs Recepción");
   XLSX.utils.book_append_sheet(wb,sheetFrom((movLect[m.id]||[]).map(d=>({"Rol":ROL[d.rol]||d.rol,"Fecha hora":fmtDT(d.t),"Persona":d.user||"","Código":d.code,"Descripción":d.desc||"","Cantidad leída":d.qty,"Unidad leída":d.ce&&+d.f!==1?d.ce:umTxt(d.um),"Factor":+d.f||1,"Total (unidad ERP)":(+d.qty||0)*(+d.f||1),"Unidad ERP":umTxt(d.um)}))),"Lecturas");
   saveWb(wb,("Entrega_MP_"+m.nombre).replace(/[^\w\-]+/g,"_").slice(0,60)+".xlsx");
 };
 
+
+checkProdLink();   // si se abrió con el link de producción, este equipo queda como panel de producción
 /* =================== CELULAR =================== */
 var om=store.get("inv_om",null), omIdx=new Map(), omForce=false, omSyncing=false, omT=null, omHold=false, omCamI=null, omLast={c:"",miss:99};
 const omSave=()=>store.set("inv_om",om);
@@ -2351,7 +2727,7 @@ async function omTake(id,token,url,k,rol){
     if(om&&om.id!==id&&om.dirty&&!om.fin){await omSync();}
     const m=await rpc({url,key:k},"cb_mov_abrir",{p_id:id,p_token:token,p_device:cfg.dev,p_rol:rol});
     const loc=om&&om.id===id&&om.rol===rol&&!om.fin&&om.lect?om.lect:null, srv=Array.isArray(m.lect)?m.lect:[], keep=loc&&(loc.length>=srv.length||om.dirty)?loc:srv;
-    om={id,rol,nombre:m.nombre,ref:(m.meta&&m.meta.ref)||"",vence:m.vence,conf:{url,key:k,secret:m.secret},items:omItems(m.items),sol:(m.meta&&m.meta.sol)||null,lect:keep||[],persona:(om&&om.persona)||cfg.user||"",dirty:keep!==srv,ver:0,syncAt:null,syncErr:"",fin:false};
+    om={id,rol,nombre:m.nombre,ref:(m.meta&&m.meta.ref)||"",vence:m.vence,conf:{url,key:k,secret:m.secret},items:omItems(m.items),sol:(m.meta&&m.meta.sol)||null,stock:m.stock||null,stockAt:m.stock_at||null,lect:keep||[],persona:(om&&om.persona)||cfg.user||"",dirty:keep!==srv,ver:0,syncAt:null,syncErr:"",fin:false};
     omSave();ban.innerHTML="";$("#omPick").innerHTML="";omEnter();if(om.dirty)omSync();omLatido();
     toast(rol==="E"?"Listo: escanea lo que entregas":"Listo: escanea lo que recibes");
   }catch(e){ban.innerHTML=`<div class="lockCard"><div class="big">⚠️</div><h2>No se pudo tomar el rol</h2><p>${esc(movMsg(e))}</p></div>`;$("#omPick").innerHTML=""}
@@ -2378,13 +2754,22 @@ function omRender(){
     $("#omConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
   omRenderSync();
 }
+// Stock disponible del ERP (solo lo ve quien entrega): alcanza, alcanza en parte o no hay.
+function omStock(cod){if(!om||om.rol!=="E"||!om.stock)return null;const s=om.stock[cod]||om.stock[String(cod)];if(!s)return null;return s[0]!=null?+s[0]:(s[1]!=null?+s[1]:null)}
+function omStockPill(cod,q,um,ce,f){const d=omStock(cod), eq=d!=null&&ce&&+f>0&&+f!==1?` (${fmt2(d/+f)} ${esc(plural(ce))})`:"";
+  if(d==null)return '<span class="stk" style="background:var(--chip);color:var(--muted)">Sin dato de stock</span>';
+  if(d<=0)return '<span class="stk" style="background:var(--bad-bg);color:var(--bad)">Sin stock</span>';
+  if(q!=null&&d<q-1e-9)return `<span class="stk" style="background:var(--warn-bg);color:var(--warn)">Disp. ${fmt2(d)} ${esc(um||"")}${eq} · no alcanza</span>`;
+  return `<span class="stk" style="background:var(--ok-bg);color:var(--ok)">Disp. ${fmt2(d)} ${esc(um||"")}${eq}</span>`}
 function omSolHtml(){
   if(!om||!om.sol||!om.sol.length)return "";
   const reg=k=>om.lect.filter(l=>key(l.k||l.code)===k).reduce((a,l)=>a+(+l.qty||0)*(+l.f||1),0);
   const rows=om.sol.map(([cod,q,desc,um,ce,f])=>{const r=reg(key(cod)),done=r>=q-1e-9;return {cod,q,desc,um,ce,f:+f||1,r,done}});
-  const nd=rows.filter(x=>x.done).length;
-  return `<details class="omSol" ${nd<rows.length?"open":""}><summary><b>Solicitud: ${fmt(nd)} de ${fmt(rows.length)} completos</b></summary><div class="clist" style="margin-top:8px">`+
-    rows.map(x=>`<button class="clrow${x.done?" done":""}" data-sc="${esc(x.cod)}"><span class="code">${esc(x.cod)}</span><span class="cd">${esc(x.desc||x.cod)}</span><span class="cs">${fmt2(x.r)} / ${fmt2(x.q)} ${esc(x.um||"")}${x.ce&&x.f!==1?` · ${fmt2(x.q/x.f)} ${esc(plural(x.ce))}`:""}</span></button>`).join("")+`</div></details>`;
+  const nd=rows.filter(x=>x.done).length, verStock=om.rol==="E"&&!!om.stock;
+  return `<details class="omSol" ${nd<rows.length?"open":""}><summary><b>Solicitud: ${fmt(nd)} de ${fmt(rows.length)} completos</b></summary>`+
+    (verStock?`<div class="small muted" style="margin-top:6px">Disponible según el ERP${om.stockAt?" al "+fmtDT(om.stockAt):""} · revisa primero lo que no alcanza.</div>`:"")+
+    `<div class="clist" style="margin-top:8px">`+
+    rows.map(x=>`<button class="clrow${x.done?" done":""}" data-sc="${esc(x.cod)}"><span class="code">${esc(x.cod)}</span><span class="cd">${esc(x.desc||x.cod)}${verStock&&!x.done?"<br>"+omStockPill(x.cod,x.q,x.um,x.ce,x.f):""}</span><span class="cs">${fmt2(x.r)} / ${fmt2(x.q)} ${esc(x.um||"")}${x.ce&&x.f!==1?` · ${fmt2(x.q/x.f)} ${esc(plural(x.ce))}`:""}</span></button>`).join("")+`</div></details>`;
 }
 function omRenderSync(){
   if(!om)return;let h;
@@ -2399,7 +2784,8 @@ function omPending(code){
   const it=omFind(code),p=$("#omPending");p.hidden=false;p.className="pending"+(it?"":" bad");
   const tot=om.lect.filter(l=>key(l.k||l.code)===key(it?it.cod:code)).reduce((a,l)=>a+(+l.qty||0),0);
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(code)}${it&&it.cod!==code?" → "+esc(it.cod):""}${tot?` · ya registrado: ${fmt2(tot)} ${esc(it&&conv(it)?plural(it.ce):umTxt(it?it.um:""))}`:""}</div>`+
-    convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza. Si pesas por partes, ingresa cada pesada con OK.");
+    convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza. Si pesas por partes, ingresa cada pesada con OK.")+
+    (it&&om.rol==="E"&&om.stock?`<div style="margin-top:4px">${omStockPill(it.cod,(om.sol||[]).filter(x=>key(x[0])===key(it.cod)).reduce((a,x)=>a+(+x[1]||0),0)||null,umTxt(it.um),conv(it)?it.ce:"",conv(it)?it.f:1)}</div>`:"");
   $("#omQtyEb").textContent=qtyLabel(it,2);
   return it;
 }
@@ -2479,7 +2865,7 @@ $("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
- if(!isOp()&&!isSupDevice())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
+ if(!isOp()&&!isSupDevice()&&!prodMode())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
 var _qMov=false;try{_qMov=!!new URLSearchParams(location.search).get("mov")}catch(e){}
 checkMovLink().then(mv=>{if(mv)return;if(movOn()){omEnter();omSync();return}checkNubeLink().then(x=>{if(!x)checkConteoLink()})});
 if(nubeOn())refreshNube(true);
