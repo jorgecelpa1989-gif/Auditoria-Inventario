@@ -155,13 +155,22 @@ body:has(#v-resultado:not([hidden])) .wrap{max-width:1720px}
 @media (max-width:820px){.resGrid{grid-template-columns:1fr;grid-template-areas:"l" "c" "r"}}
 .mpGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:16px;align-items:start}
 .mpFold{display:block}.mpFold>*+*{margin-top:8px}.mpFold>summary{cursor:pointer;list-style:revert;font-size:15px}.mpFold[open]>summary{margin-bottom:4px}
+.solUnit{align-self:flex-start}.solUnit button{padding:5px 10px;font-size:13px}
 .solMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .linkBtn{background:none;border:0;color:var(--primary);text-decoration:underline;cursor:pointer;padding:2px 0;font:inherit;align-self:center}
 .solAlert{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
 .actBox{display:flex;flex-direction:column;gap:6px;border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px}
 nav.tabs .n.alert{background:var(--warn);color:#fff}
+.puestoBar{display:none;align-items:center;gap:10px;max-width:720px;width:100%;margin:0 auto 10px}
+body.puesto .puestoBar{display:flex}
+body.puesto nav.tabs,body.puesto #status{display:none!important}
+.puMenu{display:flex;flex-direction:column;gap:12px;max-width:720px;width:100%;margin:12px auto}
+.puBtn{position:relative;display:flex;align-items:center;gap:14px;text-align:left;padding:18px 44px 18px 16px;border:2px solid var(--primary);border-radius:14px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
+.puBtn .ic{font-size:30px}.puBtn b{font-size:18px;display:block}.puBtn .s{font-size:13px;color:var(--muted)}
+.puBtn .dotR{position:absolute;top:10px;right:12px;min-width:22px;height:22px;border-radius:11px;background:var(--bad);color:#fff;font:700 12px var(--font);display:flex;align-items:center;justify-content:center;padding:0 6px}
+.puBtn[disabled]{opacity:.5;cursor:default}
 .stk{font-size:12px;font-weight:600;padding:1px 7px;border-radius:9px;white-space:nowrap}
-body.prodv nav.tabs button:not([data-v="mp"]),body.prodv #status{display:none!important}
+body.prodv nav.tabs button:not([data-v="mp"]):not([data-v="pt"]),body.prodv #status{display:none!important}
 body.prodv .supOnly{display:none!important}
 .mpRight{display:flex;flex-direction:column;gap:16px;min-width:0}
 .solAdd{display:grid;grid-template-columns:minmax(0,1fr) 76px auto;gap:6px}
@@ -171,7 +180,7 @@ body.prodv .supOnly{display:none!important}
 .solRow .sd{min-width:0}.solRow .sd b{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .solRow input{width:64px;padding:4px 6px;text-align:right}
 .mpLeft{display:flex;flex-direction:column;gap:16px;min-width:0}.mpMain{min-width:0;display:flex;flex-direction:column;gap:16px}
-body:has(#v-mp:not([hidden])) .wrap{max-width:1720px}
+body:has(#v-mp:not([hidden])) .wrap,body:has(#v-pt:not([hidden])) .wrap{max-width:1720px}
 .mpList{display:flex;flex-direction:column;gap:8px;max-height:62vh;overflow:auto}
 .mpItem{border:1px solid var(--line);border-radius:9px;padding:9px 10px;display:flex;flex-direction:column;gap:5px;background:var(--panel);cursor:pointer}
 .mpItem:hover{border-color:var(--primary)}.mpItem.sel{border:2px solid var(--primary);background:var(--info-bg)}
@@ -202,6 +211,7 @@ body.mov nav.tabs,body.mov #status{display:none!important}
     <button role="tab" data-v="contar" aria-selected="false" hidden>Contar<span class="n" id="nScans">0</span></button>
     <button role="tab" data-v="mp" aria-selected="false">2 · Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
     <button role="tab" data-v="resultado" aria-selected="false">3 · Resultados</button>
+    <button role="tab" data-v="pt" aria-selected="false">4 · Producto terminado</button>
   </nav>
 </div></header>
 
@@ -267,6 +277,7 @@ body.mov nav.tabs,body.mov #status{display:none!important}
       <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
       <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
       <div class="small" id="rotRes"></div></details>
+    <label class="small" id="cPuWrap" style="display:flex;gap:6px;align-items:center" hidden><input type="checkbox" id="cPuesto"> Asignar también al celular fijo de bodega (le aparece en su menú)</label>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
   </div>
@@ -895,6 +906,232 @@ grant execute on function
   public.cb_mov_crear(text, text, timestamptz, jsonb, jsonb), public.cb_mov_listar(text), public.cb_mov_lecturas(text, uuid),
   public.cb_mov_finalizar(text, uuid), public.cb_mov_abrir(uuid, text, text, text)
 to anon, authenticated;
+
+
+-- =====================================================================
+--  CONTROL DE OPERACIONES · Grupo Vector
+--  Actualización 04: CELULARES FIJOS (bodega y producción) + PRODUCTO TERMINADO (PT)
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No borra datos. Se puede ejecutar más de una vez.
+--  Requiere haber ejecutado antes la actualización 03 (acceso de producción).
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+-- ---------- Celulares fijos: uno de bodega y uno de producción ----------
+-- El link de cada celular queda amarrado al primer equipo que lo abre (si se reenvía, no abre en otro).
+create table if not exists public.cb_puesto (
+  id          text primary key check (id in ('bodega','produccion')),
+  hash        text not null,
+  creado      timestamptz not null default now(),
+  usado       timestamptz,
+  sesion_hash text,
+  equipo      text,
+  visto       timestamptz,
+  persona     text
+);
+
+-- Conteos: guardan su link para poder asignarlos al celular de bodega.
+alter table public.cb_conteos add column if not exists link_token text;
+alter table public.cb_conteos add column if not exists puesto text;
+
+-- ---------- Producto terminado: cada pallet que sale de máquina y cada pallet que recibe bodega ----------
+create table if not exists public.cb_pt (
+  lid     text primary key,
+  puesto  text not null check (puesto in ('bodega','produccion')),
+  pallet  text not null,
+  data    jsonb not null,
+  t       timestamptz not null default now()
+);
+create index if not exists cb_pt_t on public.cb_pt (t);
+create index if not exists cb_pt_pallet on public.cb_pt (pallet);
+
+-- Cada "Terminar proceso" (cierre de turno) de PT queda registrado.
+create table if not exists public.cb_pt_cierre (
+  id      bigserial primary key,
+  puesto  text not null,
+  persona text,
+  t       timestamptz not null default now()
+);
+
+alter table public.cb_puesto    enable row level security;
+alter table public.cb_pt        enable row level security;
+alter table public.cb_pt_cierre enable row level security;
+revoke all on public.cb_puesto, public.cb_pt, public.cb_pt_cierre from anon, authenticated;
+
+-- ---------- Supervisor: links de los celulares fijos ----------
+create or replace function public.cb_puesto_link(p_clave text, p_puesto text, p_token text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_puesto not in ('bodega','produccion') then raise exception 'datos_invalidos'; end if;
+  if length(coalesce(p_token,'')) < 16 then raise exception 'clave_corta'; end if;
+  insert into cb_puesto(id, hash) values (p_puesto, extensions.crypt(p_token, extensions.gen_salt('bf')))
+  on conflict (id) do update set hash = excluded.hash, creado = now(), usado = null, sesion_hash = null, equipo = null, visto = null;
+end $$;
+
+create or replace function public.cb_puesto_estado(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_object_agg(id, jsonb_build_object('creado', creado, 'usado', usado, 'equipo', equipo, 'visto', visto, 'persona', persona)) from cb_puesto), '{}'::jsonb);
+end $$;
+
+-- ---------- Celular fijo: se vincula una vez y luego se identifica con su llave ----------
+create or replace function public.cb_puesto_vincular(p_puesto text, p_token text, p_equipo text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare a cb_puesto; v_ses text := encode(extensions.gen_random_bytes(24), 'hex');
+begin
+  select * into a from cb_puesto where id = p_puesto for update;
+  if not found or a.hash <> extensions.crypt(coalesce(p_token,''), a.hash) then perform pg_sleep(0.5); raise exception 'puesto_invalido'; end if;
+  if a.usado is not null then raise exception 'puesto_usado'; end if;
+  update cb_puesto set usado = now(), visto = now(), equipo = left(p_equipo, 120), sesion_hash = extensions.crypt(v_ses, extensions.gen_salt('bf')) where id = p_puesto;
+  return v_ses;
+end $$;
+
+create or replace function public.cb_puesto_ok(p_puesto text, p_ses text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not exists (select 1 from cb_puesto where id = p_puesto and sesion_hash is not null and sesion_hash = extensions.crypt(coalesce(p_ses,''), sesion_hash)) then
+    perform pg_sleep(0.5); raise exception 'puesto_invalido';
+  end if;
+  update cb_puesto set visto = now() where id = p_puesto;
+end $$;
+
+-- Tareas del celular: entregas de MP asignadas y (solo bodega) conteos asignados.
+create or replace function public.cb_puesto_tareas(p_puesto text, p_ses text, p_persona text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_rol text := case when p_puesto = 'bodega' then 'E' else 'R' end;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_persona is not null and p_persona <> '' then update cb_puesto set persona = left(p_persona, 80) where id = p_puesto; end if;
+  return jsonb_build_object(
+    'mp', coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'nombre', m.nombre, 'ref', m.meta->>'ref', 'por', m.meta->>'por', 'token', m.link_token,
+              'creado', m.creado, 'vence', m.vence, 'productos', jsonb_array_length(coalesce(m.meta->'sol','[]'::jsonb)),
+              'terminado', (select l.terminado from cb_mov_lado l where l.mov = m.id and l.rol = v_rol)) order by m.creado)
+            from cb_mov m where coalesce(m.meta->>'estado','activa') = 'activa' and m.meta->>'puestos' = 'true' and m.finalizado is null
+              and m.link_token is not null and (m.vence is null or m.vence > now())), '[]'::jsonb),
+    'conteos', case when p_puesto = 'bodega' then coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'nombre', c.nombre, 'token', c.link_token,
+              'creado', c.creado, 'vence', c.vence, 'productos', jsonb_array_length(c.items), 'terminado', c.terminado) order by c.creado)
+            from cb_conteos c where c.puesto = 'bodega' and c.finalizado is null and c.link_token is not null and (c.vence is null or c.vence > now())), '[]'::jsonb)
+            else '[]'::jsonb end,
+    'pt_cierre', (select max(t) from cb_pt_cierre where puesto = p_puesto));
+end $$;
+
+-- ---------- Asignar tareas a los celulares fijos (supervisor) ----------
+create or replace function public.cb_mov_asignar(p_clave text, p_id uuid, p_si boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_mov set meta = coalesce(meta, '{}'::jsonb) || jsonb_build_object('puestos', p_si) where id = p_id;
+end $$;
+
+create or replace function public.cb_conteo_asignar(p_clave text, p_id uuid, p_puesto text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_conteos set puesto = nullif(p_puesto, '') where id = p_id;
+end $$;
+
+-- Conteos: ahora guardan su link (para poder asignarlos) y el listado dice a qué celular están asignados.
+create or replace function public.cb_crear(p_clave text, p_nombre text, p_vence timestamptz, p_items jsonb, p_meta jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex'); v_id uuid;
+begin
+  perform cb_check(p_clave);
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'sin_productos'; end if;
+  insert into cb_conteos(nombre, vence, token_hash, link_token, items, meta)
+  values (left(p_nombre, 120), p_vence, extensions.crypt(v_token, extensions.gen_salt('bf')), v_token, p_items, p_meta)
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'token', v_token);
+end $$;
+
+create or replace function public.cb_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'finalizado', c.finalizado,
+      'abierto', c.abierto, 'contador', c.contador, 'ultimo_envio', c.ultimo_envio, 'n_lecturas', c.n_lecturas,
+      'visto', c.visto, 'terminado', c.terminado, 'puesto', c.puesto, 'asignable', c.link_token is not null,
+      'productos', jsonb_array_length(c.items),
+      'contados', (select count(distinct l.data->>'k') from cb_lecturas l where l.conteo = c.id)
+    ) order by c.creado desc)
+    from cb_conteos c where c.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+-- ---------- PT desde los celulares fijos ----------
+-- Producción registra cada pallet que sale de máquina; bodega cada pallet que recibe.
+create or replace function public.cb_pt_registrar(p_puesto text, p_ses text, p_data jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if coalesce(p_data->>'lid','') = '' or coalesce(p_data->>'pallet','') = '' then raise exception 'datos_invalidos'; end if;
+  insert into cb_pt(lid, puesto, pallet, data) values (p_data->>'lid', p_puesto, upper(left(p_data->>'pallet', 60)), p_data)
+  on conflict (lid) do update set pallet = excluded.pallet, data = excluded.data where cb_pt.puesto = p_puesto;
+end $$;
+
+create or replace function public.cb_pt_borrar(p_puesto text, p_ses text, p_lid text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  delete from cb_pt where lid = p_lid and puesto = p_puesto;
+end $$;
+
+-- Pallets de este celular desde su último cierre (para la lista en pantalla).
+create or replace function public.cb_pt_mis(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_desde timestamptz;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  select max(t) into v_desde from cb_pt_cierre where puesto = p_puesto;
+  return coalesce((select jsonb_agg(data order by t) from cb_pt where puesto = p_puesto and t > coalesce(v_desde, now() - interval '2 days')), '[]'::jsonb);
+end $$;
+
+-- Bodega: al escanear un pallet, trae lo que declaró producción (producto y cantidad) para confirmar rápido.
+create or replace function public.cb_pt_buscar(p_puesto text, p_ses text, p_pallet text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  return (select data from cb_pt where puesto = 'produccion' and pallet = upper(p_pallet) and t > now() - interval '30 days' order by t desc limit 1);
+end $$;
+
+-- "Terminar proceso": cierra el turno de este celular (el link sigue abierto).
+create or replace function public.cb_pt_cerrar(p_puesto text, p_ses text, p_persona text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  insert into cb_pt_cierre(puesto, persona) values (p_puesto, left(p_persona, 80));
+end $$;
+
+-- Panel (supervisor o jefe de producción): pallets de ambos lados y cierres desde una fecha.
+create or replace function public.cb_pt_listar(p_clave text, p_desde timestamptz) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return jsonb_build_object(
+    'pallets', coalesce((select jsonb_agg(data || jsonb_build_object('puesto', puesto, 'pallet', pallet, 'rt', t) order by t) from cb_pt where t >= p_desde), '[]'::jsonb),
+    'cierres', coalesce((select jsonb_agg(jsonb_build_object('puesto', puesto, 'persona', persona, 't', t) order by t) from cb_pt_cierre where t >= p_desde - interval '1 day'), '[]'::jsonb),
+    'puestos', coalesce((select jsonb_object_agg(id, jsonb_build_object('visto', visto, 'persona', persona, 'usado', usado)) from cb_puesto), '{}'::jsonb));
+end $$;
+
+-- Lista de productos para el celular fijo (sin stock ni costos).
+create or replace function public.cb_puesto_catalogo(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  return (select jsonb_build_object('items', items, 'actualizado', actualizado) from cb_catalogo where id = 1);
+end $$;
+
+revoke execute on function public.cb_puesto_ok(text, text) from public, anon, authenticated;
+grant execute on function
+  public.cb_puesto_link(text, text, text), public.cb_puesto_estado(text), public.cb_puesto_vincular(text, text, text),
+  public.cb_puesto_tareas(text, text, text), public.cb_mov_asignar(text, uuid, boolean), public.cb_conteo_asignar(text, uuid, text),
+  public.cb_crear(text, text, timestamptz, jsonb, jsonb), public.cb_listar(text),
+  public.cb_pt_registrar(text, text, jsonb), public.cb_pt_borrar(text, text, text), public.cb_pt_mis(text, text),
+  public.cb_pt_buscar(text, text, text), public.cb_pt_cerrar(text, text, text), public.cb_pt_listar(text, timestamptz), public.cb_puesto_catalogo(text, text)
+to anon, authenticated;
 </script>
   </div>
 
@@ -928,6 +1165,7 @@ to anon, authenticated;
 
 <!-- ============ 2 CONTAR ============ -->
 <section class="view" id="v-contar" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b>Conteo de inventario</b></div>
   <div id="conteoBanner"></div>
   <div id="conteoBox"></div>
   <div class="card contarCard">
@@ -1035,10 +1273,11 @@ to anon, authenticated;
       <input id="solQty" placeholder="Cant." inputmode="decimal" autocomplete="off">
       <button class="btn sm primary" id="solAddBtn">Agregar</button>
     </div>
+    <div class="seg solUnit" id="solUnit" hidden></div>
     <div class="small" id="solHint"></div>
     <div class="sugg" id="solSugg" hidden></div>
     <details><summary class="small" style="cursor:pointer;font-weight:600">Pegar varios desde Excel</summary>
-      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad, una línea por producto" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
+      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad[tab]Unidad (opcional: ROLLO, CAJA… o kg, m), una línea por producto" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
       <button class="btn sm" id="solPasteBtn" style="margin-top:6px">Agregar lista</button>
     </details>
     <div class="solList" id="solList"></div>
@@ -1047,6 +1286,7 @@ to anon, authenticated;
       <label class="f">OT / referencia (opcional)<input id="mpRef" placeholder="Ej: OT 4512"></label>
       <label class="f supOnly">Vigencia del link<select id="mpVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label>
     </div>
+    <label class="small supOnly" id="mpPuWrap" style="display:flex;gap:6px;align-items:center" hidden><input type="checkbox" id="mpPuestos" checked> Enviar a los celulares fijos de bodega y producción</label>
     <button class="btn accent" id="btnSolGen" style="font-size:15px;padding:11px 16px;justify-content:center">Generar solicitud</button>
     <button class="linkBtn small supOnly" id="btnMpSinSol">Crear entrega sin solicitud</button>
     <span class="small muted" id="mpMsg"></span>
@@ -1060,6 +1300,12 @@ to anon, authenticated;
     <div id="mpConfirm"></div>
   </details>
 
+  <details class="card mpFold" id="puAdm">
+    <summary><b>Celulares fijos</b> <span class="small muted" id="puAdmSum"></span></summary>
+    <p class="small" style="margin:8px 0 0">Un link para el celular de <b>bodega</b> y otro para el de <b>producción</b>. Cada uno queda amarrado al primer celular que lo abre y siempre abierto: ahí les llegan las tareas que asignas.</p>
+    <div id="puAdmBox"></div>
+  </details>
+
   <details class="card mpFold" id="mpAcc">
     <summary><b>Acceso para producción</b> <span class="small muted" id="mpAccSum"></span></summary>
     <p class="small" style="margin:8px 0 0">Un link para que el jefe de producción vea y use <b>solo esta pestaña</b> desde su computador, en tiempo real. No ve conteos, stock ni costos.</p>
@@ -1071,6 +1317,7 @@ to anon, authenticated;
 </section>
 <!-- ============ ENTREGA / RECEPCIÓN (celular) ============ -->
 <section class="view" id="v-opmov" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b id="omBarT">Materia prima</b></div>
   <div id="omBanner"></div>
   <div id="omPick"></div>
   <div id="omWork" hidden>
@@ -1177,6 +1424,87 @@ to anon, authenticated;
     <div class="row" style="gap:6px"><button class="btn sm danger" id="btnReset">Borrar lecturas…</button><button class="btn sm danger" id="btnResetAll">Borrar todo…</button></div>
     <div id="confirmBox"></div>
   </div>
+  </div>
+ </div>
+</section>
+<!-- ============ CELULAR FIJO (bodega o producción): menú de tareas ============ -->
+<section class="view" id="v-puesto" hidden>
+  <div class="cbox" id="puHead"></div>
+  <div class="puMenu" id="puMenu"></div>
+  <div id="puList"></div>
+  <p class="small muted" style="text-align:center">Este celular queda conectado. Las tareas nuevas aparecen solas con un punto rojo.</p>
+</section>
+
+<!-- ============ PT en el celular: producción entrega / bodega recibe ============ -->
+<section class="view" id="v-ptcel" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b id="ptTitle"></b></div>
+  <div class="card contarCard">
+    <div id="ptCamWrap" class="camWrap" hidden>
+      <div class="row" style="justify-content:space-between"><span class="camTarget" id="ptCamTarget">Leyendo pallet</span><button class="btn sm" id="ptCamStop">Cerrar cámara</button></div>
+      <div id="ptReader"></div>
+      <div class="small muted" id="ptCamMsg"></div>
+    </div>
+    <div class="step">
+      <div class="eyebrow">1 · N° de pallet</div>
+      <div class="scanbox">
+        <input id="ptPallet" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea o digita el N° de pallet">
+        <button class="btn accent" id="ptCamPallet">Cámara</button>
+      </div>
+      <div class="small" id="ptPalletInfo"></div>
+    </div>
+    <div class="step">
+      <div class="eyebrow">2 · Producto</div>
+      <div class="scanbox">
+        <input id="ptScan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea, digita el código o el nombre">
+        <button class="btn accent" id="ptCamSku">Cámara</button>
+      </div>
+      <div class="pending" id="ptPending" hidden></div>
+      <div class="sugg" id="ptSugg" hidden></div>
+    </div>
+    <div class="step">
+      <div class="eyebrow" id="ptQtyEb">3 · Cantidad</div>
+      <div class="scanbox">
+        <input id="ptQty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off">
+        <button class="btn primary" id="ptOk" style="padding-inline:26px;font-size:18px;min-width:84px;justify-content:center">OK</button>
+      </div>
+    </div>
+  </div>
+  <div class="card contarCard">
+    <div class="row"><h2 style="margin:0">Pallets de este turno</h2><span class="sep"></span><span class="small muted" id="ptInfo"></span></div>
+    <div class="tbl"><table id="ptList"></table></div>
+    <div id="ptSync"></div>
+  </div>
+  <div class="card contarCard">
+    <div class="eyebrow">Al terminar el turno</div>
+    <p class="small">Avisa al supervisor que terminaste. El celular sigue conectado: el próximo pallet empieza un turno nuevo.</p>
+    <button class="btn danger" id="ptFin" style="justify-content:center">Terminar proceso (cierre de turno)…</button>
+    <div id="ptConfirm"></div>
+  </div>
+</section>
+<!-- ============ ENTREGA Y RECEPCIÓN DE PT (supervisor y jefe de producción) ============ -->
+<section class="view" id="v-pt" hidden>
+ <div class="mpGrid">
+  <div class="mpMain">
+  <div class="notice" id="ptNote" hidden></div>
+  <div class="card">
+    <div class="eyebrow">Producto terminado</div>
+    <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción en bodega</h2><span class="sep"></span>
+      <select id="ptDesde" style="flex:0 1 190px"><option value="turno">Turno actual</option><option value="hoy" selected>Hoy</option><option value="24">Últimas 24 horas</option><option value="168">Últimos 7 días</option></select>
+      <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button></div>
+    <div class="mpSides" id="ptSides"></div>
+    <div class="kpis" id="ptKpis"></div>
+    <div class="row"><div class="chips" id="ptChips"></div><span class="sep"></span><input id="ptQ" placeholder="Buscar pallet, código o descripción" style="flex:0 1 280px"></div>
+    <div class="tbl" style="max-height:none"><table id="ptRes"></table></div>
+    <div class="small muted">Se compara pallet por pallet (por su número). Cantidades en la unidad del ERP; con equivalencia, debajo en esa unidad.</div>
+    <details><summary class="small" style="cursor:pointer;font-weight:600">Resumen por producto</summary>
+      <div class="tbl" style="margin-top:8px"><table id="ptProd"></table></div></details>
+  </div>
+  </div>
+  <div class="mpRight">
+    <div class="card">
+      <div class="eyebrow">Cierres de turno</div>
+      <div id="ptCierres" class="small"></div>
+    </div>
   </div>
  </div>
 </section>
@@ -1298,7 +1626,9 @@ function updStatus(){
 
 /* ================= pestañas ================= */
 function show(v){
-  if(typeof prodMode==="function"&&prodMode()&&v!=="mp")v="mp";   // el jefe de producción solo ve Entrega MP
+  if(typeof prodMode==="function"&&prodMode()&&v!=="mp"&&v!=="pt")v="mp";   // el jefe de producción solo ve MP y PT
+  if(v==="pt"&&typeof ptEnter==="function")setTimeout(ptEnter,0);
+  if(v!=="ptcel"&&typeof ptStopCam==="function")ptStopCam();
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
@@ -1983,6 +2313,7 @@ $("#btnCrear").onclick=async()=>{
   try{
    if(nubeOn()){
     const c=await crearNube(m,its,sel,rot);
+    if($("#cPuesto").checked&&!$("#cPuWrap").hidden){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:"bodega"});c.puesto="bodega"}catch(e){toast("El conteo se creó, pero no se pudo asignar al celular de bodega")}}
     conteos.unshift(c);store.set("inv_conteos",conteos);
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
     cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
@@ -2036,7 +2367,7 @@ function renderConteosOnly(){
    (conteos.length?conteos.map((c,i)=>{
      if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&(x.finalizado||x.terminado))c.fin=true;
        return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
-       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&!x.abierto&&!x.finalizado?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
+       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&!x.abierto&&!x.finalizado?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&SB.pu&&SB.pu.bodega?(x.puesto?`<button class="btn sm" data-pq="${i}" title="Quitar del celular de bodega">📱 En bodega ✕</button>`:`<button class="btn sm accent" data-pa="${i}">📱 Asignar a bodega</button>`):""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
      return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
     <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
     <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
@@ -2045,6 +2376,9 @@ function renderConteosOnly(){
   $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
   $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
   $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
+  $$("#conteosTbl [data-pa],#conteosTbl [data-pq]").forEach(b=>b.onclick=async()=>{const c=conteos[+(b.dataset.pa||b.dataset.pq)];
+    try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:b.dataset.pa?"bodega":""});toast(b.dataset.pa?"Conteo asignado al celular de bodega":"Conteo quitado del celular de bodega");refreshNube(true)}catch(e){toast(sbMsg(e))}});
+  $("#cPuWrap").hidden=!(nubeOn()&&SB.pu&&SB.pu.bodega);
   $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
     confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
@@ -2315,7 +2649,7 @@ const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.log
 /* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
 function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(typeof gh!=="undefined"&&gh.login)||(erp&&!erp.maestro))}
 function lockScreen(msg,title,icon,force){
-  if(!force&&(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn())||(typeof prodMode==="function"&&prodMode())))return false;
+  if(!force&&(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn())||(typeof prodMode==="function"&&prodMode())||(typeof puestoMode==="function"&&puestoMode())))return false;
   if(typeof stopCam==="function")stopCam();
   document.body.classList.add("locked");
   $("#lockBox").innerHTML=`<div class="lockCard"><div class="big">${icon||"🔒"}</div><h2>${esc(title||"Esta app se usa con el link de tu supervisor")}</h2><p>${msg||"Abre el link de conteo que te enviaron por WhatsApp."}</p></div>`;
@@ -2323,7 +2657,9 @@ function lockScreen(msg,title,icon,force){
 }
 function lockFromBanner(title){const t=($("#conteoBanner").textContent||"").trim();lockScreen(esc(t),title||"No se puede abrir este link","⚠️")}
 function applyMode(){
-  if(typeof prodApply==="function"&&prodApply()){if($("#v-mp").hidden)show("mp");return}
+  if(typeof puestoMode==="function"&&puestoMode()){puestoApply();return}
+  document.body.classList.remove("puesto");
+  if(typeof prodApply==="function"&&prodApply()){if($("#v-mp").hidden&&$("#v-pt").hidden)show("mp");return}
   document.body.classList.remove("prodv");
   if(typeof movOn==="function"&&movOn()){document.body.classList.add("mov");document.body.classList.remove("op");if($("#v-opmov").hidden)show("opmov");return}
   document.body.classList.remove("mov");
@@ -2341,6 +2677,7 @@ $("#btnClearScans").onclick=async()=>{
       try{await rpc(cfin,"cb_terminar",{p_id:idfin,p_secret:cfin.secret})}catch(e){}
       scans=[];store.set("inv_scans",scans);erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}cfg.dirty=false;store.set("inv_cfg",cfg);
       buildIndex();updStatus();renderRecent();renderSess();renderConteoBox();clearProduct();setUbic("",true);
+      if(typeof puestoMode==="function"&&puestoMode()){$("#conteoBanner").innerHTML="";toast("Conteo terminado y enviado. ¡Gracias!");puestoMenu();return}
       $("#conteoBanner").innerHTML='<div class="notice">Conteo terminado y enviado. ¡Gracias!</div>';lockScreen("Tus lecturas llegaron al supervisor. Ya puedes cerrar esta página.","Conteo terminado","✅");},"#confirmScans");
   }
   confirmBox(`Se borrarán ${fmt(scans.length)} lecturas de este celular. ¿Ya exportaste y enviaste el archivo?`,()=>{scans=[];saveScans();if(erp&&erp.conteo&&isVenc(erp.conteo.vence)){erp=null;try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();$("#conteoBanner").innerHTML='<div class="notice">Conteo terminado. Este celular ya no tiene la lista de productos.</div>';lockScreen("Este celular ya no tiene la lista de productos.","Conteo terminado","✅")}renderRecent();renderSess();$("#last").innerHTML='<div class="d muted">Listo para un nuevo conteo</div>';toast("Lecturas borradas");renderConteoBox()},"#confirmScans");};
@@ -2439,6 +2776,7 @@ async function crearMov(conSol){
     if(!prod){movs.unshift(m);movs=movs.slice(0,60);store.set("inv_movs",movs)}
     movSel=m.id;store.set("inv_movsel",movSel);
     $("#mpRef").value="";
+    if(!prod&&hayPuestos()&&$("#mpPuestos").checked){try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:r.id,p_si:true})}catch(e){}}
     if(prod){$("#mpCreated").innerHTML=`<div class="cbox" style="max-width:none"><b>Solicitud enviada a bodega</b><div class="small">Bodega la ve al instante y genera el link para quien entrega y quien recibe. Aquí verás el avance en vivo.</div></div>`;toast("Solicitud enviada a bodega")}
     else mpShowCreated(m);
     await refreshMov(true);
@@ -2456,22 +2794,38 @@ const solSave=()=>store.set("inv_mpsol",mpSol);
 const solMeta=()=>mpSol.length?mpSol.map(x=>[x.cod,x.q,x.desc||"",x.um||"",x.ce||"",x.f||1]):null;
 function solFind(c){const its=movCatalog();if(!its)return null;const k=key(c);
   return its.find(i=>key(i.cod)===k)||its.find(i=>i.ean&&String(i.ean).split(/[;,/ ]+/).some(e=>key(e)===k))||null}
-function solAdd(code,q,silent){
+// Unidad en que se pide: la de la equivalencia (rollos, cajas…) o la unidad base del ERP. Se guarda siempre también en la base.
+var solU="ce";
+const esUnidadCe=(it,u)=>{if(!it||!conv(it)||!u)return false;const d=deacc(u).replace(/[.\s]/g,"");const c=deacc(it.ce).replace(/[.\s]/g,"");return d===c||d===deacc(plural(it.ce)).replace(/[.\s]/g,"")||c.startsWith(d)&&d.length>=3};
+function solAdd(code,q,silent,unidad){
   code=codeStr(code);q=num(q);if(!code||q==null||q<=0){if(!silent)toast("Escribe código y cantidad");return false}
   const it=solFind(code), cod=it?it.cod:code, ex=mpSol.find(x=>key(x.cod)===key(cod));
-  if(ex)ex.q+=q;else mpSol.push({cod,q,desc:it?it.desc:"",um:it?umTxt(it.um):"",ce:it&&conv(it)?it.ce:"",f:it&&conv(it)?+it.f:1,ok:!!it});
+  const enCe=it&&conv(it)&&(unidad!==undefined?esUnidadCe(it,unidad):solU==="ce"), base=enCe?q*(+it.f):q;
+  if(ex){ex.q+=base;ex.qu=ex.u==="ce"&&ex.f?ex.q/ex.f:ex.q}
+  else mpSol.push({cod,q:base,u:enCe?"ce":"base",qu:enCe?q:base,desc:it?it.desc:"",um:it?umTxt(it.um):"",ce:it&&conv(it)?it.ce:"",f:it&&conv(it)?+it.f:1,ok:!!it});
   solSave();return true;
 }
-function solHint(){const c=norm($("#solCod").value),h=$("#solHint"),sg=$("#solSugg");sg.hidden=true;if(!c){h.innerHTML="";return}
+function solUnitRender(it){
+  const box=$("#solUnit");
+  if(!it||!conv(it)){box.hidden=true;box.innerHTML="";$("#solQty").placeholder="Cant."+(it?" ("+umTxt(it.um)+")":"");return}
+  box.hidden=false;
+  box.innerHTML=`<button data-u="ce" aria-pressed="${solU==="ce"}">En ${esc(plural(it.ce).toLowerCase())}</button><button data-u="base" aria-pressed="${solU!=="ce"}">En ${esc(umTxt(it.um))}</button>`;
+  $("#solQty").placeholder=solU==="ce"?plural(it.ce).toLowerCase():umTxt(it.um);
+  $$("#solUnit button").forEach(b=>b.onclick=()=>{solU=b.dataset.u;solUnitRender(it);solQtyHint();$("#solQty").focus()});
+}
+function solQtyHint(){const it=solFind(norm($("#solCod").value)),q=num($("#solQty").value),h=$("#solEq");if(!h)return;
+  h.textContent=it&&conv(it)&&q?(solU==="ce"?`= ${fmt2(q*it.f)} ${umTxt(it.um)}`:`= ${fmt2(q/it.f)} ${plural(it.ce).toLowerCase()}`):""}
+function solHint(){const c=norm($("#solCod").value),h=$("#solHint"),sg=$("#solSugg");sg.hidden=true;if(!c){h.innerHTML="";solUnitRender(null);return}
   const it=solFind(c);
   if(!it&&/[a-záéíóúñ]{3,}/i.test(c)){const res=buscarNombre(movCatalog(),c);h.innerHTML="";if(res.length){sg.hidden=false;
       sg.innerHTML=res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join("");
       $$("#solSugg button").forEach(b=>b.onclick=()=>{$("#solCod").value=res[+b.dataset.n].cod;solHint();$("#solQty").focus()})}
     else h.innerHTML='<span style="color:var(--warn)">No encontré productos con ese nombre</span>';return}
-  h.innerHTML=it?`<b>${esc(it.desc)}</b> <span class="muted">· cantidad en ${esc(umTxt(it.um))}${conv(it)?` (1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))})`:""}</span>`:(movCatalog()?'<span style="color:var(--warn)">Código no está en la lista de productos</span>':'<span class="muted">Falta la lista de productos (ver aviso)</span>')}
+  solUnitRender(it);
+  h.innerHTML=it?`<b>${esc(it.desc)}</b> <span class="muted">· unidad ERP: ${esc(umTxt(it.um))}${conv(it)?` · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}`:""}</span> <b id="solEq" style="color:var(--primary)"></b>`:(movCatalog()?'<span style="color:var(--warn)">Código no está en la lista de productos</span>':'<span class="muted">Falta la lista de productos (ver aviso)</span>')}
 function renderSol(){
   $("#solList").innerHTML=mpSol.map((x,i)=>`<div class="solRow"><div class="sd"><b title="${esc(x.desc)}">${esc(x.desc||"(no está en el ERP)")}</b><span class="muted code">${esc(x.cod)}</span></div>
-    <span style="white-space:nowrap"><input data-sq="${i}" value="${fmt2(x.q)}" inputmode="decimal" aria-label="Cantidad"> <span class="muted">${esc(x.um||"")}</span>${x.ce&&x.f!==1?`<span class="sub">${fmt2(x.q/x.f)} ${esc(plural(x.ce))}</span>`:""}</span>
+    <span style="white-space:nowrap"><input data-sq="${i}" value="${fmt2(x.u==="ce"?x.qu:x.q)}" inputmode="decimal" aria-label="Cantidad"> <span class="muted">${esc(x.u==="ce"?plural(x.ce).toLowerCase():(x.um||""))}</span>${x.ce&&x.f!==1?`<span class="sub">= ${x.u==="ce"?fmt2(x.q)+" "+esc(x.um||""):fmt2(x.q/x.f)+" "+esc(plural(x.ce).toLowerCase())}</span>`:""}</span>
     <button class="btn sm" data-sr="${i}" aria-label="Quitar">✕</button></div>`).join("");
   $("#solInfo").textContent=mpSol.length?`${fmt(mpSol.length)} productos en la solicitud`:"Sin productos todavía";
   $("#solClear").hidden=!mpSol.length;
@@ -2479,15 +2833,16 @@ function renderSol(){
   $("#btnSolGen").textContent=(pm?"Enviar solicitud a bodega":"Generar solicitud")+(mpSol.length?` (${fmt(mpSol.length)} productos)`:"");
   $("#solTxt").innerHTML=pm?"Agrega los códigos y cantidades que necesitas y toca <b>Enviar solicitud a bodega</b>. Bodega la recibe al instante y prepara la entrega.":"Agrega códigos y cantidades y toca <b>Generar solicitud</b>: se crea la entrega con su link. Las solicitudes de producción llegan como aviso arriba.";
   $$("#solList [data-sr]").forEach(b=>b.onclick=()=>{mpSol.splice(+b.dataset.sr,1);solSave();renderSol()});
-  $$("#solList [data-sq]").forEach(inp=>inp.onchange=()=>{const v=num(inp.value),x=mpSol[+inp.dataset.sq];if(v!=null&&v>0){x.q=v;solSave()}renderSol()});
+  $$("#solList [data-sq]").forEach(inp=>inp.onchange=()=>{const v=num(inp.value),x=mpSol[+inp.dataset.sq];if(v!=null&&v>0){if(x.u==="ce"){x.qu=v;x.q=v*x.f}else{x.q=v;x.qu=v}solSave()}renderSol()});
 }
 $("#solAddBtn").onclick=()=>{if(solAdd($("#solCod").value,$("#solQty").value)){$("#solCod").value="";$("#solQty").value="";solHint();renderSol();$("#solCod").focus()}};
 $("#solCod").addEventListener("input",solHint);
 $("#solCod").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#solQty").focus()}});
+$("#solQty").addEventListener("input",solQtyHint);
 $("#solQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#solAddBtn").click()}});
 $("#solPasteBtn").onclick=()=>{let n=0,bad=0;
-  for(const ln of $("#solPaste").value.split(/\r?\n/)){const t=ln.trim();if(!t)continue;const p=t.split(/\t|;|\s{2,}|,(?=\s*\d+(?:[.,]\d+)?\s*$)|\s+(?=[\d.,]+\s*$)/).filter(Boolean);
-    if(p.length<2){bad++;continue}if(solAdd(p[0],p[p.length-1],true))n++;else bad++}
+  for(const ln of $("#solPaste").value.split(/\r?\n/)){const t=ln.trim();if(!t)continue;const m=t.match(/^(\S+)[\s;,\t]+([\d.,]+)(?:[\s;,\t]+([A-Za-zÁÉÍÓÚÑáéíóúñ.]+))?\s*$/);
+    if(!m){bad++;continue}if(solAdd(m[1],m[2],true,m[3]||""))n++;else bad++}
   $("#solPaste").value="";renderSol();toast(`${fmt(n)} productos agregados${bad?` · ${fmt(bad)} líneas sin cantidad`:""}`)};
 $("#solClear").onclick=()=>{mpSol=[];solSave();renderSol()};
 renderSol();
@@ -2590,7 +2945,7 @@ async function refreshMov(force){
 setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-mp").hidden)refreshMov(false)},15000);
 $("#btnMpRefresh").onclick=()=>refreshMov(true);
 $("#btnMpTraer").onclick=()=>refreshMov(true);
-function mpEnter(){mpNote();renderAcc();renderSol();renderMp();catLoad(false).then(()=>{mpNote();solHint()});refreshMov(true)}
+function mpEnter(){mpNote();renderAcc();renderSol();renderPuAdm();$("#mpPuWrap").hidden=prodMode()||!hayPuestos();renderMp();catLoad(false).then(()=>{mpNote();solHint()});refreshMov(true)}
 
 function renderMp(){
   if($("#v-mp").hidden)return;
@@ -2627,7 +2982,9 @@ const MPST={porent:["Por entregar","p-mut"],ok:["Cuadra","p-ok"],falta:["Recibi�
 function mpQty(t,r,n){if(t==null)return "";const u=esc(umTxt(r.um));return `${fmt2(t)} <span class="small muted">${u}</span>${r.ce&&r.f!==1?`<span class="sub">${fmt2(n)} ${esc(plural(r.ce))}</span>`:""}`}
 async function activarMov(m){
   const b=$("#btnAct");b.disabled=true;
-  try{const r=await rpc(SB,"cb_mov_activar",{p_clave:SB.admin,p_id:m.id,p_vence:venceDesde($("#actVence").value)});
+  try{const asig=$("#actPu")&&$("#actPu").checked;
+    const r=await rpc(SB,"cb_mov_activar",{p_clave:SB.admin,p_id:m.id,p_vence:venceDesde($("#actVence").value)});
+    if(asig){try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:m.id,p_si:true})}catch(e){}}
     const mm=Object.assign({},m,{link:movLink(m.id,r.token)});movs.unshift(mm);store.set("inv_movs",movs.slice(0,60));
     $("#mpCreated").innerHTML="";await refreshMov(true);mpShowCreated(mm);$("#mpCreated").scrollIntoView({behavior:"smooth",block:"center"});toast("Link generado: envíalo a bodega y a quien recibe")}
   catch(e){toast(movMsg(e));b.disabled=false}
@@ -2654,8 +3011,9 @@ function renderMpCmp(){
   const sol=esSolicitada(x), open=x&&!x.finalizado&&!isVenc(x.vence);
   $("#mpAct").innerHTML=sol?(prodMode()?`<div class="notice">Solicitud enviada a bodega${x.meta.por?" por "+esc(x.meta.por):""} ${hace(x.creado)}. Bodega genera el link para quien entrega y quien recibe; aquí verás el avance en vivo.</div>`
     :`<div class="actBox"><div><b>🔔 Solicitud de ${esc(x.meta.por||"producción")}</b> <span class="small muted">· ${fmt((x.meta.sol||[]).length)} productos · ${hace(x.creado)}</span><div class="small">Revisa lo solicitado y genera el link para el operario de bodega y quien recibe.</div></div>
-       <div class="row" style="gap:8px"><label class="f" style="flex:0 1 170px">Vigencia del link<select id="actVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label><button class="btn accent" id="btnAct" style="margin-top:16px">Generar link para bodega</button></div></div>`)
-    :(!prodMode()&&open&&m.link?`<div class="row" style="gap:6px"><span class="small muted">Link para bodega y quien recibe:</span><a class="btn sm primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" id="actCopy">Copiar link</button></div>`:"");
+       <div class="row" style="gap:8px"><label class="f" style="flex:0 1 170px">Vigencia del link<select id="actVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label><button class="btn accent" id="btnAct" style="margin-top:16px">Generar link para bodega</button></div>${hayPuestos()?`<label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="actPu" checked> Enviar a los celulares fijos de bodega y producción (sin mandar link)</label>`:""}</div>`)
+    :(!prodMode()&&open&&m.link?`<div class="row" style="gap:6px"><span class="small muted">Link para bodega y quien recibe:</span><a class="btn sm primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" id="actCopy">Copiar link</button>${hayPuestos()?(x.meta&&x.meta.puestos?'<span class="pill p-ok">📱 En los celulares fijos</span>':'<button class="btn sm accent" id="actAsig">📱 Enviar a celulares fijos</button>'):""}</div>`:"");
+  if($("#actAsig"))$("#actAsig").onclick=async()=>{try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:m.id,p_si:true});toast("Enviada a los celulares fijos");refreshMov(true)}catch(e){toast(movMsg(e))}};
   if($("#btnAct"))$("#btnAct").onclick=()=>activarMov(m);
   if($("#actCopy"))$("#actCopy").onclick=()=>copyText(m.link);
   $("#mpSides").hidden=sol;
@@ -2846,6 +3204,7 @@ $("#omFin").onclick=async()=>{
     try{await rpc(om.conf,"cb_mov_terminar",{p_id:om.id,p_rol:om.rol,p_secret:om.conf.secret})}catch(e){}
     omStopCam();const r=om.rol;om={id:om.id,rol:om.rol,fin:true,nombre:om.nombre};omSave();
     $("#omWork").hidden=true;$("#omPick").innerHTML="";
+    if(typeof puestoMode==="function"&&puestoMode()){$("#omBanner").innerHTML="";toast(`${r==="E"?"Entrega":"Recepción"} terminada. ¡Gracias!`);puestoMenu();return}
     $("#omBanner").innerHTML=`<div class="lockCard"><div class="big">✅</div><h2>${r==="E"?"Entrega":"Recepción"} terminada</h2><p>Tus lecturas llegaron al supervisor. Ya puedes cerrar esta página.</p></div>`;
   },"#omConfirm");
 };
@@ -2862,15 +3221,336 @@ async function omOpenCam(){
 async function omStopCam(){if(omCamI){await detenerLector(omCamI);omCamI=null}omHold=false;const w=$("#omCamWrap");if(w)w.hidden=true}
 $("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
 
+/* =====================================================================
+   CELULARES FIJOS (bodega y producción)
+   Cada celular se vincula una vez con su link y queda siempre abierto. Tiene un menú con sus tareas:
+     Bodega:     Entrega de MP (asignada) · Recepción de PT (siempre) · Conteo de inventario (asignado)
+     Producción: Recepción de MP (asignada) · Entrega de PT (siempre)
+   ===================================================================== */
+var PST=store.get("inv_puesto",null), puestoForce=false, puestoReady=Promise.resolve(), puVista="menu",
+    puTareas={mp:[],conteos:[],pt_cierre:null}, puVistos=store.get("inv_puvistos",[]), puCat=store.get("inv_pucat",null);
+const PUN={bodega:"Bodega",produccion:"Producción"};
+const puestoMode=()=>!!(PST&&PST.url&&PST.key&&PST.puesto&&(PST.ses||PST.tok))&&(puestoForce||!isSupDevice());
+const pconf=()=>({url:PST.url,key:PST.key});
+const prpc=async(fn,args)=>{await puestoReady;return rpc(pconf(),fn,Object.assign({p_puesto:PST.puesto,p_ses:PST.ses},args||{}))};
+const puMsg=e=>({puesto_usado:"Este link ya se abrió en otro celular y quedó amarrado a ese celular. Pide un link nuevo al supervisor.",puesto_invalido:"El link del celular no es válido o fue cambiado. Pide uno nuevo al supervisor."}[e.message]||sbMsg(e));
+
+/* ---------- Abrir el link del celular fijo ---------- */
+function checkPuestoLink(){
+  let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
+  const pu=q.get("puesto"),tok=q.get("t");if(!pu)return false;
+  const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), pk=q.get("k")||"";
+  try{history.replaceState(null,"",location.pathname+"#puesto")}catch(e){}
+  if(!PUN[pu]||!tok||!url||!pk){lockScreen("El link está incompleto. Pide uno nuevo al supervisor.","No se puede abrir este link","⚠️",true);return true}
+  puestoForce=true;
+  if(PST&&PST.puesto===pu&&PST.tok===tok&&PST.ses)return true;
+  PST={url,key:pk,puesto:pu,tok,ses:"",persona:(PST&&PST.persona)||cfg.user||""};
+  puestoReady=(async()=>{
+    try{PST.ses=await rpc({url,key:pk},"cb_puesto_vincular",{p_puesto:pu,p_token:tok,p_equipo:equipoDesc()});store.set("inv_puesto",PST)}
+    catch(e){PST=null;store.set("inv_puesto",null);puestoForce=false;
+      lockScreen(puMsg(e),e.message==="puesto_usado"?"Link ya usado en otro celular":"No se puede abrir este link","🔒",true);throw e}
+  })();
+  puestoReady.catch(()=>{});
+  return true;
+}
+checkPuestoLink();
+
+/* ---------- Modo de pantalla del celular fijo ---------- */
+function puestoApply(){
+  const b=document.body;b.classList.add("puesto");b.classList.remove("prodv","locked");$("#lockBox").innerHTML="";
+  b.classList.toggle("op",puVista==="conteo");b.classList.toggle("mov",puVista==="mp");
+  const v={conteo:"contar",mp:"opmov",pt:"ptcel"}[puVista]||"puesto";
+  if($("#v-"+v).hidden)show(v);
+}
+function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();puestoApply();renderPuesto();puRefresh()}
+$$("[data-menu]").forEach(b=>b.onclick=()=>puestoMenu());
+async function puestoInit(){try{await puestoReady}catch(e){return}puestoMenu()}
+
+/* ---------- Tareas: se consultan solas cada 20 s ---------- */
+var puBusy=false;
+async function puRefresh(){
+  if(!puestoMode()||puBusy)return;puBusy=true;
+  try{puTareas=await prpc("cb_puesto_tareas",{p_persona:PST.persona||null})||puTareas;
+    const ids=[...puTareas.mp.filter(t=>!t.terminado),...puTareas.conteos.filter(t=>!t.terminado)].map(t=>t.id), nuevas=ids.filter(id=>!puVistos.includes(id));
+    if(nuevas.length){puVistos=puVistos.concat(nuevas).slice(-200);store.set("inv_puvistos",puVistos);audio.beep(true);setTimeout(()=>audio.beep(true),220);toast("🔴 Tienes una tarea nueva")}
+    if(puVista==="menu")renderPuesto();
+  }catch(e){if(/puesto_invalido/.test(e.message))lockScreen(puMsg(e),"Celular desconectado","🔒",true)}
+  finally{puBusy=false}
+}
+setInterval(()=>{if(puestoMode()&&!document.hidden)puRefresh()},20000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&puestoMode())puRefresh()});
+
+function renderPuesto(){
+  if(!PST)return;
+  const bod=PST.puesto==="bodega", pend=a=>a.filter(t=>!t.terminado).length;
+  $("#puHead").innerHTML=`<div class="row"><span class="pill p-info" style="font-size:13px">📱 Celular de ${PUN[PST.puesto]}</span><span class="sep"></span><span class="small muted">conectado</span></div>
+    <label class="f">Operario<input id="puPersona" value="${esc(PST.persona||"")}" placeholder="Tu nombre" autocapitalize="characters"></label>`;
+  $("#puPersona").onchange=e=>{PST.persona=norm(e.target.value).toUpperCase();e.target.value=PST.persona;cfg.user=PST.persona;store.set("inv_cfg",cfg);store.set("inv_puesto",PST);puRefresh()};
+  const nMp=puTareas.mp.length,pMp=pend(puTareas.mp),nC=puTareas.conteos.length,pC=pend(puTareas.conteos);
+  const items=bod?[
+    {k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} asignada${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas",dot:pMp},
+    {k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"},
+    {k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC}]
+   :[{k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp},
+    {k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"}];
+  $("#puMenu").innerHTML=items.map(x=>`<button class="puBtn" data-pk="${x.k}"><span class="ic">${x.ic}</span><span><b>${x.t}</b><span class="s">${x.s}</span></span>${x.dot?`<span class="dotR">${x.dot}</span>`:""}</button>`).join("");
+  $$("#puMenu [data-pk]").forEach(b=>b.onclick=()=>puAbrir(b.dataset.pk));
+  $("#puList").innerHTML="";
+}
+function puAbrir(k){
+  if(!PST.persona){toast("Escribe tu nombre arriba");return $("#puPersona").focus()}
+  if(k==="pt")return ptAbrir();
+  const lista=k==="mp"?puTareas.mp:puTareas.conteos;
+  if(!lista.length)return toast(k==="mp"?"No tienes entregas asignadas por ahora":"No tienes conteos asignados por ahora");
+  if(lista.length===1)return k==="mp"?puAbrirMov(lista[0]):puAbrirConteo(lista[0]);
+  $("#puList").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Elige la tarea</h2>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":fmt(t.productos)+" productos"}</span></button>`).join("")+`</div>`;
+  $$("#puList [data-pi]").forEach(b=>b.onclick=()=>{const t=lista[+b.dataset.pi];k==="mp"?puAbrirMov(t):puAbrirConteo(t)});
+}
+async function puAbrirMov(t){
+  const rol=PST.puesto==="bodega"?"E":"R";
+  cfg.user=PST.persona;store.set("inv_cfg",cfg);
+  $("#omBarT").textContent=rol==="E"?"Entrega de materia prima":"Recepción de materia prima";
+  puVista="mp";puestoApply();
+  if(om&&om.id===t.id&&om.rol===rol&&!om.fin){omEnter();omSync();return}
+  if(om&&!om.fin&&om.dirty)await omSync();
+  await omTake(t.id,t.token,PST.url,PST.key,rol);
+  if(om&&om.id===t.id&&!om.persona){om.persona=PST.persona;omSave();omRender()}
+}
+async function puAbrirConteo(t){
+  cfg.user=PST.persona;store.set("inv_cfg",cfg);$("#user").value=cfg.user;
+  puVista="conteo";
+  if(erp&&erp.conteo&&erp.conteo.id===t.id){puestoApply();renderConteoBox();return}
+  try{
+    if(nubeConf()&&cfg.dirty){await syncNow();if(cfg.dirty)throw new Error("Hay lecturas de otro conteo sin enviar. Busca señal y vuelve a intentar.")}
+    const m=await rpc(pconf(),"cb_abrir",{p_id:t.id,p_token:t.token,p_device:cfg.dev});
+    scans=[];store.set("inv_scans",scans);
+    applyConteo(m,t.id,{url:PST.url,key:PST.key,secret:m.secret});
+    puestoApply();
+  }catch(e){toast(e.message&&!SBMSG[e.message]&&!/[_]/.test(e.message)?e.message:sbMsg(e));puestoMenu()}
+}
+
+/* ---------- Supervisor: crear y controlar los links de los celulares fijos (pestaña 2) ---------- */
+function renderPuAdm(){
+  const box=$("#puAdmBox");if(!box)return;
+  $("#puAdm").hidden=prodMode()||!nubeOn();
+  const w=$("#mpPuWrap");if(w)w.hidden=prodMode()||!hayPuestos();
+  if(prodMode()||!nubeOn())return;
+  SB.pu=SB.pu||{};
+  box.innerHTML=["bodega","produccion"].map(p=>{const tok=SB.pu[p];
+    if(!tok)return `<div class="puAdmRow"><b>Celular de ${PUN[p]}</b><button class="btn sm primary" data-pnew="${p}">Crear link</button></div>`;
+    const link=appUrl()+"?puesto="+p+"&t="+encodeURIComponent(tok)+sbLinkParams();
+    return `<div class="puAdmRow" style="flex-direction:column;align-items:stretch"><b>Celular de ${PUN[p]}</b><input readonly value="${esc(link)}" id="pul-${p}">
+      <div class="row" style="gap:6px"><a class="btn sm primary" href="${esc(waLink(`Celular de ${PUN[p]} · Control de Operaciones. Ábrelo una sola vez en el celular asignado:\n`+link))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-pcp="${p}">Copiar</button><button class="btn sm danger" data-prot="${p}">Cambiar link…</button></div>
+      <div class="small" id="pue-${p}"></div></div>`}).join("")+`<div id="puConfirm"></div>`;
+  $$("#puAdmBox [data-pnew]").forEach(b=>b.onclick=()=>puAdmSet(b.dataset.pnew));
+  $$("#puAdmBox [data-pcp]").forEach(b=>b.onclick=()=>copyText($("#pul-"+b.dataset.pcp).value,$("#pul-"+b.dataset.pcp)));
+  $$("#puAdmBox [data-prot]").forEach(b=>b.onclick=()=>confirmBox(`Se crea un link nuevo para el celular de ${PUN[b.dataset.prot]} y el actual queda desconectado.`,()=>puAdmSet(b.dataset.prot),"#puConfirm"));
+  rpc(SB,"cb_puesto_estado",{p_clave:SB.admin}).then(e=>{let n=0;
+    for(const p of ["bodega","produccion"]){const el=$("#pue-"+p),x=e&&e[p];if(!el)continue;
+      if(x&&x.usado){n++;el.innerHTML=`<span class="dot ${enLinea(x.visto)?"on":"off"}"></span>Vinculado a <b>${esc(x.equipo||"un celular")}</b>${x.persona?" · "+esc(x.persona):""} · ${enLinea(x.visto)?"en línea":"última conexión "+(x.visto?hace(x.visto):"—")}`}
+      else el.textContent="Aún no se abre: quedará amarrado al primer celular que lo abra."}
+    $("#puAdmSum").textContent=n?`· ${n} vinculado${n>1?"s":""}`:""}).catch(()=>{});
+}
+async function puAdmSet(p){
+  const tok=rndKey(24);
+  try{await rpc(SB,"cb_puesto_link",{p_clave:SB.admin,p_puesto:p,p_token:tok});SB.pu=SB.pu||{};SB.pu[p]=tok;store.set("inv_sb",SB);renderPuAdm();catSync(true);toast("Link del celular de "+PUN[p]+" listo")}
+  catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script actualizacion_04_puestos.sql.":movMsg(e))}
+}
+const hayPuestos=()=>!!(SB.pu&&(SB.pu.bodega||SB.pu.produccion));
+
+/* =====================================================================
+   PT en el celular fijo: producción registra cada pallet que sale de máquina, bodega cada pallet que recibe.
+   ===================================================================== */
+var ptCel=store.get("inv_ptcel",{lect:[]}), ptIdx=new Map(), ptCamI=null, ptCamT="pallet", ptHold=false, ptLast={c:"",miss:99}, ptDecl=null;
+const ptSave=()=>store.set("inv_ptcel",ptCel);
+function ptIndex(){ptIdx=new Map();const its=puCat&&puCat.items||[];its.forEach((it,i)=>{if(it.cod)ptIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!ptIdx.has(k))ptIdx.set(k,i)})})}
+const ptItems=()=>(puCat&&puCat.items)||[];
+const ptFind=c=>{const i=ptIdx.get(key(c));return i==null?null:ptItems()[i]};
+async function ptAbrir(){
+  puVista="pt";puestoApply();
+  const bod=PST.puesto==="bodega";
+  $("#ptTitle").textContent=bod?"Recepción de producto terminado":"Entrega de producto terminado";
+  try{
+    if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
+      if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}
+    ptIndex();
+    const srv=await prpc("cb_pt_mis")||[], loc=ptCel.lect.filter(l=>!l.sync), ids=new Set(srv.map(x=>x.lid));
+    ptCel.lect=srv.map(x=>Object.assign(x,{sync:true})).concat(loc.filter(l=>!ids.has(l.lid)));ptSave();
+  }catch(e){toast(puMsg(e))}
+  ptIndex();ptRender();ptLimpiar();ptSyncAll();
+}
+function ptLimpiar(){ptDecl=null;$("#ptPallet").value="";$("#ptScan").value="";$("#ptQty").value="";$("#ptPending").hidden=true;$("#ptSugg").hidden=true;$("#ptPalletInfo").innerHTML="";$("#ptQtyEb").textContent="3 · Cantidad";ptHold=false;if(!ptCamI)setTimeout(()=>$("#ptPallet").focus(),50)}
+async function ptPalletRead(v){
+  v=codeStr(v);if(!v)return;$("#ptPallet").value=v;
+  if(ptCel.lect.some(l=>codeStr(l.pallet)===v)){$("#ptPalletInfo").innerHTML='<span style="color:var(--bad);font-weight:600">Este pallet ya está registrado en este turno.</span>';audio.beep(false);return}
+  $("#ptPalletInfo").innerHTML="";audio.beep(true);
+  if(PST.puesto==="bodega"){
+    $("#ptPalletInfo").innerHTML='<span class="muted">Buscando lo que declaró producción…</span>';
+    try{const d=await prpc("cb_pt_buscar",{p_pallet:v});ptDecl=d||null;
+      if(d){const it=ptFind(d.k||d.code)||{cod:d.k||d.code,desc:d.desc,um:d.um,ce:d.ce,f:d.f};ptProducto(it.cod,true);$("#ptQty").value=String(d.qty);
+        $("#ptPalletInfo").innerHTML=`<span style="color:var(--ok);font-weight:600">Producción declaró ${fmt2(d.qty)} ${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))} de ${esc(d.desc||d.code)}.</span> <span class="muted">Revisa y toca OK, o corrige la cantidad.</span>`;
+        if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Pallet encontrado. Revisa la cantidad y toca OK."}
+        $("#ptQty").focus();try{$("#ptQty").select()}catch(e){}return}
+      $("#ptPalletInfo").innerHTML='<span style="color:var(--warn);font-weight:600">Producción no ha registrado este pallet.</span> <span class="muted">Regístralo igual: queda marcado para revisar.</span>'}
+    catch(e){$("#ptPalletInfo").innerHTML='<span class="muted">Sin conexión: registra el pallet igual.</span>'}
+  }
+  if(ptCamI)ptSetCam("sku");else focusSel($("#ptScan"));
+}
+function ptProducto(v,silent){
+  v=codeStr(v);if(!v)return null;
+  const it=ptFind(v);
+  if(!it&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){const res=buscarNombre(ptItems(),v),box=$("#ptSugg");box.hidden=false;
+    box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(v)}"</span></button>`;
+    $$("#ptSugg [data-n]").forEach(b=>b.onclick=()=>{box.hidden=true;ptProducto(res[+b.dataset.n].cod)});return null}
+  $("#ptSugg").hidden=true;$("#ptScan").value=v;
+  const p=$("#ptPending");p.hidden=false;p.className="pending"+(it?"":" bad");
+  p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza.");
+  $("#ptQtyEb").textContent=qtyLabel(it,3);
+  if(!silent){audio.beep(!!it);if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Leído. Digita la cantidad y toca OK."}focusSel($("#ptQty"))}
+  return it;
+}
+function ptAdd(){
+  const pallet=codeStr($("#ptPallet").value), code=codeStr($("#ptScan").value), q=num($("#ptQty").value);
+  if(!pallet){toast("Falta el N° de pallet");return focusSel($("#ptPallet"))}
+  if(ptCel.lect.some(l=>codeStr(l.pallet)===pallet)){toast("Ese pallet ya está registrado en este turno");return focusSel($("#ptPallet"))}
+  if(!code){toast("Falta el producto");return focusSel($("#ptScan"))}
+  if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#ptQty"))}
+  const it=ptFind(code);
+  const l={lid:newLid(),pallet,code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString(),sync:false};
+  if(conv(it)){l.f=+it.f;l.ce=it.ce}
+  if(ptDecl&&PST.puesto==="bodega")l.decl=ptDecl.qty;
+  ptCel.lect.push(l);ptSave();audio.beep(true);toast(`✓ Pallet ${pallet} registrado`);
+  ptRender();ptLimpiar();ptSyncAll();
+  if(ptCamI){ptSetCam("pallet");$("#ptCamMsg").textContent="Listo. Apunta a la etiqueta del siguiente pallet."}
+}
+var ptSyncing=false;
+async function ptSyncAll(){
+  if(ptSyncing||!puestoMode())return;ptSyncing=true;
+  try{for(const l of ptCel.lect.filter(x=>!x.sync)){const d=Object.assign({},l);delete d.sync;
+      try{await prpc("cb_pt_registrar",{p_data:d});l.sync=true;ptSave()}catch(e){if(!e.net)toast(puMsg(e));break}}}
+  finally{ptSyncing=false;ptRender()}
+}
+setInterval(()=>{if(puestoMode()&&ptCel.lect.some(l=>!l.sync))ptSyncAll()},20000);
+addEventListener("online",()=>{if(puestoMode())ptSyncAll()});
+function ptRender(){
+  if(!PST)return;
+  const ls=[...ptCel.lect].reverse(), pend=ptCel.lect.filter(l=>!l.sync).length;
+  $("#ptInfo").textContent=`${fmt(ptCel.lect.length)} pallets`;
+  $("#ptList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">Pallet ${esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}${l.sync?"":" · ⏳ por enviar"}</div></td>
+     <td class="num" style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td>
+     <td><button class="btn sm" data-pd="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no hay pallets en este turno.</td></tr>`;
+  $("#ptSync").innerHTML=pend?`<span class="sync s-wait">⏳ ${fmt(pend)} pallet${pend>1?"s":""} por enviar</span> <button class="btn sm" id="ptGo">Enviar ahora</button>`:(ptCel.lect.length?`<span class="sync s-ok">☁ Todo enviado al supervisor</span>`:"");
+  if($("#ptGo"))$("#ptGo").onclick=ptSyncAll;
+  $$("#ptList [data-pd]").forEach(b=>b.onclick=()=>{const l=ptCel.lect.find(z=>z.lid===b.dataset.pd);if(!l)return;
+    confirmBox(`Quitar el pallet ${esc(l.pallet)}.`,async()=>{if(l.sync){try{await prpc("cb_pt_borrar",{p_lid:l.lid})}catch(e){return toast(puMsg(e))}}ptCel.lect=ptCel.lect.filter(z=>z.lid!==l.lid);ptSave();ptRender();toast("Pallet quitado")},"#ptConfirm");
+    $("#ptConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
+}
+$("#ptPallet").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();ptPalletRead(e.target.value)}});
+$("#ptScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();ptProducto(e.target.value)}});
+$("#ptQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();ptAdd()}});
+$("#ptOk").onclick=ptAdd;
+$("#ptFin").onclick=async()=>{
+  if(ptCel.lect.some(l=>!l.sync)){await ptSyncAll();if(ptCel.lect.some(l=>!l.sync))return toast("Hay pallets sin enviar. Busca señal y toca Enviar ahora.")}
+  confirmBox(`Se cierra tu turno con ${fmt(ptCel.lect.length)} pallets y se avisa al supervisor. El celular sigue conectado para el próximo turno.`,async()=>{
+    try{await prpc("cb_pt_cerrar",{p_persona:PST.persona||""});ptCel={lect:[]};ptSave();toast("Turno cerrado. ¡Gracias!");puestoMenu()}catch(e){toast(puMsg(e))}},"#ptConfirm");
+};
+/* cámara del PT: primero la etiqueta del pallet, luego el producto */
+function ptSetCam(t){ptCamT=t;ptHold=false;ptLast.miss=99;$("#ptCamTarget").textContent=t==="pallet"?"Leyendo pallet":"Leyendo producto";$("#ptCamMsg").textContent=t==="pallet"?"Apunta a la etiqueta del pallet.":"Apunta al código del producto."}
+async function ptOpenCam(t){
+  if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
+  ptSetCam(t);if(ptCamI){$("#ptCamWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
+  $("#ptCamWrap").hidden=false;$("#ptCamMsg").textContent="Pidiendo permiso de cámara…";
+  try{ptCamI=await iniciarLector("ptReader",txt=>{txt=norm(txt);if(!txt||ptHold)return;if(txt===ptLast.c&&ptLast.miss<10)return;ptLast={c:txt,miss:0};
+        if(ptCamT==="pallet")ptPalletRead(txt);else ptProducto(txt)},()=>{ptLast.miss++});
+    ptSetCam(t);$("#ptCamWrap").scrollIntoView({block:"start",behavior:"smooth"})}
+  catch(e){ptCamI=null;$("#ptCamWrap").hidden=true;toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.")}
+}
+async function ptStopCam(){if(ptCamI){await detenerLector(ptCamI);ptCamI=null}ptHold=false;const w=$("#ptCamWrap");if(w)w.hidden=true}
+$("#ptCamPallet").onclick=()=>ptOpenCam("pallet");$("#ptCamSku").onclick=()=>ptOpenCam("sku");$("#ptCamStop").onclick=ptStopCam;
+/* =====================================================================
+   PRODUCTO TERMINADO (PT) en el panel: lo que entregó producción vs lo que recibió bodega, pallet por pallet.
+   Lo ven en tiempo real el supervisor y el jefe de producción.
+   ===================================================================== */
+var ptData={pallets:[],cierres:[],puestos:{}}, ptAt=null, ptBusy=false, ptFilter="todos";
+function ptRango(){
+  const v=$("#ptDesde").value, ahora=new Date();
+  if(v==="hoy")return new Date(ahora.getFullYear(),ahora.getMonth(),ahora.getDate());
+  if(v==="turno")return null;                                   // desde el último cierre de producción
+  return new Date(ahora.getTime()-(+v)*3600e3);
+}
+async function ptRefresh(force){
+  if(!movOk()||ptBusy)return;ptBusy=true;
+  try{
+    const r=ptRango(), desde=new Date(((r||new Date(Date.now()-2*864e5)).getTime())-2*864e5);   // 2 días antes, para encontrar la producción de pallets recibidos después
+    ptData=await mrpc("cb_pt_listar",{p_desde:desde.toISOString()})||ptData;ptAt=new Date();
+    $("#ptNote").hidden=true;renderPtPanel();
+  }catch(e){if(force){$("#ptNote").hidden=false;$("#ptNote").textContent=/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script actualizacion_04_puestos.sql.":movMsg(e)}}
+  finally{ptBusy=false}
+}
+function ptEnter(){if(!movOk()){$("#ptNote").hidden=false;$("#ptNote").innerHTML="Para ver el producto terminado, conecta el envío automático (Supabase) en <b>1 · Panel</b>.";return}renderPtPanel();ptRefresh(true)}
+setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-pt").hidden)ptRefresh(false)},20000);
+$("#ptTraer").onclick=()=>ptRefresh(true);
+$("#ptDesde").onchange=()=>ptRefresh(true);
+$("#ptQ").addEventListener("input",()=>renderPtPanel());
+
+const ptBase=d=>(+d.qty||0)*(+d.f||1);
+function ptRows(){
+  let ini=ptRango();
+  if(!ini){const c=ptData.cierres.filter(x=>x.puesto==="produccion").map(x=>x.t).sort().at(-1);ini=c?new Date(c):new Date(new Date().setHours(0,0,0,0))}
+  const E=new Map(),R=new Map();
+  for(const d of ptData.pallets){const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
+  const rows=[];
+  for(const k of new Set([...E.keys(),...R.keys()])){const e=E.get(k),r=R.get(k),ref=e||r,t=Date.parse((e||r).t||(e||r).rt);
+    if(t<ini.getTime())continue;
+    const pe=e?ptBase(e):null, pr=r?ptBase(r):null, otro=e&&r&&key(e.k||e.code)!==key(r.k||r.code);
+    const st=!r?"transito":!e?"sinprod":otro?"otro":Math.abs(pr-pe)<1e-9?"ok":"dif";
+    rows.push({pallet:k,cod:ref.k||ref.code,desc:ref.desc||(r&&r.desc)||"",um:ref.um||"",ce:ref.ce||"",f:+ref.f||1,e,r,pe,pr,dif:pe!=null&&pr!=null&&!otro?pr-pe:null,st,t})}
+  return {rows,ini};
+}
+const PTST={ok:["Recibido OK","p-ok"],dif:["Diferencia de cantidad","p-bad"],otro:["Producto distinto","p-bad"],transito:["En tránsito","p-info"],sinprod:["Sin registro de producción","p-warn"]};
+function ptQ(t,r,n){if(t==null)return "";return `${fmt2(t)} <span class="small muted">${esc(umTxt(r.um))}</span>${r.ce&&r.f!==1?`<span class="sub">${fmt2(n)} ${esc(plural(r.ce))}</span>`:""}`}
+function renderPtPanel(){
+  if($("#v-pt").hidden)return;
+  const {rows,ini}=ptRows(), cnt=s=>rows.filter(r=>s.includes(r.st)).length, P=ptData.puestos||{};
+  const cier=p=>ptData.cierres.filter(x=>x.puesto===p).map(x=>x.t).sort().at(-1);
+  $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"]].map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
+    return `<div class="mpSide"><span class="rl">${t}</span><div><span class="dot ${x.usado?(on?"on":"off"):""}"></span><b>${!x.usado?"Celular sin vincular":on?"En línea":"Sin señal"}</b>${x.visto&&!on?` <span class="small muted">· última señal ${hace(x.visto)}</span>`:""}</div><div class="small muted">${x.persona?esc(x.persona)+" · ":""}${c?"último cierre de turno "+fmtDT(c):"sin cierres registrados"}</div></div>`}).join("");
+  $("#ptKpis").innerHTML=[["Pallets producidos",rows.filter(r=>r.e).length],["Pallets recibidos",rows.filter(r=>r.r).length],["Recibidos OK",cnt(["ok"])],["En tránsito",cnt(["transito"])],["Con diferencia",cnt(["dif","otro"])],["Sin registro de producción",cnt(["sinprod"])]].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["dif","otro"])],["transito","En tránsito",cnt(["transito"])],["sinprod","Sin registro de producción",cnt(["sinprod"])],["ok","Recibidos OK",cnt(["ok"])]];
+  $("#ptChips").innerHTML=F.map(([f,l,n])=>`<button class="chip" data-f="${f}" aria-pressed="${ptFilter===f}">${l} · ${fmt(n)}</button>`).join("");
+  $$("#ptChips .chip").forEach(b=>b.onclick=()=>{ptFilter=b.dataset.f;renderPtPanel()});
+  const q=deacc($("#ptQ").value), ord={dif:0,otro:1,sinprod:2,transito:3,ok:4};
+  let f=rows.filter(r=>ptFilter==="todos"||(ptFilter==="dif"?["dif","otro"].includes(r.st):r.st===ptFilter));
+  if(q)f=f.filter(r=>deacc(r.pallet+" "+r.cod+" "+r.desc).includes(q));
+  f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
+  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Producido</th><th>Hora prod.</th><th class="num">Recibido</th><th>Hora recep.</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
+    (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.st==="otro"?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.r.desc||r.r.code)}</span>`:""}</td>
+      <td class="num">${ptQ(r.pe,r,r.e?+r.e.qty:0)}</td><td class="small">${r.e?hhmm(r.e.t)+(r.e.user?" · "+esc(r.e.user):""):""}</td>
+      <td class="num">${ptQ(r.pr,r,r.r?+r.r.qty:0)}</td><td class="small">${r.r?hhmm(r.r.t)+(r.r.user?" · "+esc(r.r.user):""):""}</td>
+      <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td></tr>`).join("")
+    :`<tr><td colspan="9" class="muted">${rows.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
+  // resumen por producto
+  const pm=new Map();for(const r of rows){const k=key(r.cod),o=pm.get(k)||{cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,np:0,nr:0,p:0,rc:0};if(r.e){o.np++;o.p+=r.pe}if(r.r&&r.st!=="otro"){o.nr++;o.rc+=r.pr}pm.set(k,o)}
+  $("#ptProd").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Pallets prod.</th><th class="num">Producido</th><th class="num">Pallets recib.</th><th class="num">Recibido</th><th class="num">Diferencia</th></tr></thead><tbody>`+
+    [...pm.values()].map(o=>`<tr><td class="code">${esc(o.cod)}</td><td class="desc">${esc(o.desc)}</td><td class="num">${fmt(o.np)}</td><td class="num">${ptQ(o.p,o,o.p/(o.f||1))}</td><td class="num">${fmt(o.nr)}</td><td class="num">${ptQ(o.rc,o,o.rc/(o.f||1))}</td><td class="num" style="font-weight:600">${fmt2(o.rc-o.p)}</td></tr>`).join("")+"</tbody>";
+  $("#ptCierres").innerHTML=`<div class="muted" style="margin-bottom:6px">Desde ${fmtDT(ini)}${ptAt?` · actualizado ${hhmm(ptAt)}, se refresca cada 20 s`:""}</div>`+
+    ([...ptData.cierres].reverse().slice(0,12).map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--line)"><b>${c.puesto==="produccion"?"Producción":"Bodega"}</b> cerró turno · ${fmtDT(c.t)}${c.persona?" · "+esc(c.persona):""}</div>`).join("")||'<div class="muted">Sin cierres de turno todavía.</div>');
+}
+$("#ptExp").onclick=()=>{
+  const {rows}=ptRows(), wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Producido":r.pe??"","Hora producción":r.e?fmtDT(r.e.t):"","Operario producción":r.e?r.e.user||"":"","Recibido":r.pr??"","Hora recepción":r.r?fmtDT(r.r.t):"","Operario bodega":r.r?r.r.user||"":"","Diferencia":r.dif??"","Estado":PTST[r.st][0]}))),"Pallets");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Celular":c.puesto==="produccion"?"Producción":"Bodega","Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
+  saveWb(wb,"PT_"+new Date().toISOString().slice(0,10)+".xlsx");
+};
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
- if(!isOp()&&!isSupDevice()&&!prodMode())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
+ if(!isOp()&&!isSupDevice()&&!prodMode()&&!puestoMode())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
 var _qMov=false;try{_qMov=!!new URLSearchParams(location.search).get("mov")}catch(e){}
-checkMovLink().then(mv=>{if(mv)return;if(movOn()){omEnter();omSync();return}checkNubeLink().then(x=>{if(!x)checkConteoLink()})});
+if(puestoMode())puestoInit();else checkMovLink().then(mv=>{if(mv)return;if(movOn()){omEnter();omSync();return}checkNubeLink().then(x=>{if(!x)checkConteoLink()})});
 if(nubeOn())refreshNube(true);
 if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
-if(!movOn()&&!_qMov)show(isOp()?"contar":["erp","mp","resultado"].includes(h)?h:"erp");
+if(!movOn()&&!_qMov&&!puestoMode())show(isOp()?"contar":["erp","mp","resultado","pt"].includes(h)?h:"erp");
 </script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){const had=!!navigator.serviceWorker.controller;let rl=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(had&&!rl){rl=true;location.reload()}});addEventListener("load",()=>navigator.serviceWorker.register("sw.js").then(r=>{r.update();setInterval(()=>r.update(),30*60*1000)}).catch(()=>{}))}</script></body></html>
