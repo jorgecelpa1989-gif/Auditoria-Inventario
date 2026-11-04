@@ -190,7 +190,7 @@ body:has(#v-mp:not([hidden])) .wrap,body:has(#v-pt:not([hidden])) .wrap{max-widt
 #mpCreated .cbox{max-width:none}
 #mpCreated input{font-size:12px}
 @media (max-width:980px){.mpGrid{grid-template-columns:1fr}}
-.mpSides{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mpSides{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
 .mpSide{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
 .mpSide .rl{font:700 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .rolBtns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -1132,6 +1132,52 @@ grant execute on function
   public.cb_pt_registrar(text, text, jsonb), public.cb_pt_borrar(text, text, text), public.cb_pt_mis(text, text),
   public.cb_pt_buscar(text, text, text), public.cb_pt_cerrar(text, text, text), public.cb_pt_listar(text, timestamptz), public.cb_puesto_catalogo(text, text)
 to anon, authenticated;
+
+
+-- =====================================================================
+--  CONTROL DE OPERACIONES · Grupo Vector
+--  Actualización 05: TERCER CELULAR FIJO — PICKING RETAIL (solo recepción de PT)
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No borra datos. Se puede ejecutar más de una vez. Requiere la actualización 04.
+-- =====================================================================
+
+-- Permitir el celular 'retail' en los celulares fijos y en los registros de PT.
+alter table public.cb_puesto drop constraint if exists cb_puesto_id_check;
+alter table public.cb_puesto add constraint cb_puesto_id_check check (id in ('bodega','produccion','retail'));
+alter table public.cb_pt drop constraint if exists cb_pt_puesto_check;
+alter table public.cb_pt add constraint cb_pt_puesto_check check (puesto in ('bodega','produccion','retail'));
+
+create or replace function public.cb_puesto_link(p_clave text, p_puesto text, p_token text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_puesto not in ('bodega','produccion','retail') then raise exception 'datos_invalidos'; end if;
+  if length(coalesce(p_token,'')) < 16 then raise exception 'clave_corta'; end if;
+  insert into cb_puesto(id, hash) values (p_puesto, extensions.crypt(p_token, extensions.gen_salt('bf')))
+  on conflict (id) do update set hash = excluded.hash, creado = now(), usado = null, sesion_hash = null, equipo = null, visto = null;
+end $$;
+
+-- Tareas: bodega entrega MP y cuenta; producción recibe MP; retail no tiene tareas asignadas (solo PT).
+create or replace function public.cb_puesto_tareas(p_puesto text, p_ses text, p_persona text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_rol text := case when p_puesto = 'bodega' then 'E' when p_puesto = 'produccion' then 'R' else null end;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_persona is not null and p_persona <> '' then update cb_puesto set persona = left(p_persona, 80) where id = p_puesto; end if;
+  return jsonb_build_object(
+    'mp', case when v_rol is null then '[]'::jsonb else coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'nombre', m.nombre, 'ref', m.meta->>'ref', 'por', m.meta->>'por', 'token', m.link_token,
+              'creado', m.creado, 'vence', m.vence, 'productos', jsonb_array_length(coalesce(m.meta->'sol','[]'::jsonb)),
+              'terminado', (select l.terminado from cb_mov_lado l where l.mov = m.id and l.rol = v_rol)) order by m.creado)
+            from cb_mov m where coalesce(m.meta->>'estado','activa') = 'activa' and m.meta->>'puestos' = 'true' and m.finalizado is null
+              and m.link_token is not null and (m.vence is null or m.vence > now())), '[]'::jsonb) end,
+    'conteos', case when p_puesto = 'bodega' then coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'nombre', c.nombre, 'token', c.link_token,
+              'creado', c.creado, 'vence', c.vence, 'productos', jsonb_array_length(c.items), 'terminado', c.terminado) order by c.creado)
+            from cb_conteos c where c.puesto = 'bodega' and c.finalizado is null and c.link_token is not null and (c.vence is null or c.vence > now())), '[]'::jsonb)
+            else '[]'::jsonb end,
+    'pt_cierre', (select max(t) from cb_pt_cierre where puesto = p_puesto));
+end $$;
+
+grant execute on function public.cb_puesto_link(text, text, text), public.cb_puesto_tareas(text, text, text) to anon, authenticated;
 </script>
   </div>
 
@@ -1302,7 +1348,7 @@ to anon, authenticated;
 
   <details class="card mpFold" id="puAdm">
     <summary><b>Celulares fijos</b> <span class="small muted" id="puAdmSum"></span></summary>
-    <p class="small" style="margin:8px 0 0">Un link para el celular de <b>bodega</b> y otro para el de <b>producción</b>. Cada uno queda amarrado al primer celular que lo abre y siempre abierto: ahí les llegan las tareas que asignas.</p>
+    <p class="small" style="margin:8px 0 0">Un link para cada celular: <b>bodega</b>, <b>producción</b> y <b>picking retail</b> (solo recepción de PT). Cada uno queda amarrado al primer celular que lo abre y siempre abierto: ahí les llegan las tareas que asignas.</p>
     <div id="puAdmBox"></div>
   </details>
 
@@ -1488,7 +1534,7 @@ to anon, authenticated;
   <div class="notice" id="ptNote" hidden></div>
   <div class="card">
     <div class="eyebrow">Producto terminado</div>
-    <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción en bodega</h2><span class="sep"></span>
+    <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción (bodega y retail)</h2><span class="sep"></span>
       <select id="ptDesde" style="flex:0 1 190px"><option value="turno">Turno actual</option><option value="hoy" selected>Hoy</option><option value="24">Últimas 24 horas</option><option value="168">Últimos 7 días</option></select>
       <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button></div>
     <div class="mpSides" id="ptSides"></div>
@@ -1498,7 +1544,7 @@ to anon, authenticated;
     <div class="small muted">Los pallets con número se comparan uno a uno. Cantidades en la unidad del ERP; con equivalencia, debajo en esa unidad.</div>
     <div id="ptSnBox" hidden>
       <h3 style="margin:8px 0 4px;font-size:15px">Pallets sin número · cuadre por producto</h3>
-      <div class="small muted" style="margin-bottom:6px">Lo registrado sin N° de pallet se compara por SKU: total entregado por producción contra total recibido en bodega en el período.</div>
+      <div class="small muted" style="margin-bottom:6px">Lo registrado sin N° de pallet se compara por SKU: total entregado por producción contra total recibido por bodega y retail en el período.</div>
       <div class="tbl" style="max-height:none"><table id="ptSn"></table></div>
     </div>
     <details><summary class="small" style="cursor:pointer;font-weight:600">Resumen por producto</summary>
@@ -3234,7 +3280,8 @@ $("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
    ===================================================================== */
 var PST=store.get("inv_puesto",null), puestoForce=false, puestoReady=Promise.resolve(), puVista="menu",
     puTareas={mp:[],conteos:[],pt_cierre:null}, puVistos=store.get("inv_puvistos",[]), puCat=store.get("inv_pucat",null);
-const PUN={bodega:"Bodega",produccion:"Producción"};
+const PUN={bodega:"Bodega",produccion:"Producción",retail:"Picking retail"};
+const esReceptorPT=()=>!!PST&&PST.puesto!=="produccion";   // bodega o retail reciben PT
 const puestoMode=()=>!!(PST&&PST.url&&PST.key&&PST.puesto&&(PST.ses||PST.tok))&&(puestoForce||!isSupDevice());
 const pconf=()=>({url:PST.url,key:PST.key});
 const prpc=async(fn,args)=>{await puestoReady;return rpc(pconf(),fn,Object.assign({p_puesto:PST.puesto,p_ses:PST.ses},args||{}))};
@@ -3292,7 +3339,9 @@ function renderPuesto(){
     <label class="f">Operario<input id="puPersona" value="${esc(PST.persona||"")}" placeholder="Tu nombre" autocapitalize="characters"></label>`;
   $("#puPersona").onchange=e=>{PST.persona=norm(e.target.value).toUpperCase();e.target.value=PST.persona;cfg.user=PST.persona;store.set("inv_cfg",cfg);store.set("inv_puesto",PST);puRefresh()};
   const nMp=puTareas.mp.length,pMp=pend(puTareas.mp),nC=puTareas.conteos.length,pC=pend(puTareas.conteos);
-  const items=bod?[
+  const items=PST.puesto==="retail"?[
+    {k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"}]
+   :bod?[
     {k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} asignada${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas",dot:pMp},
     {k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"},
     {k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC}]
@@ -3341,7 +3390,7 @@ function renderPuAdm(){
   const w=$("#mpPuWrap");if(w)w.hidden=prodMode()||!hayPuestos();
   if(prodMode()||!nubeOn())return;
   SB.pu=SB.pu||{};
-  box.innerHTML=["bodega","produccion"].map(p=>{const tok=SB.pu[p];
+  box.innerHTML=["bodega","produccion","retail"].map(p=>{const tok=SB.pu[p];
     if(!tok)return `<div class="puAdmRow"><b>Celular de ${PUN[p]}</b><button class="btn sm primary" data-pnew="${p}">Crear link</button></div>`;
     const link=appUrl()+"?puesto="+p+"&t="+encodeURIComponent(tok)+sbLinkParams();
     return `<div class="puAdmRow" style="flex-direction:column;align-items:stretch"><b>Celular de ${PUN[p]}</b><input readonly value="${esc(link)}" id="pul-${p}">
@@ -3351,7 +3400,7 @@ function renderPuAdm(){
   $$("#puAdmBox [data-pcp]").forEach(b=>b.onclick=()=>copyText($("#pul-"+b.dataset.pcp).value,$("#pul-"+b.dataset.pcp)));
   $$("#puAdmBox [data-prot]").forEach(b=>b.onclick=()=>confirmBox(`Se crea un link nuevo para el celular de ${PUN[b.dataset.prot]} y el actual queda desconectado.`,()=>puAdmSet(b.dataset.prot),"#puConfirm"));
   rpc(SB,"cb_puesto_estado",{p_clave:SB.admin}).then(e=>{let n=0;
-    for(const p of ["bodega","produccion"]){const el=$("#pue-"+p),x=e&&e[p];if(!el)continue;
+    for(const p of ["bodega","produccion","retail"]){const el=$("#pue-"+p),x=e&&e[p];if(!el)continue;
       if(x&&x.usado){n++;el.innerHTML=`<span class="dot ${enLinea(x.visto)?"on":"off"}"></span>Vinculado a <b>${esc(x.equipo||"un celular")}</b>${x.persona?" · "+esc(x.persona):""} · ${enLinea(x.visto)?"en línea":"última conexión "+(x.visto?hace(x.visto):"—")}`}
       else el.textContent="Aún no se abre: quedará amarrado al primer celular que lo abra."}
     $("#puAdmSum").textContent=n?`· ${n} vinculado${n>1?"s":""}`:""}).catch(()=>{});
@@ -3374,8 +3423,7 @@ const ptItems=()=>(puCat&&puCat.items)||[];
 const ptFind=c=>{const i=ptIdx.get(key(c));return i==null?null:ptItems()[i]};
 async function ptAbrir(){
   puVista="pt";puestoApply();
-  const bod=PST.puesto==="bodega";
-  $("#ptTitle").textContent=bod?"Recepción de producto terminado":"Entrega de producto terminado";
+  $("#ptTitle").textContent=PST.puesto==="retail"?"Recepción de PT · retiro para despacho":esReceptorPT()?"Recepción de producto terminado":"Entrega de producto terminado";
   try{
     if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
       if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}
@@ -3390,11 +3438,11 @@ async function ptPalletRead(v){
   v=codeStr(v);if(!v)return;$("#ptPallet").value=v;
   if(ptCel.lect.some(l=>codeStr(l.pallet)===v)){$("#ptPalletInfo").innerHTML='<span style="color:var(--bad);font-weight:600">Este pallet ya está registrado en este turno.</span>';audio.beep(false);return}
   $("#ptPalletInfo").innerHTML="";audio.beep(true);
-  if(PST.puesto==="bodega"){
+  if(esReceptorPT()){
     $("#ptPalletInfo").innerHTML='<span class="muted">Buscando lo que declaró producción…</span>';
     try{const d=await prpc("cb_pt_buscar",{p_pallet:v});ptDecl=d||null;
       if(d){const it=ptFind(d.k||d.code)||{cod:d.k||d.code,desc:d.desc,um:d.um,ce:d.ce,f:d.f};ptProducto(it.cod,true);$("#ptQty").value=String(d.qty);
-        $("#ptPalletInfo").innerHTML=`<span style="color:var(--ok);font-weight:600">Producción declaró ${fmt2(d.qty)} ${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))} de ${esc(d.desc||d.code)}.</span> <span class="muted">Revisa y toca OK, o corrige la cantidad.</span>`;
+        $("#ptPalletInfo").innerHTML=`<span style="color:var(--ok);font-weight:600">Producción declaró ${fmt2(d.qty)} ${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))} de ${esc(String(d.desc||d.code).replace(/\.+$/,""))}.</span> <span class="muted">Revisa y toca OK, o corrige la cantidad.</span>`;
         if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Pallet encontrado. Revisa la cantidad y toca OK."}
         $("#ptQty").focus();try{$("#ptQty").select()}catch(e){}return}
       $("#ptPalletInfo").innerHTML='<span style="color:var(--warn);font-weight:600">Producción no ha registrado este pallet.</span> <span class="muted">Regístralo igual: queda marcado para revisar.</span>'}
@@ -3425,7 +3473,7 @@ function ptAdd(){
   const lid=newLid();
   const l={lid,pallet:sn?"SN-"+lid.toUpperCase():pallet,sn,code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString(),sync:false};
   if(conv(it)){l.f=+it.f;l.ce=it.ce}
-  if(ptDecl&&PST.puesto==="bodega")l.decl=ptDecl.qty;
+  if(ptDecl&&esReceptorPT())l.decl=ptDecl.qty;
   ptCel.lect.push(l);ptSave();audio.beep(true);toast(sn?"✓ Pallet sin número registrado":`✓ Pallet ${pallet} registrado`);
   ptRender();ptLimpiar();ptSyncAll();
   if(ptCamI){ptSetCam("pallet");$("#ptCamMsg").textContent="Listo. Apunta a la etiqueta del siguiente pallet."}
@@ -3502,15 +3550,16 @@ $("#ptQ").addEventListener("input",()=>renderPtPanel());
 
 const ptBase=d=>(+d.qty||0)*(+d.f||1);
 const ptSNd=d=>!!(d&&(d.sn||/^SN-/i.test(String(d.pallet||""))));
-const PTSN={ok:["Cuadra","p-ok"],faltan:["Faltan en bodega","p-bad"],sobran:["Bodega recibió más","p-warn"],transito:["Solo producción (en tránsito)","p-info"],sinprod:["Solo bodega","p-warn"]};
+const PTSN={ok:["Cuadra","p-ok"],faltan:["Falta recepción","p-bad"],sobran:["Se recibió más","p-warn"],transito:["Solo producción (en tránsito)","p-info"],sinprod:["Solo recepción","p-warn"]};
+const PTREC={bodega:"Bodega",retail:"Retail"};
 function ptRows(){
   let ini=ptRango();
   if(!ini){const c=ptData.cierres.filter(x=>x.puesto==="produccion").map(x=>x.t).sort().at(-1);ini=c?new Date(c):new Date(new Date().setHours(0,0,0,0))}
   const E=new Map(),R=new Map();
   const SN=new Map();
   for(const d of ptData.pallets){
-    if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime())continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0};
-      if(!o.desc&&d.desc)o.desc=d.desc;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d)}SN.set(k,o);continue}
+    if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime())continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
+      if(!o.desc&&d.desc)o.desc=d.desc;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
   const rows=[];
   for(const k of new Set([...E.keys(),...R.keys()])){const e=E.get(k),r=R.get(k),ref=e||r,t=Date.parse((e||r).t||(e||r).rt);
@@ -3527,10 +3576,10 @@ function renderPtPanel(){
   if($("#v-pt").hidden)return;
   const {rows,ini,snRows}=ptRows(), cnt=s=>rows.filter(r=>s.includes(r.st)).length, P=ptData.puestos||{};
   const cier=p=>ptData.cierres.filter(x=>x.puesto===p).map(x=>x.t).sort().at(-1);
-  $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"]].map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
+  $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"],["retail","🛒 Picking retail retira"]].filter(([p])=>p!=="retail"||(P.retail&&P.retail.usado)||ptData.pallets.some(d=>d.puesto==="retail")).map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
     return `<div class="mpSide"><span class="rl">${t}</span><div><span class="dot ${x.usado?(on?"on":"off"):""}"></span><b>${!x.usado?"Celular sin vincular":on?"En línea":"Sin señal"}</b>${x.visto&&!on?` <span class="small muted">· última señal ${hace(x.visto)}</span>`:""}</div><div class="small muted">${x.persona?esc(x.persona)+" · ":""}${c?"último cierre de turno "+fmtDT(c):"sin cierres registrados"}</div></div>`}).join("");
   const snP=snRows.reduce((a,o)=>a+o.np,0),snR=snRows.reduce((a,o)=>a+o.nr,0),snD=snRows.filter(o=>o.st!=="ok").length;
-  $("#ptKpis").innerHTML=[["Pallets producidos",rows.filter(r=>r.e).length+snP],["Pallets recibidos",rows.filter(r=>r.r).length+snR],["Recibidos OK",cnt(["ok"])],["En tránsito",cnt(["transito"])],["Con diferencia",cnt(["dif","otro"])],["Sin registro de producción",cnt(["sinprod"])],...(snRows.length?[["Productos sin N° con diferencia",snD]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  $("#ptKpis").innerHTML=[["Pallets producidos",rows.filter(r=>r.e).length+snP],["Pallets recibidos",rows.filter(r=>r.r).length+snR],...(ptData.pallets.some(d=>d.puesto==="retail")?[["Retirados por retail",rows.filter(r=>r.r&&r.r.puesto==="retail").length+snRows.reduce((a,o)=>a+(o.nrr||0),0)]]:[]),["Recibidos OK",cnt(["ok"])],["En tránsito",cnt(["transito"])],["Con diferencia",cnt(["dif","otro"])],["Sin registro de producción",cnt(["sinprod"])],...(snRows.length?[["Productos sin N° con diferencia",snD]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
   const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["dif","otro"])],["transito","En tránsito",cnt(["transito"])],["sinprod","Sin registro de producción",cnt(["sinprod"])],["ok","Recibidos OK",cnt(["ok"])]];
   $("#ptChips").innerHTML=F.map(([f,l,n])=>`<button class="chip" data-f="${f}" aria-pressed="${ptFilter===f}">${l} · ${fmt(n)}</button>`).join("");
   $$("#ptChips .chip").forEach(b=>b.onclick=()=>{ptFilter=b.dataset.f;renderPtPanel()});
@@ -3538,17 +3587,17 @@ function renderPtPanel(){
   let f=rows.filter(r=>ptFilter==="todos"||(ptFilter==="dif"?["dif","otro"].includes(r.st):r.st===ptFilter));
   if(q)f=f.filter(r=>deacc(r.pallet+" "+r.cod+" "+r.desc).includes(q));
   f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
-  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Producido</th><th>Hora prod.</th><th class="num">Recibido</th><th>Hora recep.</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
+  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Producido</th><th>Hora prod.</th><th class="num">Recibido</th><th>Recibió · hora</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
     (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.st==="otro"?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.r.desc||r.r.code)}</span>`:""}</td>
       <td class="num">${ptQ(r.pe,r,r.e?+r.e.qty:0)}</td><td class="small">${r.e?hhmm(r.e.t)+(r.e.user?" · "+esc(r.e.user):""):""}</td>
-      <td class="num">${ptQ(r.pr,r,r.r?+r.r.qty:0)}</td><td class="small">${r.r?hhmm(r.r.t)+(r.r.user?" · "+esc(r.r.user):""):""}</td>
+      <td class="num">${ptQ(r.pr,r,r.r?+r.r.qty:0)}</td><td class="small">${r.r?`<b>${PTREC[r.r.puesto]||""}</b> · `+hhmm(r.r.t)+(r.r.user?" · "+esc(r.r.user):""):""}</td>
       <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td></tr>`).join("")
     :`<tr><td colspan="9" class="muted">${rows.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
   // pallets sin número: cuadre por SKU
   $("#ptSnBox").hidden=!snRows.length;
   const so={faltan:0,sinprod:1,sobran:2,transito:3,ok:4};
   $("#ptSn").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Pallets prod.</th><th class="num">Producido</th><th class="num">Pallets recib.</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
-    [...snRows].sort((a,b)=>so[a.st]-so[b.st]||Math.abs(b.dif)-Math.abs(a.dif)).map(o=>`<tr><td class="code">${esc(o.cod)}</td><td class="desc">${esc(o.desc)}</td><td class="num">${fmt(o.np)}</td><td class="num">${ptQ(o.np?o.p:null,o,o.p/(o.f||1))}</td><td class="num">${fmt(o.nr)}</td><td class="num">${ptQ(o.nr?o.rc:null,o,o.rc/(o.f||1))}</td>
+    [...snRows].sort((a,b)=>so[a.st]-so[b.st]||Math.abs(b.dif)-Math.abs(a.dif)).map(o=>`<tr><td class="code">${esc(o.cod)}</td><td class="desc">${esc(o.desc)}</td><td class="num">${fmt(o.np)}</td><td class="num">${ptQ(o.np?o.p:null,o,o.p/(o.f||1))}</td><td class="num">${fmt(o.nr)}${o.nrr?`<span class="sub">bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)}</span>`:""}</td><td class="num">${ptQ(o.nr?o.rc:null,o,o.rc/(o.f||1))}</td>
       <td class="num" style="font-weight:600;color:${o.dif<0?"var(--bad)":o.dif>0?"var(--warn)":"inherit"}">${(o.dif>0?"+":"")+fmt2(o.dif)}</td><td><span class="pill ${PTSN[o.st][1]}">${PTSN[o.st][0]}</span></td></tr>`).join("")+"</tbody>";
   // resumen por producto (con número y sin número)
   const pm=new Map();for(const o of snRows){pm.set(key(o.cod),{cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,np:o.np,nr:o.nr,p:o.p,rc:o.rc})}
@@ -3556,14 +3605,14 @@ function renderPtPanel(){
   $("#ptProd").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Pallets prod.</th><th class="num">Producido</th><th class="num">Pallets recib.</th><th class="num">Recibido</th><th class="num">Diferencia</th></tr></thead><tbody>`+
     [...pm.values()].map(o=>`<tr><td class="code">${esc(o.cod)}</td><td class="desc">${esc(o.desc)}</td><td class="num">${fmt(o.np)}</td><td class="num">${ptQ(o.p,o,o.p/(o.f||1))}</td><td class="num">${fmt(o.nr)}</td><td class="num">${ptQ(o.rc,o,o.rc/(o.f||1))}</td><td class="num" style="font-weight:600">${fmt2(o.rc-o.p)}</td></tr>`).join("")+"</tbody>";
   $("#ptCierres").innerHTML=`<div class="muted" style="margin-bottom:6px">Desde ${fmtDT(ini)}${ptAt?` · actualizado ${hhmm(ptAt)}, se refresca cada 20 s`:""}</div>`+
-    ([...ptData.cierres].reverse().slice(0,12).map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--line)"><b>${c.puesto==="produccion"?"Producción":"Bodega"}</b> cerró turno · ${fmtDT(c.t)}${c.persona?" · "+esc(c.persona):""}</div>`).join("")||'<div class="muted">Sin cierres de turno todavía.</div>');
+    ([...ptData.cierres].reverse().slice(0,12).map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--line)"><b>${c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto}</b> cerró turno · ${fmtDT(c.t)}${c.persona?" · "+esc(c.persona):""}</div>`).join("")||'<div class="muted">Sin cierres de turno todavía.</div>');
 }
 $("#ptExp").onclick=()=>{
   const {rows}=ptRows(), wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Producido":r.pe??"","Hora producción":r.e?fmtDT(r.e.t):"","Operario producción":r.e?r.e.user||"":"","Recibido":r.pr??"","Hora recepción":r.r?fmtDT(r.r.t):"","Operario bodega":r.r?r.r.user||"":"","Diferencia":r.dif??"","Estado":PTST[r.st][0]}))),"Pallets");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Producido":r.pe??"","Hora producción":r.e?fmtDT(r.e.t):"","Operario producción":r.e?r.e.user||"":"","Recibido":r.pr??"","Recibido por":r.r?PTREC[r.r.puesto]||"":"","Hora recepción":r.r?fmtDT(r.r.t):"","Operario recepción":r.r?r.r.user||"":"","Diferencia":r.dif??"","Estado":PTST[r.st][0]}))),"Pallets");
   const {snRows}=ptRows();
-  if(snRows.length)XLSX.utils.book_append_sheet(wb,sheetFrom(snRows.map(o=>({"Código":o.cod,"Descripción":o.desc,"Unidad ERP":umTxt(o.um),"Pallets producción":o.np,"Producido":o.p,"Pallets bodega":o.nr,"Recibido":o.rc,"Diferencia":o.dif,"Estado":PTSN[o.st][0]}))),"Sin número por producto");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Celular":c.puesto==="produccion"?"Producción":"Bodega","Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
+  if(snRows.length)XLSX.utils.book_append_sheet(wb,sheetFrom(snRows.map(o=>({"Código":o.cod,"Descripción":o.desc,"Unidad ERP":umTxt(o.um),"Pallets producción":o.np,"Producido":o.p,"Pallets recibidos":o.nr,"Pallets bodega":o.nrb||0,"Pallets retail":o.nrr||0,"Recibido":o.rc,"Recibido bodega":o.rb||0,"Recibido retail":o.rr||0,"Diferencia":o.dif,"Estado":PTSN[o.st][0]}))),"Sin número por producto");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Celular":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
   saveWb(wb,"PT_"+new Date().toISOString().slice(0,10)+".xlsx");
 };
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
