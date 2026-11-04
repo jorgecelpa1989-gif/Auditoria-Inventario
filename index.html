@@ -133,6 +133,14 @@ body:not(.locked) #lockBox{display:none}
 .chip[aria-pressed="true"]{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
 .confirm{border:1px solid var(--bad);background:var(--bad-bg);border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+/* Alerta de código que no existe: tapa la pantalla para que no pase desapercibida */
+.calert{position:fixed;inset:0;z-index:30;background:rgba(38,70,92,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.calert[hidden]{display:none}
+.calert .cbox2{background:var(--panel);border:3px solid var(--bad);border-radius:14px;padding:22px 18px;max-width:420px;width:100%;display:flex;flex-direction:column;gap:10px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.calert .big{font-size:40px;line-height:1}.calert h2{margin:0;font-size:20px;color:var(--bad)}.calert p{margin:0}
+.calert .code{font-family:var(--mono);background:var(--bad-bg);padding:1px 6px;border-radius:4px;word-break:break-all}
+.calert .col{display:flex;flex-direction:column;gap:8px;margin-top:6px}.calert .col .btn{justify-content:center;font-size:16px;padding:12px 14px}
+.lockLink{display:flex;flex-direction:column;gap:8px;margin-top:6px;text-align:left}.lockLink input{font:14px var(--mono);padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%}
 .muted{color:var(--muted)}
 .small{font-size:12.5px}
 .sep{flex:1}
@@ -1178,6 +1186,77 @@ begin
 end $$;
 
 grant execute on function public.cb_puesto_link(text, text, text), public.cb_puesto_tareas(text, text, text) to anon, authenticated;
+
+-- =====================================================================
+--  CONTROL DE OPERACIONES · Grupo Vector
+--  Actualización 06: LIBERAR CELULAR + RECUPERAR LECTURAS
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No borra datos. Se puede ejecutar más de una vez. Requiere la actualización 05.
+--  Compatible con la versión anterior de la app: solo agrega funciones y datos en las respuestas.
+-- =====================================================================
+
+-- El supervisor libera un conteo que quedó amarrado a un celular (cambio de teléfono, iPhone con
+-- ícono en la pantalla de inicio, datos borrados…). El celular anterior ya no puede enviar más y el
+-- próximo que abra el link queda como dueño. Las lecturas ya recibidas se mantienen.
+create or replace function public.cb_liberar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_fin timestamptz;
+begin
+  perform cb_check(p_clave);
+  select finalizado into v_fin from cb_conteos where id = p_id for update;
+  if not found then raise exception 'no_existe'; end if;
+  if v_fin is not null then raise exception 'finalizado'; end if;
+  update cb_conteos set device = null, secret_hash = null, terminado = null where id = p_id;
+end $$;
+
+-- Lo mismo para un lado (E = entrega, R = recepción) de una entrega de materia prima.
+-- Las lecturas de ese lado (cb_mov_lect) se mantienen y cb_mov_abrir ya las devuelve al celular nuevo.
+create or replace function public.cb_mov_liberar(p_clave text, p_id uuid, p_rol text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if exists (select 1 from cb_mov where id = p_id and finalizado is not null) then raise exception 'finalizado'; end if;
+  delete from cb_mov_lado where mov = p_id and rol = p_rol;
+end $$;
+
+-- Abrir el link ahora devuelve también las lecturas que ya llegaron ('lect'), para que un celular
+-- liberado siga desde ahí y su primer envío no borre lo que ya estaba guardado.
+create or replace function public.cb_abrir(p_id uuid, p_token text, p_device text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos; v_secret text := encode(extensions.gen_random_bytes(16), 'hex');
+begin
+  select * into c from cb_conteos where id = p_id for update;
+  if not found or c.token_hash <> extensions.crypt(coalesce(p_token,''), c.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if c.finalizado is not null then raise exception 'finalizado'; end if;
+  if c.vence is not null and c.vence < now() then raise exception 'vencido'; end if;
+  if c.device is not null and c.device <> p_device then raise exception 'usado'; end if;
+  update cb_conteos set device = p_device, secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')),
+         abierto = coalesce(abierto, now()) where id = p_id;
+  return jsonb_build_object('nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'items', c.items, 'meta', c.meta, 'secret', v_secret,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_lecturas where conteo = p_id), '[]'::jsonb));
+end $$;
+
+-- El listado del supervisor indica si el conteo está libre (sin celular dueño) para mostrar de nuevo el link.
+create or replace function public.cb_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'finalizado', c.finalizado,
+      'abierto', c.abierto, 'contador', c.contador, 'ultimo_envio', c.ultimo_envio, 'n_lecturas', c.n_lecturas,
+      'visto', c.visto, 'terminado', c.terminado, 'puesto', c.puesto, 'asignable', c.link_token is not null,
+      'libre', c.device is null,
+      'productos', jsonb_array_length(c.items),
+      'contados', (select count(distinct l.data->>'k') from cb_lecturas l where l.conteo = c.id)
+    ) order by c.creado desc)
+    from cb_conteos c where c.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+grant execute on function public.cb_liberar(text, uuid), public.cb_mov_liberar(text, uuid, text) to anon, authenticated;
 </script>
   </div>
 
@@ -1868,6 +1947,26 @@ $("#btnDemo").onclick=()=>{
 /* ================= CONTAR ================= */
 const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||window.webkitAudioContext)();const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.frequency.value=ok?1600:320;o.type=ok?"sine":"square";g.gain.value=.08;o.connect(g);g.connect(this.ctx.destination);o.start();o.stop(this.ctx.currentTime+(ok?.08:.28))}catch(e){}
   try{navigator.vibrate&&navigator.vibrate(ok?40:[80,60,80])}catch(e){}}};
+/* ---- alerta: el código digitado NO existe en la lista de productos ----
+   Se muestra antes de registrar. "Corregir" vuelve al campo de código; "Registrar igual" deja pasar ese código
+   (queda anotado en unkOk para no volver a preguntar por el mismo código). */
+const unkOk=new Set();
+const calertOpen=()=>{const o=document.getElementById("calert");return !!(o&&!o.hidden)};
+function codeAlert(code,onFix,onKeep){
+  let ov=document.getElementById("calert");
+  if(!ov){ov=document.createElement("div");ov.id="calert";ov.className="calert";ov.setAttribute("role","alertdialog");ov.setAttribute("aria-modal","true");ov.setAttribute("aria-labelledby","caT");document.body.appendChild(ov)}
+  ov.innerHTML=`<div class="cbox2"><div class="big">⚠️</div><h2 id="caT">Código no encontrado</h2>
+    <p>El código <span class="code">${esc(code)}</span> <b>NO existe</b> en la lista de productos.</p>
+    <p class="small muted">Revisa que esté bien digitado antes de seguir.</p>
+    <div class="col"><button class="btn primary" id="caFix">Corregir código</button><button class="btn" id="caKeep">Registrar igual</button></div></div>`;
+  ov.hidden=false;audio.beep(false);
+  const close=()=>{ov.hidden=true;ov.innerHTML=""};
+  $("#caFix").onclick=()=>{close();if(onFix)onFix()};
+  $("#caKeep").onclick=()=>{close();if(onKeep)onKeep()};
+  ov.onkeydown=e=>{if(e.key==="Escape"){e.preventDefault();$("#caFix").click()}};
+  setTimeout(()=>{try{$("#caFix").focus()}catch(e){}},30);
+}
+const esTextoBusqueda=v=>/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v);
 let lastSrc="teclado", unsaved=false, nextArmed=0;
 const camOpen=()=>!!cam;
 $("#blind").checked=cfg.blind;cfg.keepQty=false;
@@ -1916,12 +2015,29 @@ function productRead(raw,src){
   const it0=erp&&findItem(v);
   if(!it0&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){nameSearch(v);return}
   $("#sugg").hidden=true;
-  v=codeStr(v); $("#scan").value=v; lastSrc=src;
+  v=codeStr(v); $("#scan").value=v; lastSrc=src; scanChk=v;
   const it=showPending(v);
-  audio.beep(!!it||!erp); unsaved=true;
+  unsaved=true;
   if(camOpen()){camHold=true;$("#camMsg").textContent="Leído. Digita la cantidad y toca OK."}
+  if(erp&&!it&&!unkOk.has(key(v))){
+    codeAlert(v,()=>{if(camOpen()){camHold=false;$("#camMsg").textContent="Apunta al código del producto."}focusSel($("#scan"))},
+      ()=>{unkOk.add(key(v));focusSel($("#qty"))});
+    return}
+  audio.beep(!!it||!erp);
   focusSel($("#qty"));
 }
+/* al salir del campo de código sin tocar Enter (lo normal en el celular): revisa igual si el código existe */
+let scanChk="";
+function scanBlurCheck(){
+  if($("#v-contar").hidden||calertOpen())return;
+  const raw=norm($("#scan").value);if(!raw)return;
+  const v=codeStr(raw);if(v===scanChk)return;
+  if(esTextoBusqueda(raw)&&!(erp&&findItem(raw)))return;   // es una búsqueda por nombre: se resuelve con Enter
+  scanChk=v;$("#scan").value=v;lastSrc="teclado";
+  const it=showPending(v);
+  if(erp&&!it&&!unkOk.has(key(v)))codeAlert(v,()=>focusSel($("#scan")),()=>{unkOk.add(key(v));focusSel($("#qty"))});
+}
+$("#scan").addEventListener("blur",()=>setTimeout(scanBlurCheck,150));
 function nameSearch(v){
   const words=deacc(v).split(" ").filter(Boolean);
   const res=buscarNombre(erp?erp.items:[],v);
@@ -1938,6 +2054,8 @@ function doSum(){
   if(checkExpiry())return;
   const v=norm($("#scan").value);
   if(!v){toast("Primero escanea o digita un producto");focusSel($("#scan"));return}
+  scanChk=codeStr(v);
+  if(erp&&!findItem(v)&&!unkOk.has(key(v))){showPending(codeStr(v));codeAlert(codeStr(v),()=>focusSel($("#scan")),()=>{unkOk.add(key(v));doSum()});return}
   const q=num($("#qty").value);
   if(q==null){toast("Digita la cantidad");focusSel($("#qty"));return}
   addScan(v,q,lastSrc);
@@ -2050,7 +2168,7 @@ async function stopCam(){if(cam){await detenerLector(cam);cam=null}camHold=false
 $("#camUbic").onclick=()=>openCam("ubic");
 $("#camSku").onclick=()=>openCam("sku");
 $("#btnCamStop").onclick=stopCam;
-document.addEventListener("keydown",e=>{if($("#v-contar").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#scan"))},true);
+document.addEventListener("keydown",e=>{if($("#v-contar").hidden||calertOpen())return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#scan"))},true);
 applyKbd();
 
 
@@ -2426,7 +2544,7 @@ function renderConteosOnly(){
    (conteos.length?conteos.map((c,i)=>{
      if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&(x.finalizado||x.terminado))c.fin=true;
        return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
-       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&!x.abierto&&!x.finalizado?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&SB.pu&&SB.pu.bodega?(x.puesto?`<button class="btn sm" data-pq="${i}" title="Quitar del celular de bodega">📱 En bodega ✕</button>`:`<button class="btn sm accent" data-pa="${i}">📱 Asignar a bodega</button>`):""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
+       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&(!x.abierto||x.libre)&&!x.finalizado&&c.link?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&SB.pu&&SB.pu.bodega?(x.puesto?`<button class="btn sm" data-pq="${i}" title="Quitar del celular de bodega">📱 En bodega ✕</button>`:`<button class="btn sm accent" data-pa="${i}">📱 Asignar a bodega</button>`):""}${x&&x.abierto&&x.libre===false&&!x.finalizado?`<button class="btn sm" data-lb="${i}" title="Si el celular del contador quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
      return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
     <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
     <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
@@ -2438,6 +2556,8 @@ function renderConteosOnly(){
   $$("#conteosTbl [data-pa],#conteosTbl [data-pq]").forEach(b=>b.onclick=async()=>{const c=conteos[+(b.dataset.pa||b.dataset.pq)];
     try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:b.dataset.pa?"bodega":""});toast(b.dataset.pa?"Conteo asignado al celular de bodega":"Conteo quitado del celular de bodega");refreshNube(true)}catch(e){toast(sbMsg(e))}});
   $("#cPuWrap").hidden=!(nubeOn()&&SB.pu&&SB.pu.bodega);
+  $$("#conteosTbl [data-lb]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.lb],x=nubeLive.get(c.id)||{};
+    confirmBox(`Liberar el celular de "${esc(c.nombre)}"${x.contador?" ("+esc(x.contador)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas ya recibidas.`,async()=>{try{await rpc(SB,"cb_liberar",{p_clave:SB.admin,p_id:c.id});await refreshNube(true);toast("Celular liberado: reenvía el mismo link al contador")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
     confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
@@ -2464,7 +2584,7 @@ async function rpc(conf,fn,args){
   return j;
 }
 const SBMSG={acceso_produccion:"La clave no es válida o fue cambiada. Pide un link nuevo al supervisor.",clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
-  usado:"Este link ya se abrió en otro celular. Pide uno nuevo al supervisor.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
+  usado:"Este link ya se abrió en otro celular. Pide al supervisor que libere el celular desde el Panel y vuelve a abrir el mismo link.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
   no_existe:"El link no es válido o el conteo fue eliminado. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para enviar este conteo.",sin_conexion:"Sin conexión a internet.",sin_productos:"El conteo no tiene productos."};
 const sbMsg=e=>SBMSG[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script SQL en Supabase (paso 2 de las instrucciones).":/Invalid API key|401|JWT|apikey/i.test(e.message)?"La clave pública (anon / publishable) no es válida.":e.message);
 const rndKey=n=>{const a=new Uint8Array(n);crypto.getRandomValues(a);return [...a].map(b=>"abcdefghjkmnpqrstuvwxyz23456789"[b%31]).join("")};
@@ -2559,6 +2679,7 @@ function nubeEstado(c,x){
   if(x.finalizado)return ['<span class="pill p-mut">Finalizado</span>',""];
   if(!x.abierto)return isVenc(x.vence)?['<span class="pill p-warn">Venció sin abrir</span>',""]:['<span class="pill p-info">Sin abrir</span>',""];
   const av=`${fmt(x.contados)} de ${fmt(x.productos)} productos · ${fmt(x.n_lecturas)} lecturas${x.contador?" · "+esc(x.contador):""}${x.ultimo_envio?`<br><span class="muted">último envío ${new Date(x.ultimo_envio).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}</span>`:""}`;
+  if(x.libre&&!isVenc(x.vence))return ['<span class="pill p-warn">Liberado</span>',av+'<br><span class="muted">esperando que se abra el link en el celular nuevo</span>'];
   return [isVenc(x.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Contando</span>',av];
 }
 async function traerLecturas(c,silent){
@@ -2696,10 +2817,17 @@ function applyConteo(m,id,sb){
   erp={file:m.nombre,at:m.creado,version:id,maestro:true,conteo:{id,nombre:m.nombre,creado:m.creado,vence:m.vence||null,sb:sb||null},
     items:m.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1,stock:null,costo:null,ubic:""}))};
   store.set("inv_erp",erp);cfg.conteoId=id;cfg.operator=null;cfg.ubic="";cfg.dirty=false;cfg.syncAt=null;cfg.syncErr="";store.set("inv_cfg",cfg);
+  // Recuperar lecturas: si el link ya tenía lecturas en el servidor (celular liberado por el supervisor), se siguen
+  // desde ahí. Así el primer envío de este celular no borra lo que ya estaba guardado.
+  const srv=Array.isArray(m.lect)?m.lect:[];let recup=0;
+  if(srv.length){const have=new Set(scans.map(s=>s.lid).filter(Boolean));
+    for(const d of srv){if(!d||(d.lid&&have.has(d.lid)))continue;
+      scans.push({code:d.code,qty:+d.qty||0,f:+d.f>0&&+d.f!==1?+d.f:undefined,ce:d.ce||undefined,um:d.um||undefined,ubic:d.ubic||"",user:d.user||"",t:d.t,src:d.src||"recuperada",lid:d.lid||newLid(),conteo:m.nombre});recup++}
+    if(recup){store.set("inv_scans",scans);const u=srv[srv.length-1]&&srv[srv.length-1].user;if(u&&!cfg.user){cfg.user=u;store.set("inv_cfg",cfg)}}}
   buildIndex();updStatus();applyMode();setUbic("",true);clearProduct();renderRecent();renderSess();
-  $("#last").innerHTML=`<div class="d">Listo para contar</div><div class="c">${esc(m.nombre)} · ${fmt(erp.items.length)} productos</div>`;
+  $("#last").innerHTML=`<div class="d">Listo para contar</div><div class="c">${esc(m.nombre)} · ${fmt(erp.items.length)} productos${recup?` · <b>${fmt(recup)} lecturas recuperadas</b>`:""}</div>`;
   $("#conteoBanner").innerHTML="";cfg.listOpen=erp.items.length<=60;store.set("inv_cfg",cfg);
-  renderConteoBox();toast("Conteo listo: escribe tu nombre y escanea la primera ubicación");
+  renderConteoBox();toast(recup?`Se recuperaron ${fmt(recup)} lecturas de este conteo. Puedes seguir contando.`:"Conteo listo: escribe tu nombre y escanea la primera ubicación");
   show("contar");
 }
 
@@ -2711,8 +2839,22 @@ function lockScreen(msg,title,icon,force){
   if(!force&&(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn())||(typeof prodMode==="function"&&prodMode())||(typeof puestoMode==="function"&&puestoMode())))return false;
   if(typeof stopCam==="function")stopCam();
   document.body.classList.add("locked");
-  $("#lockBox").innerHTML=`<div class="lockCard"><div class="big">${icon||"🔒"}</div><h2>${esc(title||"Esta app se usa con el link de tu supervisor")}</h2><p>${msg||"Abre el link de conteo que te enviaron por WhatsApp."}</p></div>`;
+  $("#lockBox").innerHTML=`<div class="lockCard"><div class="big">${icon||"🔒"}</div><h2>${esc(title||"Esta app se usa con el link de tu supervisor")}</h2><p>${msg||"Abre el link de conteo que te enviaron por WhatsApp."}</p>
+    <div class="lockLink"><label class="small" for="lockUrl"><b>¿Tienes el link?</b> Cópialo desde WhatsApp y pégalo aquí (sirve también si abriste la app desde el ícono de inicio).</label>
+      <input id="lockUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…">
+      <button class="btn primary" id="lockGo" style="justify-content:center">Abrir link</button><span class="small" id="lockErr" style="color:var(--bad)"></span></div></div>`;
+  const go=()=>{const u=linkPegado($("#lockUrl").value);if(!u){$("#lockErr").textContent="Ese no parece un link de esta app. Cópialo completo desde el mensaje.";return}location.href=u};
+  $("#lockGo").onclick=go;$("#lockUrl").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();go()}});
   return true;
+}
+/* Solo acepta links de esta misma app (mismo sitio y carpeta) que traen un conteo, entrega o celular fijo. */
+function linkPegado(v){
+  v=String(v||"").trim();const m=v.match(/https?:\/\/\S+/);if(m)v=m[0];
+  let u;try{u=new URL(v,location.href)}catch(e){return null}
+  const base=location.pathname.replace(/[^/]*$/,"");
+  if(u.origin!==location.origin||!u.pathname.startsWith(base))return null;
+  if(!["nube","c","mov","puesto","prod"].some(k=>u.searchParams.has(k)))return null;
+  return u.href;
 }
 function lockFromBanner(title){const t=($("#conteoBanner").textContent||"").trim();lockScreen(esc(t),title||"No se puede abrir este link","⚠️")}
 function applyMode(){
@@ -2761,7 +2903,7 @@ setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>
 var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
     movLect={}, movSeen={}, mpFilter="todos", movHide=store.get("inv_movhide",[]);
 const ROL={E:"Entrega",R:"Recepción"};
-const movMsg=e=>({rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que revise.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
+const movMsg=e=>({rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere desde el Panel y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
 
 /* ---------- ¿Quién usa esta pestaña? supervisor (clave de Supabase) o jefe de producción (link propio) ---------- */
 // PRD = {url,key,tok,ses} en el PC del jefe de producción: tok viene en su link, ses es la llave que recibe ESE equipo al vincularse.
@@ -3077,7 +3219,9 @@ function renderMpCmp(){
   if($("#actCopy"))$("#actCopy").onclick=()=>copyText(m.link);
   $("#mpSides").hidden=sol;
   $("#mpTitle").innerHTML=`${esc(m.nombre)}${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}`;
-  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div></div>`}).join("");
+  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div>${l&&!l.terminado&&x&&!x.finalizado&&!prodMode()&&nubeOn()?`<button class="btn sm" data-ml="${r}" style="align-self:flex-start;margin-top:4px" title="Si ese celular quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}</div>`}).join("");
+  $$("#mpSides [data-ml]").forEach(b=>b.onclick=()=>{const r=b.dataset.ml,l=L[r]||{};
+    confirmBox(`Liberar el celular de ${r==="E"?"quien entrega":"quien recibe"}${l.persona?" ("+esc(l.persona)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link en ese rol lo toma y recupera sus ${fmt(l.n_lecturas||0)} lecturas.`,async()=>{try{await rpc(SB,"cb_mov_liberar",{p_clave:SB.admin,p_id:m.id,p_rol:r});await refreshMov(true);toast("Celular liberado: reenvía el mismo link")}catch(e){toast(movMsg(e))}},"#mpConfirm");$("#mpConfirm")&&$("#mpConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   const rows=mpRows(m.id), cnt=s=>rows.filter(r=>s.includes(r.st)).length, hasS=rows.some(r=>r.S!=null);
   $("#mpKpis").innerHTML=[...(hasS?[["Solicitados",rows.filter(r=>r.S!=null).length]]:[]),["Productos entregados",rows.filter(r=>r.E!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt(["ok"])],["Con diferencia",cnt(["falta","sobra","norec","noent"])],["Por recibir",cnt(["porrec"])],...(hasS?[["Por entregar",cnt(["porent"])]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
   const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["falta","sobra","norec","noent"])],["ok","Cuadran",cnt(["ok"])],["porrec","Por recibir",cnt(["porrec"])],...(hasS?[["porent","Por entregar",cnt(["porent"])]]:[])];
@@ -3211,11 +3355,27 @@ function omRead(raw){
   let v=norm(raw);if(!v)return;
   const it0=omFind(v);
   if(!it0&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){omSearch(v);return}
-  $("#omSugg").hidden=true;v=codeStr(v);$("#omScan").value=v;
-  const it=omPending(v);audio.beep(!!it);
+  $("#omSugg").hidden=true;v=codeStr(v);$("#omScan").value=v;omChk=v;
+  const it=omPending(v);
   if(omCamI){omHold=true;$("#omCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
+  if(!it&&om.items&&om.items.length&&!unkOk.has(key(v))){
+    codeAlert(v,()=>{if(omCamI){omHold=false;$("#omCamMsg").textContent="Apunta al código del producto."}focusSel($("#omScan"))},
+      ()=>{unkOk.add(key(v));focusSel($("#omQty"))});
+    return}
+  audio.beep(!!it);
   focusSel($("#omQty"));
 }
+let omChk="";
+function omBlurCheck(){
+  if(!om||$("#v-opmov").hidden||calertOpen())return;
+  const raw=norm($("#omScan").value);if(!raw)return;
+  const v=codeStr(raw);if(v===omChk)return;
+  if(esTextoBusqueda(raw)&&!omFind(raw))return;
+  omChk=v;$("#omScan").value=v;
+  const it=omPending(v);
+  if(!it&&om.items&&om.items.length&&!unkOk.has(key(v)))codeAlert(v,()=>focusSel($("#omScan")),()=>{unkOk.add(key(v));focusSel($("#omQty"))});
+}
+$("#omScan").addEventListener("blur",()=>setTimeout(omBlurCheck,150));
 function omSearch(v){
   const res=buscarNombre(om.items,v), box=$("#omSugg");box.hidden=false;
   if(!res.length){box.innerHTML=`<button><span>No encontré "${esc(v)}". ¿Usarlo como código?</span></button>`;box.querySelector("button").onclick=()=>{box.hidden=true;omRead(v.replace(/\s+/g,""))};return}
@@ -3227,10 +3387,11 @@ function omAdd(){
   const code=codeStr($("#omScan").value);if(!code){toast("Primero escanea o digita un producto");return focusSel($("#omScan"))}
   const q=num($("#omQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#omQty"))}
   if(!om.persona){const v=norm($("#omUser").value).toUpperCase();if(!v){toast("Escribe tu nombre arriba");return $("#omUser").focus()}om.persona=v}
-  const it=omFind(code);
+  const it=omFind(code);omChk=code;
+  if(!it&&om.items&&om.items.length&&!unkOk.has(key(code))){omPending(code);codeAlert(code,()=>focusSel($("#omScan")),()=>{unkOk.add(key(code));omAdd()});return}
   const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:om.persona,t:new Date().toISOString()};
   if(conv(it)){l.f=+it.f;l.ce=it.ce}
-  om.lect.push(l);omDirty();audio.beep(true);
+  om.lect.push(l);omDirty();audio.beep(!!it);
   $("#omQty").value="";omPending(code);
   const pe=$("#omPending");pe.classList.add("done");pe.insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${l.f?`${fmt2(q)} ${esc(plural(l.ce))} = ${fmt2(q*l.f)} ${esc(l.um)}`:fmt2(q)+(l.um&&l.um!=="un"?" "+esc(l.um):"")}</div>`);setTimeout(()=>pe.classList.remove("done"),900);
   omHold=false;omRender();
@@ -3240,7 +3401,7 @@ $("#omOk").onclick=omAdd;
 $("#omQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();omAdd()}});
 $("#omScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();omRead(e.target.value)}});
 $("#omScan").addEventListener("input",()=>{$("#omPending").hidden=true});
-document.addEventListener("keydown",e=>{if($("#v-opmov").hidden||$("#omWork").hidden)return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#omScan"))},true);
+document.addEventListener("keydown",e=>{if($("#v-opmov").hidden||$("#omWork").hidden||calertOpen())return;const a=document.activeElement;if(a&&/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(a.tagName))return;if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey)focusSel($("#omScan"))},true);
 function omDirty(){om.dirty=true;om.ver=(om.ver||0)+1;omSave();clearTimeout(omT);omT=setTimeout(omSync,1500);omRenderSync()}
 async function omSync(){
   if(!om||!om.conf||omSyncing||!om.dirty)return;
@@ -3467,22 +3628,39 @@ function ptProducto(v,silent){
   $("#ptSugg").hidden=true;$("#ptScan").value=v;
   const p=$("#ptPending");p.hidden=false;p.className="pending"+(it?"":" bad");
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza.");
-  $("#ptQtyEb").textContent=qtyLabel(it,3);
-  if(!silent){audio.beep(!!it);if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Leído. Digita la cantidad y toca OK."}focusSel($("#ptQty"))}
+  $("#ptQtyEb").textContent=qtyLabel(it,3);ptChk=v;
+  if(!silent){
+    if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
+    if(!it&&ptItems().length&&!unkOk.has(key(v))){
+      codeAlert(v,()=>{if(ptCamI){ptHold=false;$("#ptCamMsg").textContent="Apunta al código del producto."}focusSel($("#ptScan"))},
+        ()=>{unkOk.add(key(v));focusSel($("#ptQty"))});
+      return it}
+    audio.beep(!!it);focusSel($("#ptQty"))}
   return it;
 }
+let ptChk="";
+function ptBlurCheck(){
+  if($("#v-ptcel").hidden||calertOpen())return;
+  const raw=norm($("#ptScan").value);if(!raw)return;
+  const v=codeStr(raw);if(v===ptChk)return;
+  if(esTextoBusqueda(raw)&&!ptFind(raw))return;
+  const it=ptProducto(v,true);
+  if(!it&&ptItems().length&&!unkOk.has(key(v)))codeAlert(v,()=>focusSel($("#ptScan")),()=>{unkOk.add(key(v));focusSel($("#ptQty"))});
+}
+$("#ptScan").addEventListener("blur",()=>setTimeout(ptBlurCheck,150));
 function ptAdd(){
   const pallet=codeStr($("#ptPallet").value), code=codeStr($("#ptScan").value), q=num($("#ptQty").value);
   const sn=!pallet;                                   // sin etiqueta: se cuadra por producto (SKU)
   if(!sn&&ptCel.lect.some(l=>codeStr(l.pallet)===pallet)){toast("Ese pallet ya está registrado en este turno");return focusSel($("#ptPallet"))}
   if(!code){toast(pallet?"Falta el producto":"Escanea el pallet o, si no tiene número, el producto");return focusSel(pallet?$("#ptScan"):$("#ptScan"))}
   if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#ptQty"))}
-  const it=ptFind(code);
+  const it=ptFind(code);ptChk=code;
+  if(!it&&ptItems().length&&!unkOk.has(key(code))){codeAlert(code,()=>focusSel($("#ptScan")),()=>{unkOk.add(key(code));ptAdd()});return}
   const lid=newLid();
   const l={lid,pallet:sn?"SN-"+lid.toUpperCase():pallet,sn,code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString(),sync:false};
   if(conv(it)){l.f=+it.f;l.ce=it.ce}
   if(ptDecl&&esReceptorPT())l.decl=ptDecl.qty;
-  ptCel.lect.push(l);ptSave();audio.beep(true);toast(sn?"✓ Pallet sin número registrado":`✓ Pallet ${pallet} registrado`);
+  ptCel.lect.push(l);ptSave();audio.beep(!!it);toast(sn?"✓ Pallet sin número registrado":`✓ Pallet ${pallet} registrado`);
   ptRender();ptLimpiar();ptSyncAll();
   if(ptCamI){ptSetCam("pallet");$("#ptCamMsg").textContent="Listo. Apunta a la etiqueta del siguiente pallet."}
 }
