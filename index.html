@@ -241,7 +241,7 @@ body.mov nav.tabs,body.mov #status{display:none!important}
     <div class="log" id="erpLog"></div>
     <div class="tbl"><table id="erpPrev"></table></div>
     <div class="row">
-      <button class="btn primary" id="btnErpOk">Usar este stock y empezar a contar</button>
+      <button class="btn primary" id="btnErpOk">Ver este stock en Resultados</button>
       <button class="btn" id="btnErpXlsx">Descargar ERP limpio (.xlsx)</button>
     </div>
   </div>
@@ -1814,6 +1814,7 @@ function renderDraft(){
     p.map(i=>`<tr><td class="code">${esc(i.cod)}</td><td class="code">${esc(i.ean)}</td><td class="desc">${esc(i.desc)}</td>${d.map.disp!=null?`<td class="num">${fmt2(i.disp)}</td>`:""}${d.map.res!=null?`<td class="num">${fmt2(i.res)}</td>`:""}<td class="num">${fmt2(i.stock)}</td><td class="num">${fmt2(i.costo)}</td><td>${esc(i.ubic)}</td></tr>`).join("")+
     (d.items.length>15?`<tr><td colspan="6" class="muted">… y ${fmt(d.items.length-15)} más</td></tr>`:"")+"</tbody>";
   $("#btnErpOk").disabled=!d.items.length;$("#maestroCard").hidden=!d.items.length;renderFact();
+  if(d.items.length&&!(erp&&erp.maestro&&!cfg.sup))usarErp(true);
 }
 async function loadErpFile(file){
   try{
@@ -1828,12 +1829,17 @@ $("#selSheet").onchange=e=>setDraftSheet(erpDraft,e.target.value);
 $("#hdrRow").onchange=e=>{erpDraft.hdrRow=Math.max(0,(+e.target.value||1)-1);erpDraft.map=null;processDraft()};
 $("#optZeros").checked=cfg.zeros;
 $("#optZeros").onchange=e=>{cfg.zeros=e.target.checked;store.set("inv_cfg",cfg);buildIndex()};
-$("#btnErpOk").onclick=()=>{
-  const d=erpDraft;enrich(d.items);
+// El stock cargado queda activo al tiro para Resultados (pestaña 3) y para la lista de productos de las entregas.
+function usarErp(silent){
+  const d=erpDraft;if(!d||!d.items||!d.items.length)return false;enrich(d.items);
   erp={file:d.file,at:new Date().toISOString(),items:d.items,merged:d.merged};
-  if(!store.set("inv_erp",erp))return;
-  buildIndex();updStatus();toast(`Stock cargado: ${fmt(erp.items.length)} productos`);show("contar");
-};
+  if(!store.set("inv_erp",erp))return false;
+  buildIndex();updStatus();if(!silent)toast(`Stock cargado: ${fmt(erp.items.length)} productos`);
+  if(typeof renderResult==="function"&&!$("#v-resultado").hidden)renderResult();
+  if(typeof catSync==="function")catSync(false);
+  return true;
+}
+$("#btnErpOk").onclick=()=>{if(usarErp(false))show("resultado")};
 $("#btnErpXlsx").onclick=()=>{const d=erpDraft;const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,sheetFrom(erpRows(d.items)),"Stock ERP limpio");saveWb(wb,"ERP_limpio_"+stamp()+".xlsx")};
 function erpRows(items){return items.map(i=>({"Código":i.cod,"Código barras":i.ean,"Descripción":i.desc,"Unidad":i.um,"Ubicación ERP":i.ubic,"Disponible":i.disp??"","Reserva":i.res??"","Stock total":i.stock,"Costo unitario":i.costo??"","Stock valorizado":i.costo!=null?i.stock*i.costo:""}))}
 function dropZone(zone,input,cb){
