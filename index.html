@@ -515,8 +515,6 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
   <div class="card" id="maestroCard" hidden>
     <div class="eyebrow">Crear conteo</div>
-    <h2>Crear conteo y compartir el link</h2>
-    <p>Se crea un link con la lista de productos (código, código de barras, descripción y unidad). <b>No lleva stock ni costos</b>: el contador cuenta a ciegas. Lo mandas por WhatsApp y al abrirlo el celular queda listo para contar.</p>
     <div class="row">
       <label class="f" style="flex:1 1 260px">Nombre del conteo<input id="cNombre" placeholder="Ej: Bodega Central · Pasillos 1 a 5"></label>
       <label class="f" style="flex:0 1 200px">Vigencia del link<select id="cVence">
@@ -530,7 +528,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
       <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
       <div class="small" id="rotRes"></div></details>
-    <label class="f small" id="cPuWrap" style="max-width:420px" hidden>Asignar también a un usuario (le aparece en su menú)<select id="cPuesto"><option value="">— A nadie —</option></select></label>
+    <label class="f" id="cPuWrap" style="max-width:420px" hidden>Asignar conteo a<select id="cPuesto"><option value="">— A nadie (lo mando por link) —</option></select><span class="small muted">Le llega a su celular en unos segundos, con aviso.</span></label>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
   </div>
@@ -2556,7 +2554,7 @@ function show(v){
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
-  if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult)}
+  if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult);if(nubeOn()&&typeof uCargar==="function")uCargar().then(()=>cPuSync()).catch(()=>{})}
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
   if(v==="erp"&&typeof uCargar==="function"&&nubeOn())uCargar().then(()=>{if(typeof renderConteosOnly==="function")renderConteosOnly()});
   if(v!=="contar")stopCam();
@@ -3289,7 +3287,7 @@ $("#btnCrear").onclick=async()=>{
   try{
    if(nubeOn()){
     const c=await crearNube(m,its,sel,rot);
-    const puA="";if(puA){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puA});c.puesto=puA}catch(e){toast("El conteo se creó, pero no se pudo asignar a "+uNombre(puA))}}
+    const puA=$("#cPuesto").value;if(puA){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puA});c.puesto=puA}catch(e){toast("El conteo se creó, pero no se pudo asignar a "+uNombre(puA))}}
     conteos.unshift(c);store.set("inv_conteos",conteos);
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
     cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
@@ -3325,7 +3323,8 @@ function showCreated(c){
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
-    <div class="small">Para mandarlo al contador (WhatsApp o copiar link), asignarlo a un usuario, liberarlo o bloquearlo: <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
+    ${c.puesto?`<div class="small">📱 <b>Asignado a ${esc(uNombre(c.puesto))}</b>: le llega a su celular en unos segundos, con aviso.</div>`:""}
+    <div class="small">${c.puesto?"Para cambiar la asignación":"Para mandarlo al contador (WhatsApp o copiar link)"}, liberarlo o bloquearlo: <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
     <div class="row"><button class="btn primary" data-irperm>Ir a 6 · Permisos</button></div></div>`;irPermisos(box);return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
@@ -3338,9 +3337,10 @@ const isVenc=v=>!!v&&Date.now()>Date.parse(v);
 let autoClosing=false;
 async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.nube&&!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
 function renderConteos(){renderConteosOnly();autoCloseExpired()}
+function cPuSync(){const w=$("#cPuWrap");if(!w)return;w.hidden=!(nubeOn()&&typeof usersCon==="function"&&usersCon("conteo").length);if(!w.hidden){const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— A nadie (lo mando por link) —")}}
 function renderConteosOnly(){
   if(!$("#conteosTbl")){
-    $("#cPuWrap").hidden=true;
+    cPuSync();
     if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();return}
   const hasN=conteos.some(c=>c.nube);
   $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
@@ -3358,7 +3358,7 @@ function renderConteosOnly(){
   $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
   $$("#conteosTbl select[data-pa]").forEach(s=>s.onchange=async()=>{const c=conteos[+s.dataset.pa],pu=s.value;
     try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:pu});toast(pu?"Conteo asignado a "+uNombre(pu):"Conteo quitado del usuario");refreshNube(true)}catch(e){toast(sbMsg(e));refreshNube(true)}});
-  $("#cPuWrap").hidden=!(nubeOn()&&usersCon("conteo").length);if(!$("#cPuWrap").hidden){const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— A nadie —")}
+  cPuSync();
   $$("#conteosTbl [data-lb]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.lb],x=nubeLive.get(c.id)||{};
     confirmBox(`Liberar el celular de "${esc(c.nombre)}"${x.contador?" ("+esc(x.contador)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas ya recibidas.`,async()=>{try{await rpc(SB,"cb_liberar",{p_clave:SB.admin,p_id:c.id});await refreshNube(true);toast("Celular liberado: reenvía el mismo link al contador")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
