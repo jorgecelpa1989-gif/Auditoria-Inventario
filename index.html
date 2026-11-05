@@ -222,6 +222,12 @@ nav.tabs .soon{font:600 10px var(--font);text-transform:uppercase;letter-spacing
 .navScrim{position:fixed;inset:0;z-index:24;background:rgba(38,70,92,.4)}
 .navScrim[hidden]{display:none}
 .soonCard{border-style:dashed}
+.dvRow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
+.dvRow+.dvRow{margin-top:8px}.dvRow .dd{flex:1;min-width:0}.dvRow .dd b{display:block}.dvRow .dd span{font-size:13px;color:var(--muted)}
+.dvGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.dvDocRO{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.dvDeclL{margin-top:6px}.dvDeclR{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}.dvDeclR+.dvDeclR{margin-top:8px}.dvDeclR.bad{border:2px solid var(--bad);background:var(--bad-bg)}
+#dvTbl tr[data-di]{cursor:pointer}#dvTbl tr[data-di]:hover td{background:var(--chip)}#dvTbl tr.sel td{background:var(--info-bg)}
 @media (min-width:901px){body:not(.op):not(.mov):not(.puesto):not(.locked) header.top .in{max-width:none;padding-left:26px}}
 body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{display:none!important}
 @media (max-width:900px){
@@ -249,7 +255,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <button role="tab" data-v="mp" aria-selected="false"><span class="num">2</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
   <button role="tab" data-v="resultado" aria-selected="false"><span class="num">3</span>Inventario</button>
   <button role="tab" data-v="pt" aria-selected="false"><span class="num">4</span>Recepción PT</button>
-  <button role="tab" data-v="devol" aria-selected="false"><span class="num">5</span>Logística inversa<span class="soon">Pronto</span></button>
+  <button role="tab" data-v="devol" aria-selected="false"><span class="num">5</span>Logística inversa</button>
   <button role="tab" data-v="permisos" aria-selected="false"><span class="num">6</span>Permisos</button>
   <button role="tab" data-v="prov" aria-selected="false"><span class="num">7</span>Recepción proveedores<span class="soon">Pronto</span></button>
 </nav>
@@ -635,6 +641,51 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div id="ptConfirm"></div>
   </div>
 </section>
+<!-- ============ DEVOLUCIONES EN EL CELULAR FIJO (cargar o recepcionar) ============ -->
+<section class="view" id="v-devcel" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b id="dvTitle"></b></div>
+  <div id="dvHome"></div>
+  <div id="dvWork" hidden>
+    <div class="card contarCard">
+      <div class="row"><div class="eyebrow" id="dvDocEb">1 · Documento</div><span class="sep"></span><button class="btn sm" id="dvBack">← Lista</button></div>
+      <div id="dvDoc"></div>
+    </div>
+    <div class="card contarCard">
+      <div id="dvCamWrap" class="camWrap" hidden>
+        <div class="row" style="justify-content:space-between"><span class="camTarget">Leyendo producto</span><button class="btn sm" id="dvCamStop">Cerrar cámara</button></div>
+        <div id="dvReader"></div>
+        <div class="small muted" id="dvCamMsg"></div>
+      </div>
+      <div class="step">
+        <div class="eyebrow">2 · Producto</div>
+        <div class="scanbox">
+          <input id="dvScan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea, digita el código o el nombre">
+          <button class="btn accent" id="dvCam">Cámara</button>
+        </div>
+        <div class="pending" id="dvPending" hidden></div>
+        <div class="sugg" id="dvSugg" hidden></div>
+      </div>
+      <div class="step">
+        <div class="eyebrow" id="dvQtyEb">3 · Cantidad</div>
+        <div class="scanbox">
+          <input id="dvQty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off">
+          <button class="btn primary" id="dvOk" style="padding-inline:26px;font-size:18px;min-width:84px;justify-content:center">OK</button>
+        </div>
+      </div>
+    </div>
+    <div class="card contarCard">
+      <div class="row"><h2 style="margin:0">Productos</h2><span class="sep"></span><span class="small muted" id="dvInfo"></span></div>
+      <div class="tbl"><table id="dvList"></table></div>
+      <div id="dvSync"></div>
+    </div>
+    <div class="card contarCard">
+      <div class="eyebrow" id="dvFinEb">Al terminar</div>
+      <p class="small" id="dvFinTxt"></p>
+      <button class="btn primary" id="dvFin" style="justify-content:center;font-size:16px;padding:12px"></button>
+      <div id="dvConfirm"></div>
+    </div>
+  </div>
+</section>
 <!-- ============ ENTREGA Y RECEPCIÓN DE PT (supervisor y jefe de producción) ============ -->
 <section class="view" id="v-pt" hidden>
  <div class="mpGrid">
@@ -670,15 +721,24 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
 
 <!-- ============ 5 LOGÍSTICA INVERSA ============ -->
 <section class="view" id="v-devol" hidden>
-  <div class="card soonCard">
-    <div class="row"><div class="eyebrow">5 · Logística inversa</div><span class="sep"></span><span class="pill p-warn">En construcción</span></div>
-    <h2>Devolución de materiales a bodega</h2>
-    <p>Aquí se registrarán las devoluciones que llegan a bodega, desde dos orígenes:</p>
-    <ul class="small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
-      <li><b>Producción</b>: devolución de materia prima.</li>
-      <li><b>Distribución</b>: devoluciones de clientes.</li>
-    </ul>
-    <p class="small">Datos de cada devolución: <b>N° de guía</b>, <b>N° de factura</b>, <b>fecha</b>, <b>SKU</b> y <b>cantidad</b>. Quien devuelve registra en su celular o PC, bodega escanea lo que recibe y la app compara las dos listas (igual que en Entrega MP).</p>
+  <div class="card">
+    <div class="row"><div class="eyebrow">5 · Logística inversa</div><span class="sep"></span><span class="small muted" id="dvAt"></span><button class="btn sm" id="dvRef">Actualizar</button></div>
+    <h2>Devoluciones a bodega</h2>
+    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>6 · Permisos</b>.</p>
+    <div class="notice" id="dvNote" hidden></div>
+    <div class="row" style="margin-top:4px"><div class="chips" id="dvChips"></div><span class="sep"></span>
+      <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option><option value="produccion">Producción</option><option value="retail">Picking retail</option><option value="distribucion">Distribución</option></select></label>
+      <label class="f" style="flex:1 1 200px">Buscar<input id="dvQ" placeholder="Guía, factura, persona o SKU"></label></div>
+    <div class="tbl" style="max-height:460px"><table id="dvTbl"></table></div>
+  </div>
+  <div class="card" id="dvDet" hidden>
+    <div class="row"><div class="eyebrow">Cuadre devuelto vs recibido</div><span class="sep"></span><button class="btn sm" id="dvX">Cerrar vista</button></div>
+    <h2 id="dvDetT" style="margin:0"></h2>
+    <div class="small muted" id="dvDetS"></div>
+    <div class="kpis" id="dvKpis"></div>
+    <div class="tbl" style="max-height:520px"><table id="dvCmp"></table></div>
+    <div class="row"><button class="btn primary" id="dvXlsx">Descargar cuadre (.xlsx)</button><button class="btn" id="dvCerrar">Cerrar devolución</button><span class="sep"></span><button class="btn danger" id="dvDel">Eliminar…</button></div>
+    <div id="dvConfirmS"></div>
   </div>
 </section>
 
@@ -1656,6 +1716,175 @@ begin
 end $$;
 
 grant execute on function public.cb_liberar(text, uuid), public.cb_mov_liberar(text, uuid, text) to anon, authenticated;
+
+-- =====================================================================
+--  CONTROL DE OPERACIONES · Grupo Vector
+--  Actualización 07: LOGÍSTICA INVERSA (devoluciones a bodega) + celular fijo de DISTRIBUCIÓN
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No borra datos. Se puede ejecutar más de una vez. Requiere la actualización 06.
+--  Compatible con la versión anterior de la app: solo agrega una tabla, funciones y el celular 'distribucion'.
+--
+--  Quién hace qué (por ahora; después se podrá dar a otros usuarios desde 6 · Permisos):
+--    · Producción, Picking retail y Distribución CARGAN devoluciones (guía, factura, fecha, SKU, cantidad).
+--      Solo se aceptan códigos que existen en la lista de productos (maestro).
+--    · Bodega RECEPCIONA: ve lo declarado (guía, factura, productos y cantidades) y acepta o corrige lo que llega.
+--    · El supervisor ve el cuadre devuelto vs recibido en 5 · Logística inversa.
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+-- Celular fijo nuevo: distribución (devoluciones de clientes).
+alter table public.cb_puesto drop constraint if exists cb_puesto_id_check;
+alter table public.cb_puesto add constraint cb_puesto_id_check check (id in ('bodega','produccion','retail','distribucion'));
+
+create or replace function public.cb_puesto_link(p_clave text, p_puesto text, p_token text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_puesto not in ('bodega','produccion','retail','distribucion') then raise exception 'datos_invalidos'; end if;
+  if length(coalesce(p_token,'')) < 16 then raise exception 'clave_corta'; end if;
+  insert into cb_puesto(id, hash) values (p_puesto, extensions.crypt(p_token, extensions.gen_salt('bf')))
+  on conflict (id) do update set hash = excluded.hash, creado = now(), usado = null, sesion_hash = null, equipo = null, visto = null;
+end $$;
+
+-- ---------- Devoluciones ----------
+-- En devoluciones solo se aceptan productos del maestro (lista de productos en cb_catalogo).
+create or replace function public.cb_dev_codigos_ok(p_lineas jsonb) returns void
+language plpgsql security definer set search_path = public, extensions stable as $$
+declare v_mal text;
+begin
+  if not exists (select 1 from cb_catalogo where id = 1 and jsonb_typeof(items) = 'array' and jsonb_array_length(items) > 0) then return; end if;
+  select coalesce(e->>'k', e->>'code') into v_mal from jsonb_array_elements(p_lineas) e
+   where not exists (select 1 from cb_catalogo c, jsonb_array_elements(c.items) i where c.id = 1 and i->>0 = coalesce(e->>'k', e->>'code'))
+   limit 1;
+  if v_mal is not null then raise exception 'codigo_no_existe'; end if;
+end $$;
+
+create table if not exists public.cb_dev (
+  id           uuid primary key default gen_random_uuid(),
+  origen       text not null check (origen in ('produccion','retail','distribucion')),
+  persona      text,
+  guia         text,
+  factura      text,
+  fecha        date,
+  nota         text,
+  creado       timestamptz not null default now(),
+  actualizado  timestamptz not null default now(),
+  enviado      timestamptz,                       -- quien devuelve la envió a bodega
+  lect         jsonb not null default '[]'::jsonb, -- lo que declara quien devuelve
+  rec          jsonb not null default '[]'::jsonb, -- lo que bodega acepta como recibido
+  rec_persona  text,
+  rec_inicio   timestamptz,
+  recibido     timestamptz,                       -- bodega terminó la recepción
+  finalizado   timestamptz                        -- el supervisor la cerró
+);
+create index if not exists cb_dev_creado_idx on public.cb_dev (creado desc);
+alter table public.cb_dev enable row level security;
+revoke all on public.cb_dev from anon, authenticated;
+
+-- Quien devuelve guarda (borrador) o envía su devolución. Se puede corregir hasta que bodega empiece a recibir.
+create or replace function public.cb_dev_guardar(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_lect jsonb, p_enviar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev; v_id uuid := p_id; v_fecha date;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_puesto not in ('produccion','retail','distribucion') then raise exception 'sin_permiso'; end if;
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if p_enviar then
+    if coalesce(trim(p_doc->>'guia'),'') = '' then raise exception 'falta_guia'; end if;
+    if coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_factura'; end if;
+    if v_fecha is null then raise exception 'fecha_invalida'; end if;
+    if jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  end if;
+  if v_id is not null then
+    select * into d from cb_dev where id = v_id for update;
+    if not found then v_id := null;
+    elsif d.origen <> p_puesto then raise exception 'sin_permiso';
+    elsif d.rec_inicio is not null or d.finalizado is not null then raise exception 'en_recepcion';
+    end if;
+  end if;
+  if v_id is null then
+    insert into cb_dev(id, origen) values (coalesce(p_id, gen_random_uuid()), p_puesto) returning id into v_id;
+  end if;
+  update cb_dev set persona = left(coalesce(p_doc->>'persona', persona), 80), guia = left(trim(p_doc->>'guia'), 40),
+         factura = left(trim(p_doc->>'factura'), 40), fecha = v_fecha, nota = left(p_doc->>'nota', 300),
+         lect = p_lect, actualizado = now(), enviado = case when p_enviar then coalesce(enviado, now()) else enviado end
+   where id = v_id;
+  return jsonb_build_object('id', v_id, 'enviado', (select enviado from cb_dev where id = v_id));
+end $$;
+
+-- Lo que ve cada celular fijo:
+--   quien devuelve: sus devoluciones de los últimos 30 días (con su detalle, para seguir o revisar);
+--   bodega: las enviadas que falta recibir, más las que recibió hoy, con lo declarado para aceptarlo.
+create or replace function public.cb_dev_mis(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_puesto = 'bodega' then
+    return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'origen', d.origen, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura,
+        'fecha', d.fecha, 'nota', d.nota, 'enviado', d.enviado, 'lect', d.lect, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
+      from cb_dev d where d.enviado is not null and d.finalizado is null and (d.recibido is null or d.recibido > now() - interval '18 hours')), '[]'::jsonb);
+  end if;
+  if p_puesto not in ('produccion','retail','distribucion') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura, 'fecha', d.fecha, 'nota', d.nota,
+      'creado', d.creado, 'enviado', d.enviado, 'lect', d.lect, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido, 'finalizado', d.finalizado) order by d.creado desc)
+    from cb_dev d where d.origen = p_puesto and d.creado > now() - interval '30 days'), '[]'::jsonb);
+end $$;
+
+-- Bodega registra lo que recibe (envía todas sus lecturas cada vez) y, al final, termina la recepción.
+create or replace function public.cb_dev_recibir(p_puesto text, p_ses text, p_id uuid, p_persona text, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_puesto <> 'bodega' then raise exception 'sin_permiso'; end if;
+  if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
+  select * into d from cb_dev where id = p_id for update;
+  if not found or d.enviado is null then raise exception 'no_existe'; end if;
+  if d.finalizado is not null then raise exception 'finalizado'; end if;
+  if d.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p_terminar and jsonb_array_length(p_rec) = 0 then raise exception 'sin_productos'; end if;
+  update cb_dev set rec = p_rec, rec_persona = left(p_persona, 80), rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end);
+end $$;
+
+-- Supervisor: todas las devoluciones (con lo declarado y lo recibido) para el cuadre.
+create or replace function public.cb_dev_listar(p_clave text, p_desde timestamptz default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_agg(to_jsonb(d) order by d.creado desc) from cb_dev d
+    where d.creado > coalesce(p_desde, now() - interval '120 days')), '[]'::jsonb);
+end $$;
+
+-- Supervisor: cerrar (queda como histórico) o eliminar una devolución.
+create or replace function public.cb_dev_cerrar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_dev set finalizado = coalesce(finalizado, now()), actualizado = now() where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+create or replace function public.cb_dev_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  delete from cb_dev where id = p_id;
+end $$;
+
+revoke execute on function public.cb_dev_codigos_ok(jsonb) from public, anon, authenticated;
+grant execute on function
+  public.cb_puesto_link(text, text, text),
+  public.cb_dev_guardar(text, text, uuid, jsonb, jsonb, boolean), public.cb_dev_mis(text, text),
+  public.cb_dev_recibir(text, text, uuid, text, jsonb, boolean),
+  public.cb_dev_listar(text, timestamptz), public.cb_dev_cerrar(text, uuid), public.cb_dev_eliminar(text, uuid)
+to anon, authenticated;
 </script>
   </div>
 
@@ -1682,7 +1911,7 @@ grant execute on function public.cb_liberar(text, uuid), public.cb_mov_liberar(t
 
   <details class="card mpFold" id="puAdm" open>
     <summary><b>Celulares fijos</b> <span class="small muted" id="puAdmSum"></span></summary>
-    <p class="small" style="margin:8px 0 0">Un link para cada celular: <b>bodega</b>, <b>producción</b> y <b>picking retail</b> (solo recepción de PT). Cada uno queda amarrado al primer celular que lo abre y siempre abierto: ahí les llegan las tareas que asignas.</p>
+    <p class="small" style="margin:8px 0 0">Un link para cada celular: <b>bodega</b>, <b>producción</b>, <b>picking retail</b> y <b>distribución</b> (devoluciones de clientes). Producción, retail y distribución <b>cargan devoluciones</b>; bodega las <b>recepciona</b>. Cada uno queda amarrado al primer celular que lo abre y siempre abierto: ahí les llegan las tareas que asignas.</p>
     <div id="puAdmBox"></div>
   </details>
 
@@ -1834,6 +2063,8 @@ function show(v){
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   menuOpen(false);
   if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm()}
+  if(v==="devol"&&typeof devEnter==="function")devEnter();
+  if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
   if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult)}
@@ -2030,17 +2261,17 @@ const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||
    (queda anotado en unkOk para no volver a preguntar por el mismo código). */
 const unkOk=new Set();
 const calertOpen=()=>{const o=document.getElementById("calert");return !!(o&&!o.hidden)};
-function codeAlert(code,onFix,onKeep){
+function codeAlert(code,onFix,onKeep,o){o=o||{};
   let ov=document.getElementById("calert");
   if(!ov){ov=document.createElement("div");ov.id="calert";ov.className="calert";ov.setAttribute("role","alertdialog");ov.setAttribute("aria-modal","true");ov.setAttribute("aria-labelledby","caT");document.body.appendChild(ov)}
   ov.innerHTML=`<div class="cbox2"><div class="big">⚠️</div><h2 id="caT">Código no encontrado</h2>
     <p>El código <span class="code">${esc(code)}</span> <b>NO existe</b> en la lista de productos.</p>
-    <p class="small muted">Revisa que esté bien digitado antes de seguir.</p>
-    <div class="col"><button class="btn primary" id="caFix">Corregir código</button><button class="btn" id="caKeep">Registrar igual</button></div></div>`;
+    <p class="small muted">${o.msg||"Revisa que esté bien digitado antes de seguir."}</p>
+    <div class="col"><button class="btn primary" id="caFix">${o.fix||"Corregir código"}</button>${o.noKeep?"":`<button class="btn" id="caKeep">${o.keep||"Registrar igual"}</button>`}</div></div>`;
   ov.hidden=false;audio.beep(false);
   const close=()=>{ov.hidden=true;ov.innerHTML=""};
   $("#caFix").onclick=()=>{close();if(onFix)onFix()};
-  $("#caKeep").onclick=()=>{close();if(onKeep)onKeep()};
+  if($("#caKeep"))$("#caKeep").onclick=()=>{close();if(onKeep)onKeep()};
   ov.onkeydown=e=>{if(e.key==="Escape"){e.preventDefault();$("#caFix").click()}};
   setTimeout(()=>{try{$("#caFix").focus()}catch(e){}},30);
 }
@@ -3527,7 +3758,7 @@ $("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
    ===================================================================== */
 var PST=store.get("inv_puesto",null), puestoForce=false, puestoReady=Promise.resolve(), puVista="menu",
     puTareas={mp:[],conteos:[],pt_cierre:null}, puVistos=store.get("inv_puvistos",[]), puCat=store.get("inv_pucat",null);
-const PUN={bodega:"Bodega",produccion:"Producción",retail:"Picking retail"};
+const PUN={bodega:"Bodega",produccion:"Producción",retail:"Picking retail",distribucion:"Distribución"};
 const esReceptorPT=()=>!!PST&&PST.puesto!=="produccion";   // bodega o retail reciben PT
 const puestoMode=()=>!!(PST&&PST.url&&PST.key&&PST.puesto&&(PST.ses||PST.tok))&&(puestoForce||!isSupDevice());
 const pconf=()=>({url:PST.url,key:PST.key});
@@ -3558,10 +3789,10 @@ checkPuestoLink();
 function puestoApply(){
   const b=document.body;b.classList.add("puesto");b.classList.remove("prodv","locked");$("#lockBox").innerHTML="";
   b.classList.toggle("op",puVista==="conteo");b.classList.toggle("mov",puVista==="mp");
-  const v={conteo:"contar",mp:"opmov",pt:"ptcel"}[puVista]||"puesto";
+  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel"}[puVista]||"puesto";
   if($("#v-"+v).hidden)show(v);
 }
-function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();puestoApply();renderPuesto();puRefresh()}
+function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();if(typeof dvStopCam==="function")dvStopCam();puestoApply();renderPuesto();puRefresh()}
 $$("[data-menu]").forEach(b=>b.onclick=()=>puestoMenu());
 async function puestoInit(){try{await puestoReady}catch(e){return}puestoMenu()}
 
@@ -3570,9 +3801,11 @@ var puBusy=false;
 async function puRefresh(){
   if(!puestoMode()||puBusy)return;puBusy=true;
   try{puTareas=await prpc("cb_puesto_tareas",{p_persona:PST.persona||null})||puTareas;
-    const ids=[...puTareas.mp.filter(t=>!t.terminado),...puTareas.conteos.filter(t=>!t.terminado)].map(t=>t.id), nuevas=ids.filter(id=>!puVistos.includes(id));
+    await puDevRefresh();
+    const ids=[...puTareas.mp.filter(t=>!t.terminado),...puTareas.conteos.filter(t=>!t.terminado)].map(t=>t.id).concat(puDevRec()?(puDev||[]).filter(d=>!d.recibido).map(d=>"dev:"+d.id):[]), nuevas=ids.filter(id=>!puVistos.includes(id));
     if(nuevas.length){puVistos=puVistos.concat(nuevas).slice(-200);store.set("inv_puvistos",puVistos);audio.beep(true);setTimeout(()=>audio.beep(true),220);toast("🔴 Tienes una tarea nueva")}
     if(puVista==="menu")renderPuesto();
+    if(puVista==="dev"&&dv==null&&!$("#dvHome").hidden)dvHomeRender();
   }catch(e){if(/puesto_invalido/.test(e.message))lockScreen(puMsg(e),"Celular desconectado","🔒",true)}
   finally{puBusy=false}
 }
@@ -3586,7 +3819,8 @@ function renderPuesto(){
     <label class="f">Operario<input id="puPersona" value="${esc(PST.persona||"")}" placeholder="Tu nombre" autocapitalize="characters"></label>`;
   $("#puPersona").onchange=e=>{PST.persona=norm(e.target.value).toUpperCase();e.target.value=PST.persona;cfg.user=PST.persona;store.set("inv_cfg",cfg);store.set("inv_puesto",PST);puRefresh()};
   const nMp=puTareas.mp.length,pMp=pend(puTareas.mp),nC=puTareas.conteos.length,pC=pend(puTareas.conteos);
-  const items=PST.puesto==="retail"?[
+  const devN=(puDev||[]).filter(d=>!d.recibido).length;
+  const items=PST.puesto==="distribucion"?[]:PST.puesto==="retail"?[
     {k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"}]
    :bod?[
     {k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} asignada${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas",dot:pMp},
@@ -3594,6 +3828,8 @@ function renderPuesto(){
     {k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC}]
    :[{k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp},
     {k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"}];
+  if(puDevCarga())items.push({k:"dev",ic:"↩️",t:PST.puesto==="produccion"?"Cargar devolución de MP":PST.puesto==="distribucion"?"Cargar devolución de cliente":"Cargar devolución",s:"Devolución a bodega: N° de guía, N° de factura, fecha y productos"});
+  if(puDevRec())items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} devolución${devN>1?"es":""} por recibir`:"Sin devoluciones por recibir",dot:devN});
   $("#puMenu").innerHTML=items.map(x=>`<button class="puBtn" data-pk="${x.k}"><span class="ic">${x.ic}</span><span><b>${x.t}</b><span class="s">${x.s}</span></span>${x.dot?`<span class="dotR">${x.dot}</span>`:""}</button>`).join("");
   $$("#puMenu [data-pk]").forEach(b=>b.onclick=()=>puAbrir(b.dataset.pk));
   $("#puList").innerHTML="";
@@ -3601,6 +3837,7 @@ function renderPuesto(){
 function puAbrir(k){
   if(!PST.persona){toast("Escribe tu nombre arriba");return $("#puPersona").focus()}
   if(k==="pt")return ptAbrir();
+  if(k==="dev"||k==="devrec")return dvAbrir();
   const lista=k==="mp"?puTareas.mp:puTareas.conteos;
   if(!lista.length)return toast(k==="mp"?"No tienes entregas asignadas por ahora":"No tienes conteos asignados por ahora");
   if(lista.length===1)return k==="mp"?puAbrirMov(lista[0]):puAbrirConteo(lista[0]);
@@ -3637,7 +3874,7 @@ function renderPuAdm(){
   const w=$("#mpPuWrap");if(w)w.hidden=prodMode()||!hayPuestos();
   if(prodMode()||!nubeOn())return;
   SB.pu=SB.pu||{};
-  box.innerHTML=["bodega","produccion","retail"].map(p=>{const tok=SB.pu[p];
+  box.innerHTML=["bodega","produccion","retail","distribucion"].map(p=>{const tok=SB.pu[p];
     if(!tok)return `<div class="puAdmRow"><b>Celular de ${PUN[p]}</b><button class="btn sm primary" data-pnew="${p}">Crear link</button></div>`;
     const link=appUrl()+"?puesto="+p+"&t="+encodeURIComponent(tok)+sbLinkParams();
     return `<div class="puAdmRow" style="flex-direction:column;align-items:stretch"><b>Celular de ${PUN[p]}</b><input readonly value="${esc(link)}" id="pul-${p}">
@@ -3647,7 +3884,7 @@ function renderPuAdm(){
   $$("#puAdmBox [data-pcp]").forEach(b=>b.onclick=()=>copyText($("#pul-"+b.dataset.pcp).value,$("#pul-"+b.dataset.pcp)));
   $$("#puAdmBox [data-prot]").forEach(b=>b.onclick=()=>confirmBox(`Se crea un link nuevo para el celular de ${PUN[b.dataset.prot]} y el actual queda desconectado.`,()=>puAdmSet(b.dataset.prot),"#puConfirm"));
   rpc(SB,"cb_puesto_estado",{p_clave:SB.admin}).then(e=>{let n=0;
-    for(const p of ["bodega","produccion","retail"]){const el=$("#pue-"+p),x=e&&e[p];if(!el)continue;
+    for(const p of ["bodega","produccion","retail","distribucion"]){const el=$("#pue-"+p),x=e&&e[p];if(!el)continue;
       if(x&&x.usado){n++;el.innerHTML=`<span class="dot ${enLinea(x.visto)?"on":"off"}"></span>Vinculado a <b>${esc(x.equipo||"un celular")}</b>${x.persona?" · "+esc(x.persona):""} · ${enLinea(x.visto)?"en línea":"última conexión "+(x.visto?hace(x.visto):"—")}`}
       else el.textContent="Aún no se abre: quedará amarrado al primer celular que lo abra."}
     $("#puAdmSum").textContent=n?`· ${n} vinculado${n>1?"s":""}`:""}).catch(()=>{});
@@ -3786,6 +4023,288 @@ async function ptOpenCam(t){
 }
 async function ptStopCam(){if(ptCamI){await detenerLector(ptCamI);ptCamI=null}ptHold=false;const w=$("#ptCamWrap");if(w)w.hidden=true}
 $("#ptCamPallet").onclick=()=>ptOpenCam("pallet");$("#ptCamSku").onclick=()=>ptOpenCam("sku");$("#ptCamStop").onclick=ptStopCam;
+/* =====================================================================
+   LOGÍSTICA INVERSA en el celular fijo
+   Producción, picking retail y distribución CARGAN devoluciones (guía, factura, fecha y productos).
+   Bodega las RECEPCIONA: ve lo declarado y acepta (o corrige) lo que llega. El supervisor ve el cuadre en 5 · Logística inversa.
+   ===================================================================== */
+const DEV_CARGA=["produccion","retail","distribucion"];
+const puDevCarga=()=>!!PST&&DEV_CARGA.includes(PST.puesto);
+const puDevRec=()=>!!PST&&PST.puesto==="bodega";
+const ORIG={produccion:"Producción",retail:"Picking retail",distribucion:"Distribución"};
+var puDev=[], dv=store.get("inv_dv",null), dvT=null, dvSyncing=false, dvCamI=null, dvHold=false, dvLast={c:"",miss:99}, dvChk="";
+const dvSave=()=>store.set("inv_dv",dv);
+const dvRec=()=>!!dv&&dv.modo==="rec";
+const hoyISO=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
+const fechaCL=s=>{if(!s)return "—";const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}-${m[2]}-${m[1]}`:String(s)};
+const uuid4=()=>{try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=a[6]&15|64;a[8]=a[8]&63|128;const x=[...a].map(b=>b.toString(16).padStart(2,"0")).join("");return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`};
+const DV_BLOQ={noKeep:true,msg:"En las devoluciones solo se pueden registrar productos de la lista. Revisa el código o búscalo por nombre."};
+const dvMsg=e=>({codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Falta el N° de guía.",falta_factura:"Falta el N° de factura.",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
+const dvEstado=d=>d.finalizado?["Cerrada","p-mut"]:d.recibido?["Recibida","p-ok"]:d.rec_inicio?["En recepción","p-info"]:d.enviado?["Enviada a bodega","p-warn"]:["Borrador","p-mut"];
+async function puDevRefresh(){if(!(puDevCarga()||puDevRec()))return;try{const r=await prpc("cb_dev_mis");puDev=Array.isArray(r)?r:[]}catch(e){if(/puesto_invalido/.test(e.message))throw e}}
+async function dvCatalogo(){
+  try{if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
+    if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}}catch(e){}
+  ptIndex();
+}
+async function dvAbrir(){
+  puVista="dev";puestoApply();
+  $("#dvTitle").textContent=puDevRec()?"Recepción de devoluciones":PST.puesto==="produccion"?"Devolución de MP a bodega":PST.puesto==="distribucion"?"Devolución de clientes":"Devolución a bodega";
+  await dvCatalogo();
+  try{await puDevRefresh()}catch(e){}
+  if(dv&&dv.puesto===PST.puesto&&!dv.fin)return dvWork();
+  dvHomeRender();
+}
+function dvRowHtml(d,ro){
+  const [t,c]=dvEstado(d);
+  return `<button class="dvRow" data-dv="${esc(d.id)}" ${ro?"disabled":""}><span class="dd"><b>Guía ${esc(d.guia||"—")} · Factura ${esc(d.factura||"—")}</b><span>${puDevRec()?esc(ORIG[d.origen]||d.origen)+" · ":""}${fechaCL(d.fecha)}${d.persona?" · "+esc(d.persona):""}${!puDevRec()&&d.lect?" · "+fmt(d.lect.length)+" líneas":""}</span></span><span class="pill ${c}">${t}</span></button>`;
+}
+function dvHomeRender(){
+  if(dv&&dv.fin){dv=null;dvSave()}
+  $("#dvWork").hidden=true;$("#dvHome").hidden=false;dvStopCam();
+  const L=puDev||[];
+  if(puDevRec()){
+    const pend=L.filter(d=>!d.recibido), hechas=L.filter(d=>d.recibido);
+    $("#dvHome").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Devoluciones por recibir</h2>
+      ${pend.length?pend.map(d=>dvRowHtml(d)).join(""):'<p class="muted" style="margin:0">No hay devoluciones enviadas a bodega por ahora. La lista se actualiza sola cada 20 s.</p>'}
+      ${hechas.length?`<h3 style="margin:10px 0 0;font-size:15px">Recibidas hoy</h3>`+hechas.map(d=>dvRowHtml(d,true)).join(""):""}</div>`;
+  }else{
+    $("#dvHome").innerHTML=`<div class="card contarCard"><button class="btn primary" id="dvNew" style="justify-content:center;font-size:17px;padding:14px">＋ Nueva devolución</button>
+      <p class="small muted" style="margin:0">Llena N° de guía, N° de factura y fecha, registra los productos y toca <b>Enviar a bodega</b>.</p></div>
+      <div class="card contarCard"><h2 style="margin:0">Mis devoluciones (30 días)</h2>${L.length?L.map(d=>dvRowHtml(d)).join(""):'<p class="muted" style="margin:0">Todavía no cargas devoluciones.</p>'}</div>`;
+    $("#dvNew").onclick=()=>dvNueva();
+  }
+  $$("#dvHome [data-dv]").forEach(b=>b.onclick=()=>dvElegir(b.dataset.dv));
+}
+async function dvNueva(){
+  if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  if(dv&&dv.dirty)await dvSync(false);
+  dv={id:uuid4(),puesto:PST.puesto,modo:"carga",doc:{guia:"",factura:"",fecha:hoyISO(),nota:""},lect:[],dirty:false,ver:0};dvSave();dvWork();
+}
+function dvElegir(id){
+  const d=(puDev||[]).find(x=>x.id===id);if(!d)return;
+  if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  if(puDevRec()){
+    if(d.recibido)return toast("Esta devolución ya fue recibida");
+    dv={id:d.id,puesto:PST.puesto,modo:"rec",info:{origen:d.origen,guia:d.guia,factura:d.factura,fecha:d.fecha,persona:d.persona,nota:d.nota||""},decl:Array.isArray(d.lect)?d.lect:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};dvSave();return dvWork();
+  }
+  if(d.rec_inicio||d.recibido||d.finalizado)return toast("Bodega ya "+(d.recibido?"recibió":"está recibiendo")+" esta devolución: ya no se puede corregir.");
+  dv={id:d.id,puesto:PST.puesto,modo:"carga",doc:{guia:d.guia||"",factura:d.factura||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},lect:Array.isArray(d.lect)?d.lect:[],dirty:false,ver:0,enviado:d.enviado||null};dvSave();dvWork();
+}
+function dvWork(){
+  $("#dvHome").hidden=true;$("#dvWork").hidden=false;
+  if(dvRec()){const i=dv.info||{};
+    $("#dvDocEb").textContent="Devolución que recibes";
+    $("#dvDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(ORIG[i.origen]||i.origen||"")}</b></span><span>Guía <b>${esc(i.guia||"—")}</b></span><span>Factura <b>${esc(i.factura||"—")}</b></span><span>Fecha <b>${fechaCL(i.fecha)}</b></span>${i.persona?`<span>Devuelve <b>${esc(i.persona)}</b></span>`:""}</div>${i.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(i.nota)}</div>`:""}<div id="dvDecl"></div>`;
+    $("#dvFinEb").textContent="Al terminar de recibir";$("#dvFinTxt").textContent="Acepta lo que llegó tal como viene, o corrige la cantidad de lo que no calza. Después de terminar ya no se puede modificar.";$("#dvFin").textContent="Terminar recepción…";
+  }else{
+    $("#dvDocEb").textContent="1 · Documento de la devolución";
+    $("#dvDoc").innerHTML=`<div class="dvGrid"><label class="f">N° de guía<input id="dvGuia" autocomplete="off" autocapitalize="characters" value="${esc(dv.doc.guia)}"></label>
+      <label class="f">N° de factura<input id="dvFact" autocomplete="off" autocapitalize="characters" value="${esc(dv.doc.factura)}"></label>
+      <label class="f">Fecha de la devolución<input id="dvFecha" type="date" value="${esc(dv.doc.fecha||hoyISO())}"></label></div>
+      <label class="f" style="margin-top:8px">Observación (opcional)<input id="dvNota" autocomplete="off" maxlength="300" value="${esc(dv.doc.nota||"")}" placeholder="Ej: cliente, motivo o estado del material"></label>${dv.enviado?`<p class="small" style="margin:6px 0 0;color:var(--warn)">Ya la enviaste a bodega. Puedes corregirla mientras bodega no empiece a recibirla.</p>`:""}`;
+    const bind=(id,k)=>$("#"+id).addEventListener("change",e=>{dv.doc[k]=k==="fecha"?e.target.value:norm(e.target.value).toUpperCase();if(k!=="fecha")e.target.value=dv.doc[k];dvDirty()});
+    bind("dvGuia","guia");bind("dvFact","factura");bind("dvFecha","fecha");
+    $("#dvNota").addEventListener("change",e=>{dv.doc.nota=norm(e.target.value);dvDirty()});
+    $("#dvFinEb").textContent="Al terminar";$("#dvFinTxt").textContent="Revisa la guía, la factura, la fecha y los productos, y envía la devolución. Bodega la verá al instante.";$("#dvFin").textContent=dv.enviado?"Reenviar a bodega…":"Enviar a bodega…";
+  }
+  $("#dvConfirm").innerHTML="";dvLimpiar();dvRender();dvRenderSync();
+  if(!dvRec()&&!dv.doc.guia)setTimeout(()=>{try{$("#dvGuia").focus()}catch(e){}},60);else if(!dvCamI)setTimeout(()=>$("#dvScan").focus(),60);
+}
+function dvLimpiar(){$("#dvScan").value="";$("#dvQty").value="";$("#dvPending").hidden=true;$("#dvSugg").hidden=true;$("#dvQtyEb").textContent="3 · Cantidad";dvHold=false;dvChk=""}
+function dvPend(v){
+  const it=ptFind(v),p=$("#dvPending");p.hidden=false;p.className="pending"+(it?"":" bad");
+  const tot=dv.lect.filter(l=>key(l.k||l.code)===key(it?it.cod:v)).reduce((a,l)=>a+(+l.qty||0),0);
+  p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}${tot?` · ya registrado: ${fmt2(tot)}`:""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza.");
+  $("#dvQtyEb").textContent=qtyLabel(it,3);return it;
+}
+function dvRead(raw){
+  let v=norm(raw);if(!v||!dv)return;
+  const it0=ptFind(v);
+  if(!it0&&esTextoBusqueda(v)){const res=buscarNombre(ptItems(),v),box=$("#dvSugg");box.hidden=false;
+    box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(v)}"</span></button>`;
+    $$("#dvSugg [data-n]").forEach(b=>b.onclick=()=>{box.hidden=true;dvRead(res[+b.dataset.n].cod)});return}
+  $("#dvSugg").hidden=true;v=codeStr(v);$("#dvScan").value=v;dvChk=v;
+  const it=dvPend(v);
+  if(dvCamI){dvHold=true;$("#dvCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
+  if(!it&&ptItems().length){codeAlert(v,()=>{if(dvCamI){dvHold=false;$("#dvCamMsg").textContent="Apunta al código del producto."}focusSel($("#dvScan"))},null,DV_BLOQ);return}
+  audio.beep(!!it);focusSel($("#dvQty"));
+}
+function dvBlurCheck(){
+  if(!dv||$("#v-devcel").hidden||$("#dvWork").hidden||calertOpen())return;
+  const raw=norm($("#dvScan").value);if(!raw)return;const v=codeStr(raw);if(v===dvChk)return;
+  if(esTextoBusqueda(raw)&&!ptFind(raw))return;
+  dvChk=v;$("#dvScan").value=v;const it=dvPend(v);
+  if(!it&&ptItems().length)codeAlert(v,()=>focusSel($("#dvScan")),null,DV_BLOQ);
+}
+function dvAdd(){
+  if(!dv)return;
+  const code=codeStr($("#dvScan").value);if(!code){toast("Primero escanea o digita un producto");return focusSel($("#dvScan"))}
+  const q=num($("#dvQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#dvQty"))}
+  const it=ptFind(code);dvChk=code;
+  if(!it&&ptItems().length){dvPend(code);codeAlert(code,()=>focusSel($("#dvScan")),null,DV_BLOQ);return}
+  const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString()};
+  if(conv(it)){l.f=+it.f;l.ce=it.ce}
+  dv.lect.push(l);dvDirty();audio.beep(!!it);
+  $("#dvQty").value="";dvPend(code);
+  $("#dvPending").insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${l.f?`${fmt2(q)} ${esc(plural(l.ce))} = ${fmt2(q*l.f)} ${esc(l.um)}`:fmt2(q)+(l.um&&l.um!=="un"?" "+esc(l.um):"")}</div>`);
+  dvHold=false;dvRender();
+  if(dvCamI)$("#dvCamMsg").textContent="Listo. Apunta al siguiente producto.";else focusSel($("#dvScan"));
+}
+/* bodega: lo declarado por quien devuelve, con lo aceptado hasta ahora y botones para aceptar */
+function dvDeclRows(){
+  const m=new Map();
+  for(const l of dv.decl||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{k,cod:l.k||l.code,desc:l.desc||"",um:l.um||"",ce:l.ce||"",f:+l.f||1,D:0,R:0};r.D+=(+l.qty||0)*(+l.f||1);m.set(k,r)}
+  for(const l of dv.lect||[]){const r=m.get(key(l.k||l.code));if(r)r.R+=(+l.qty||0)*(+l.f||1)}
+  const hay=ptItems().length>0;
+  return [...m.values()].map(r=>Object.assign(r,{noM:hay&&!ptFind(r.cod)}));
+}
+const dvEnU=(r,base)=>r.ce&&r.f!==1?`${fmt2(base/r.f)} ${esc(plural(r.ce))} <span class="muted">(${fmt2(base)} ${esc(r.um)})</span>`:`${fmt2(base)}${r.um&&r.um!=="un"?" "+esc(r.um):""}`;
+function dvDeclRender(){
+  const box=$("#dvDecl");if(!box||!dvRec())return;
+  const rows=dvDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D),pendOk=pend.filter(r=>!r.noM),pendNo=pend.filter(r=>r.noM);
+  box.innerHTML=`<div class="row" style="margin-top:10px"><b>Lo declarado (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pendOk.length?`<button class="btn sm primary" id="dvAccAll">✓ Aceptar todo tal como viene</button>`:pend.length?"":'<span class="pill p-ok">Todo aceptado</span>'}</div>
+    ${pendNo.length?`<div class="pending bad" style="margin-top:6px"><div class="d">⚠ ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} NO existe${pendNo.length===1?"":"n"} en la lista de productos</div><div class="small">No se puede${pendNo.length===1?"":"n"} aceptar en una devolución. Avisa a quien devuelve para que lo corrija.</div></div>`:""}
+    <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR${r.noM?" bad":""}"><div>${r.noM?'<div class="small" style="color:var(--bad);font-weight:700">⚠ Este código NO existe en la lista de productos</div>':""}<div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · declarado: <b>${dvEnU(r,r.D)}</b></div>
+      <div class="small">${r.R?`Recibido: <b>${dvEnU(r,r.R)}</b> ${ok?'<span class="pill p-ok">✓</span>':`<span class="pill ${dif<0?"p-bad":"p-warn"}">${dif<0?"faltan":"sobran"} ${dvEnU(r,Math.abs(dif))}</span>`}`:'<span class="muted">Sin aceptar</span>'}</div></div>
+      <div class="row" style="gap:6px">${r.R+1e-9<r.D?`<button class="btn sm primary" data-acc="${esc(r.k)}">✓ Aceptar</button>`:""}<button class="btn sm" data-edt="${esc(r.k)}">Otra cantidad</button></div></div>`}).join("")||'<p class="muted" style="margin:0">La devolución no trae productos declarados.</p>'}</div>
+    <p class="small muted" style="margin:6px 0 0">Si llegó algo que no está en la lista o una cantidad distinta, regístralo abajo con el producto y la cantidad real.</p>`;
+  const acc=r=>{const falta=r.D-r.R;if(falta<=1e-9)return false;const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc,um:r.um,qty:+(falta/r.f).toFixed(6),user:PST.persona||"",t:new Date().toISOString(),acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}dv.lect.push(l);return true};
+  const ok1=r=>{if(acc(r)){dvDirty();audio.beep(true);dvRender();toast("✓ Aceptado: "+(r.desc||r.cod))}};
+  $$("#dvDecl [data-acc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.acc);if(!r)return;
+    if(r.noM)return codeAlert(r.cod,()=>{},null,{noKeep:true,fix:"Entendido",msg:"No está en el maestro, así que no se puede aceptar en una devolución. Avisa a quien devuelve para que lo corrija."});
+    ok1(r)});
+  const all=$("#dvAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pendOk.length)} producto${pendOk.length===1?"":"s"} con la cantidad declarada${pendNo.length?` (no incluye ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} fuera del maestro)`:""}.`,()=>{let n=0;for(const r of pendOk)if(acc(r))n++;if(n){dvDirty();audio.beep(true);dvRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#dvConfirm");
+  $$("#dvDecl [data-edt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.edt);if(!r)return;
+    const quit=dv.lect.filter(l=>key(l.k||l.code)===r.k);if(quit.length){dv.lect=dv.lect.filter(l=>key(l.k||l.code)!==r.k);dvDirty();dvRender()}
+    $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
+}
+function dvRender(){
+  if(!dv)return;if(dvRec())dvDeclRender();const ls=[...dv.lect].reverse();
+  $("#dvInfo").textContent=`${fmt(dv.lect.length)} líneas · ${fmt(new Set(dv.lect.map(l=>key(l.k||l.code))).size)} productos`;
+  $("#dvList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-dl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $$("#dvList [data-dl]").forEach(b=>b.onclick=()=>{const l=dv.lect.find(z=>z.lid===b.dataset.dl);if(!l)return;
+    confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{dv.lect=dv.lect.filter(z=>z.lid!==l.lid);dvDirty();dvRender();toast("Línea quitada")},"#dvConfirm")});
+}
+function dvDirty(){dv.dirty=true;dv.ver=(dv.ver||0)+1;dvSave();clearTimeout(dvT);dvT=setTimeout(()=>dvSync(false),1500);dvRenderSync()}
+function dvRenderSync(){
+  if(!dv)return;let h;
+  if(dvSyncing)h=`<span class="sync s-run">☁ Guardando…</span>`;
+  else if(dv.err)h=`<span class="sync s-bad">⚠ ${esc(dv.err)}</span> <button class="btn sm" id="dvGo">Reintentar</button>`;
+  else if(dv.dirty)h=`<span class="sync s-wait">⏳ ${navigator.onLine===false?"Sin señal: se guardará solo al volver":"Pendiente de guardar"}</span> <button class="btn sm" id="dvGo">Guardar ahora</button>`;
+  else h=dv.syncAt?`<span class="sync s-ok">☁ Guardado${dvRec()?" para el supervisor":dv.enviado?"":" como borrador"} · ${hhmm(dv.syncAt)}</span>`:"";
+  $("#dvSync").innerHTML=h;const g=$("#dvGo");if(g)g.onclick=()=>{dv.err="";dvSync(false)};
+}
+async function dvSync(final){
+  if(!dv||dvSyncing)return false;if(!final&&!dv.dirty)return true;
+  if(navigator.onLine===false&&!final){dvRenderSync();return false}
+  dvSyncing=true;dvRenderSync();const v=dv.ver||0;
+  try{
+    if(dvRec())await prpc("cb_dev_recibir",{p_id:dv.id,p_persona:PST.persona||"",p_rec:dv.lect,p_terminar:!!final});
+    else{const r=await prpc("cb_dev_guardar",{p_id:dv.id,p_doc:Object.assign({persona:PST.persona||""},dv.doc),p_lect:dv.lect,p_enviar:!!final});if(r&&r.enviado)dv.enviado=r.enviado}
+    if((dv.ver||0)===v)dv.dirty=false;dv.err="";dv.syncAt=new Date().toISOString();dvSave();return true;
+  }catch(e){if(final)toast(dvMsg(e));else if(!e.net)dv.err=dvMsg(e);dvSave();return false}
+  finally{dvSyncing=false;dvRenderSync()}
+}
+function dvFinalizar(){
+  if(!dv)return;
+  if(!dvRec()){
+    const g=$("#dvGuia"),f=$("#dvFact"),fe=$("#dvFecha");if(g)dv.doc.guia=norm(g.value).toUpperCase();if(f)dv.doc.factura=norm(f.value).toUpperCase();if(fe)dv.doc.fecha=fe.value;
+    if(!dv.doc.guia){toast("Falta el N° de guía");return $("#dvGuia").focus()}
+    if(!dv.doc.factura){toast("Falta el N° de factura");return $("#dvFact").focus()}
+    if(!dv.doc.fecha){toast("Falta la fecha");return $("#dvFecha").focus()}
+  }
+  if(!dv.lect.length){toast("Agrega al menos un producto");return focusSel($("#dvScan"))}
+  const n=dv.lect.length;
+  confirmBox(dvRec()?`Terminar la recepción con ${fmt(n)} líneas. Después ya no se puede modificar.`:`Enviar a bodega la devolución guía ${esc(dv.doc.guia)} · factura ${esc(dv.doc.factura)} con ${fmt(n)} líneas.`,async()=>{
+    if(navigator.onLine===false)return toast("Sin señal: busca conexión y vuelve a intentar.");
+    const rec=dvRec();const ok=await dvSync(true);if(!ok)return;
+    toast(rec?"✓ Recepción terminada. El supervisor ya ve el cuadre.":"✓ Devolución enviada a bodega");
+    dv=null;dvSave();await puDevRefresh().catch(()=>{});dvHomeRender();
+  },"#dvConfirm");
+  $("#dvConfirm").scrollIntoView({behavior:"smooth",block:"center"});
+}
+async function dvOpenCam(){
+  if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
+  if(dvCamI){$("#dvCamWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
+  $("#dvCamWrap").hidden=false;$("#dvCamMsg").textContent="Pidiendo permiso de cámara…";
+  try{dvCamI=await iniciarLector("dvReader",txt=>{txt=norm(txt);if(!txt||dvHold||calertOpen())return;if(txt===dvLast.c&&dvLast.miss<10)return;dvLast={c:txt,miss:0};dvRead(txt)},()=>{dvLast.miss++});
+    $("#dvCamMsg").textContent="Apunta al código del producto.";$("#dvCamWrap").scrollIntoView({block:"start",behavior:"smooth"})}
+  catch(e){dvCamI=null;$("#dvCamWrap").hidden=true;toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.")}
+}
+async function dvStopCam(){if(dvCamI){await detenerLector(dvCamI);dvCamI=null}dvHold=false;const w=$("#dvCamWrap");if(w)w.hidden=true}
+$("#dvCam").onclick=dvOpenCam;$("#dvCamStop").onclick=dvStopCam;$("#dvOk").onclick=dvAdd;$("#dvFin").onclick=dvFinalizar;
+$("#dvBack").onclick=async()=>{if(dv&&dv.dirty)await dvSync(false);dvStopCam();await puDevRefresh().catch(()=>{});dvHomeRender()};
+$("#dvQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();dvAdd()}});
+$("#dvScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();dvRead(e.target.value)}});
+$("#dvScan").addEventListener("input",()=>{$("#dvPending").hidden=true});
+$("#dvScan").addEventListener("blur",()=>setTimeout(dvBlurCheck,150));
+addEventListener("online",()=>{if(dv&&dv.dirty)dvSync(false)});
+
+/* =====================================================================
+   5 · LOGÍSTICA INVERSA en el panel del supervisor: lista y cuadre devuelto vs recibido.
+   ===================================================================== */
+var devList=[], devSel=store.get("inv_devsel",null), devF=store.get("inv_devf","pend"), devAt=null, devBusy=false;
+const devSt=d=>d.finalizado?"cerr":d.recibido?"rec":d.rec_inicio?"enrec":d.enviado?"pend":"borr";
+const DEVST={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],norec:["No llegó","p-bad"],nodecl:["No declarado","p-warn"],porrec:["Por recibir","p-info"]};
+function devEnter(){
+  const on=nubeOn();$("#dvNote").hidden=on;
+  if(!on){$("#dvNote").innerHTML='Para ver las devoluciones, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.';$("#dvTbl").innerHTML="";$("#dvDet").hidden=true;$("#dvChips").innerHTML="";return}
+  devRender();devRefresh(true);
+}
+async function devRefresh(silent){
+  if(!nubeOn()||devBusy)return;devBusy=true;
+  try{const r=await rpc(SB,"cb_dev_listar",{p_clave:SB.admin});devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;devRender()}
+  catch(e){const m=dvMsg(e);if(!silent)toast(m);if(/actualización 07/.test(m)){$("#dvNote").hidden=false;$("#dvNote").textContent=m}}
+  finally{devBusy=false}
+}
+setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-devol").hidden)devRefresh(true)},20000);
+function devCuadre(d){
+  const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",D:null,R:null};
+    r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";r[side]=(r[side]||0)+(+l.qty||0)*(+l.f||1);m.set(k,r)}};
+  add(d.lect,"D");add(d.rec,"R");
+  return [...m.values()].map(r=>{if(!r.desc&&erp&&typeof findItem==="function"){const it=findItem(r.cod);if(it){r.desc=it.desc;r.um=r.um||umTxt(it.um)}}
+    r.dif=(r.R||0)-(r.D||0);r.st=r.D==null?(d.rec_inicio?"nodecl":"porrec"):r.R==null?(d.recibido?"norec":"porrec"):Math.abs(r.dif)<1e-9?"ok":r.dif<0?"falta":"sobra";return r});
+}
+function devRender(){
+  const F=[["pend","Por recibir",d=>["pend","enrec"].includes(devSt(d))],["rec","Recibidas",d=>devSt(d)==="rec"],["dif","Con diferencia",d=>["rec","cerr"].includes(devSt(d))&&devCuadre(d).some(r=>r.st!=="ok")],["borr","Borradores",d=>devSt(d)==="borr"],["cerr","Cerradas",d=>devSt(d)==="cerr"],["todas","Todas",()=>true]];
+  if(!F.some(f=>f[0]===devF))devF="pend";
+  const o=$("#dvOrig").value,q=deacc($("#dvQ").value||"");
+  const base=devList.filter(d=>(!o||d.origen===o)&&(!q||deacc([d.guia,d.factura,d.persona,d.rec_persona,...(d.lect||[]).map(l=>l.code+" "+(l.desc||""))].join(" ")).includes(q)));
+  $("#dvChips").innerHTML=F.map(([k,l,fn])=>`<button class="chip" data-f="${k}" aria-pressed="${devF===k}">${l} · ${fmt(base.filter(fn).length)}</button>`).join("");
+  $$("#dvChips .chip").forEach(b=>b.onclick=()=>{devF=b.dataset.f;store.set("inv_devf",devF);devRender()});
+  const fn=F.find(f=>f[0]===devF)[2], L=base.filter(fn);
+  $("#dvAt").textContent=devAt?"actualizado "+hhmm(devAt)+" · cada 20 s":"";
+  $("#dvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Origen</th><th>Guía</th><th>Factura</th><th>Devuelve</th><th>Recibe</th><th class="num">Líneas</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
+    (L.length?L.map(d=>{const s=devSt(d),[t,c]=dvEstado(d),cu=s==="rec"||s==="cerr"?devCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
+      return `<tr data-di="${esc(d.id)}" class="${d.id===devSel?"sel":""}"><td>${fechaCL(d.fecha)}</td><td>${esc(ORIG[d.origen]||d.origen)}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.factura||"—")}</td><td>${esc(d.persona||"—")}</td><td>${esc(d.rec_persona||"—")}</td><td class="num">${fmt((d.lect||[]).length)}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
+     :`<tr><td colspan="9" class="muted">${devList.length?"No hay devoluciones con este filtro.":"Todavía no hay devoluciones. Las cargan los celulares fijos de producción, retail y distribución."}</td></tr>`)+"</tbody>";
+  $$("#dvTbl [data-di]").forEach(tr=>tr.onclick=()=>{devSel=tr.dataset.di;store.set("inv_devsel",devSel);devRender();$("#dvDet").scrollIntoView({behavior:"smooth",block:"start"})});
+  devDetRender();
+}
+function devDetRender(){
+  const d=devList.find(x=>x.id===devSel);$("#dvDet").hidden=!d;if(!d)return;
+  const rows=devCuadre(d),[t]=dvEstado(d),cnt=s=>rows.filter(r=>r.st===s).length;
+  $("#dvDetT").textContent=`${ORIG[d.origen]||d.origen} · Guía ${d.guia||"—"} · Factura ${d.factura||"—"}`;
+  $("#dvDetS").innerHTML=`Fecha ${fechaCL(d.fecha)} · ${t}${d.persona?" · devuelve "+esc(d.persona):""}${d.enviado?" · enviada "+fmtDT(d.enviado):""}${d.rec_persona?" · recibe "+esc(d.rec_persona):""}${d.recibido?" · recibida "+fmtDT(d.recibido):""}${d.nota?`<br>Observación: ${esc(d.nota)}`:""}`;
+  $("#dvKpis").innerHTML=[["Productos declarados",rows.filter(r=>r.D!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt("ok")],["Faltantes",cnt("falta")+cnt("norec")],["Sobrantes / no declarados",cnt("sobra")+cnt("nodecl")]].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  const ord={falta:0,norec:1,nodecl:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
+  $("#dvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Devuelto</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
+    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}</td><td>${esc(r.um||"")}</td><td class="num">${r.D==null?"—":fmt2(r.D)}</td><td class="num">${r.R==null?"—":fmt2(r.R)}</td><td class="num">${r.D==null||r.R==null?"—":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${DEVST[r.st][1]}">${DEVST[r.st][0]}</span></td></tr>`).join(""):`<tr><td colspan="7" class="muted">Sin productos todavía.</td></tr>`)+"</tbody>";
+  $("#dvCerrar").hidden=!!d.finalizado;$("#dvConfirmS").innerHTML="";
+}
+$("#dvRef").onclick=()=>devRefresh(false);$("#dvOrig").onchange=devRender;$("#dvQ").oninput=devRender;
+$("#dvX").onclick=()=>{devSel=null;store.set("inv_devsel",null);devRender()};
+$("#dvCerrar").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Cerrar la devolución guía ${esc(d.guia||"—")}: queda como histórico y bodega ya no la ve.`,async()=>{try{await rpc(SB,"cb_dev_cerrar",{p_clave:SB.admin,p_id:d.id});await devRefresh(false);toast("Devolución cerrada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
+$("#dvDel").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Eliminar la devolución guía ${esc(d.guia||"—")} con todo su detalle. No se puede deshacer.`,async()=>{try{await rpc(SB,"cb_dev_eliminar",{p_clave:SB.admin,p_id:d.id});devSel=null;store.set("inv_devsel",null);await devRefresh(false);toast("Devolución eliminada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
+$("#dvXlsx").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;const rows=devCuadre(d);
+  const aoa=[["Devolución",ORIG[d.origen]||d.origen],["N° de guía",d.guia||""],["N° de factura",d.factura||""],["Fecha",fechaCL(d.fecha)],["Devuelve",d.persona||""],["Recibe",d.rec_persona||""],["Estado",dvEstado(d)[0]],[],
+    ["Código","Descripción","Unidad","Devuelto","Recibido","Diferencia","Estado"],...rows.map(r=>[r.cod,r.desc||"",r.um||"",r.D==null?"":r.D,r.R==null?"":r.R,r.D==null||r.R==null?"":r.dif,DEVST[r.st][0]])];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=[{wch:14},{wch:40},{wch:8},{wch:11},{wch:11},{wch:11},{wch:14}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Cuadre");
+  const det=[["Lado","Código","Descripción","Cantidad","Equivale a","Unidad","Persona","Hora"],...(d.lect||[]).map(l=>["Devuelve",l.code,l.desc||"",+l.qty||0,(+l.qty||0)*(+l.f||1),l.um||"",l.user||"",l.t||""]),...(d.rec||[]).map(l=>["Recibe",l.code,l.desc||"",+l.qty||0,(+l.qty||0)*(+l.f||1),l.um||"",l.user||"",l.t||""])];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(det),"Detalle");
+  XLSX.writeFile(wb,`Devolucion_${String(d.guia||d.id).replace(/[^\w-]+/g,"_")}.xlsx`)};
 /* =====================================================================
    PRODUCTO TERMINADO (PT) en el panel: lo que entregó producción vs lo que recibió bodega, pallet por pallet.
    Lo ven en tiempo real el supervisor y el jefe de producción.
