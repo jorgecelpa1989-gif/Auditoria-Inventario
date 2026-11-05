@@ -62,10 +62,10 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 .p-ok{background:var(--ok-bg);color:var(--ok)}.p-bad{background:var(--bad-bg);color:var(--bad)}
 .p-warn{background:var(--warn-bg);color:var(--warn)}.p-info{background:var(--info-bg);color:var(--info)}
 .p-mut{background:var(--chip);color:var(--muted)}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.kpi{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel);display:flex;flex-direction:column;gap:2px}
-.kpi .v{font:600 22px var(--mono);font-variant-numeric:tabular-nums}
-.kpi .l{font-size:12px;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--panel);display:flex;flex-direction:column;gap:1px}
+.kpi .v{font:600 17px var(--mono);font-variant-numeric:tabular-nums}
+.kpi .l{font-size:11.5px;color:var(--muted);line-height:1.3}
 .log{font:12.5px var(--mono);color:var(--muted);display:flex;flex-direction:column;gap:2px;max-height:180px;overflow:auto}
 .log .ok{color:var(--ok)}.log .w{color:var(--warn)}
 /* Contar */
@@ -153,20 +153,20 @@ details summary{cursor:pointer;font-weight:600}
 body.op nav.tabs{display:none}
 body.op .supOnly{display:none!important}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
-.resGrid{display:grid;grid-template-columns:minmax(220px,260px) minmax(0,1fr) minmax(240px,290px);grid-template-areas:"l c r";gap:16px;align-items:start}
+.resGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,290px);grid-template-areas:"c r";gap:16px;align-items:start}
 .resLeft{grid-area:l;display:flex;flex-direction:column;gap:16px;min-width:0;position:sticky;top:12px}
 .resMain{grid-area:c;display:flex;flex-direction:column;gap:16px;min-width:0}
 .resRight{grid-area:r;display:flex;flex-direction:column;gap:12px;min-width:0}
 .card.smc{padding:12px 14px;gap:8px}.card.smc h2{font-size:15px;margin:0}.card.smc p{margin:0}
 body:has(#v-resultado:not([hidden])) .wrap{max-width:1720px}
-@media (max-width:1250px){.resGrid{grid-template-columns:minmax(220px,260px) minmax(0,1fr);grid-template-areas:"l c" "r c";grid-template-rows:auto 1fr}.resLeft{position:static}}
-@media (max-width:820px){.resGrid{grid-template-columns:1fr;grid-template-areas:"l" "c" "r"}}
+@media (max-width:1250px){.resGrid{grid-template-columns:minmax(0,1fr) minmax(220px,260px);grid-template-areas:"c r"}}
+@media (max-width:820px){.resGrid{grid-template-columns:1fr;grid-template-areas:"r" "c"}}
 .mpGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:16px;align-items:start}
 .mpFold{display:block}.mpFold>*+*{margin-top:8px}.mpFold>summary{cursor:pointer;list-style:revert;font-size:15px}.mpFold[open]>summary{margin-bottom:4px}
 .solUnit{align-self:flex-start}.solUnit button{padding:5px 10px;font-size:13px}
 .solMeta{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .linkBtn{background:none;border:0;color:var(--primary);text-decoration:underline;cursor:pointer;padding:2px 0;font:inherit;align-self:center}
-.solAlert{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+.solAlert{display:flex;align-items:center;gap:6px;flex-wrap:wrap;border:1px solid var(--warn);background:var(--warn-bg);border-radius:8px;padding:5px 10px;font-size:12.5px;margin-bottom:6px}.solAlert .btn{padding:4px 10px;font-size:12.5px}
 .actBox{display:flex;flex-direction:column;gap:6px;border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:12px 14px}
 nav.tabs .n.alert{background:var(--warn);color:#fff}
 .puestoBar{display:none;align-items:center;gap:10px;max-width:720px;width:100%;margin:0 auto 10px}
@@ -224,7 +224,7 @@ nav.tabs .soon{font:600 10px var(--font);text-transform:uppercase;letter-spacing
 .soonCard{border-style:dashed}
 .ptGrid{display:grid;grid-template-columns:minmax(180px,215px) minmax(0,1fr);gap:14px;align-items:start}.ptLeft{display:flex;flex-direction:column;gap:14px}.ptLeft .card{margin:0}
 .ptSidesCol{display:flex;flex-direction:column;gap:8px}
-#ptRes th,#ptRes td{padding:5px 6px;font-size:13px}#ptRes th{white-space:normal;vertical-align:bottom}#ptRes td.desc{min-width:140px}#ptRes .pill{white-space:normal;display:inline-block;max-width:118px;line-height:1.25;text-align:center}#ptRes td:last-child{min-width:84px}
+#ptRes th,#ptRes td,#mpRes th,#mpRes td{padding:5px 6px;font-size:13px}#mpRes .sub{white-space:normal;max-width:120px;margin-left:auto}#mpRes td.desc{min-width:120px}#mpRes .pill{white-space:normal;display:inline-block;max-width:110px;line-height:1.25;text-align:center}#ptRes th{white-space:normal;vertical-align:bottom}#ptRes td.desc{min-width:140px}#ptRes .pill{white-space:normal;display:inline-block;max-width:118px;line-height:1.25;text-align:center}#ptRes td:last-child{min-width:84px}
 @media (max-width:900px){.ptGrid{grid-template-columns:1fr}}
 .dvRow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
 .dvRow+.dvRow{margin-top:8px}.dvRow .dd{flex:1;min-width:0}.dvRow .dd b{display:block}.dvRow .dd span{font-size:13px;color:var(--muted)}
@@ -315,28 +315,6 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <div class="chips" id="factChips"><button class="chip" data-f="pend">Sin equivalencia</button><button class="chip" data-f="con">Con equivalencia</button><button class="chip" data-f="todos">Todos</button></div></div>
     <div class="tbl" style="max-height:420px"><table id="factTbl"></table></div>
     <datalist id="ceList"><option value="ROLLO"><option value="SACO"><option value="BARRA"><option value="CAJA"><option value="BOLSA"><option value="PAQUETE"><option value="CARRETE"><option value="BIDON"><option value="PLANCHA"><option value="TIRA"><option value="UNIDAD"></datalist>
-  </div>
-
-  <div class="card" id="maestroCard" hidden>
-    <div class="eyebrow">Paso 3 · Para los contadores</div>
-    <h2>Crear conteo y compartir el link</h2>
-    <p>Se crea un link con la lista de productos (código, código de barras, descripción y unidad). <b>No lleva stock ni costos</b>: el contador cuenta a ciegas. Lo mandas por WhatsApp y al abrirlo el celular queda listo para contar.</p>
-    <div class="row">
-      <label class="f" style="flex:1 1 260px">Nombre del conteo<input id="cNombre" placeholder="Ej: Bodega Central · Pasillos 1 a 5"></label>
-      <label class="f" style="flex:0 1 200px">Vigencia del link<select id="cVence">
-        <option value="2">2 horas</option><option value="4">4 horas</option><option value="8" selected>8 horas (un turno)</option><option value="12">12 horas</option><option value="hoy">Hasta hoy 23:59</option>
-      </select></label>
-    </div>
-    <details id="sgBox" hidden><summary>Subgrupos a contar <span class="small muted" id="sgInfo"></span></summary>
-      <div class="row small" style="margin:8px 0"><button class="btn sm" id="sgAll">Todos</button><button class="btn sm" id="sgNone">Ninguno</button><input id="sgQ" placeholder="Filtrar subgrupos" style="flex:1 1 160px;padding:5px 8px"></div>
-      <div id="sgList" class="sgList"></div></details>
-    <details id="rotBox"><summary>Conteo rotativo: solo algunos códigos <span class="small muted" id="rotInfo"></span></summary>
-      <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
-      <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
-      <div class="small" id="rotRes"></div></details>
-    <label class="f small" id="cPuWrap" style="max-width:420px" hidden>Asignar también a un usuario (le aparece en su menú)<select id="cPuesto"><option value="">— A nadie —</option></select></label>
-    <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
-    <div id="crearRes"></div>
   </div>
 
 </section>
@@ -530,24 +508,47 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
 <section class="view" id="v-resultado" hidden>
   <div class="notice" id="resNote" hidden>Para comparar contra el stock, carga el informe del ERP en <b>1 · Panel</b> en este computador.</div>
  <div class="resGrid">
-  <div class="resLeft">
-  <div class="card">
-    <div class="eyebrow">Ver resultados de</div>
-    <label class="f">Conteo<select id="rSel"></select></label>
-    <button class="btn primary" id="btnTraerRes" style="justify-content:center">Actualizar lecturas</button>
-    <div class="small muted">Con "Todos los conteos" se suman las lecturas de todos los conteos activos.</div>
-  </div>
-  </div>
   <div class="resMain">
   <div class="card">
     <div class="kpis" id="kpis"></div>
     <div class="small muted" id="iraInfo"></div>
   </div>
+  <div class="card" id="maestroCard" hidden>
+    <div class="eyebrow">Crear conteo</div>
+    <h2>Crear conteo y compartir el link</h2>
+    <p>Se crea un link con la lista de productos (código, código de barras, descripción y unidad). <b>No lleva stock ni costos</b>: el contador cuenta a ciegas. Lo mandas por WhatsApp y al abrirlo el celular queda listo para contar.</p>
+    <div class="row">
+      <label class="f" style="flex:1 1 260px">Nombre del conteo<input id="cNombre" placeholder="Ej: Bodega Central · Pasillos 1 a 5"></label>
+      <label class="f" style="flex:0 1 200px">Vigencia del link<select id="cVence">
+        <option value="2">2 horas</option><option value="4">4 horas</option><option value="8" selected>8 horas (un turno)</option><option value="12">12 horas</option><option value="hoy">Hasta hoy 23:59</option>
+      </select></label>
+    </div>
+    <details id="sgBox" hidden><summary>Subgrupos a contar <span class="small muted" id="sgInfo"></span></summary>
+      <div class="row small" style="margin:8px 0"><button class="btn sm" id="sgAll">Todos</button><button class="btn sm" id="sgNone">Ninguno</button><input id="sgQ" placeholder="Filtrar subgrupos" style="flex:1 1 160px;padding:5px 8px"></div>
+      <div id="sgList" class="sgList"></div></details>
+    <details id="rotBox"><summary>Conteo rotativo: solo algunos códigos <span class="small muted" id="rotInfo"></span></summary>
+      <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
+      <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
+      <div class="small" id="rotRes"></div></details>
+    <label class="f small" id="cPuWrap" style="max-width:420px" hidden>Asignar también a un usuario (le aparece en su menú)<select id="cPuesto"><option value="">— A nadie —</option></select></label>
+    <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
+    <div id="crearRes"></div>
+  </div>
 
   <div class="card">
+    <div class="eyebrow">Detalle de lecturas</div>
+    <h2>Una línea por lectura · unidades y conversión</h2>
+    <div id="liveBox"></div>
+    <div class="row">
+      <select id="dUbic" style="flex:0 1 220px"></select>
+      <input id="dSearch" placeholder="Buscar código, descripción o contador" style="min-width:0;flex:1 1 200px;max-width:320px">
+    </div>
+    <div class="tbl"><table id="det"></table></div>
+    <div class="row"><span class="small muted" id="detInfo"></span><span class="sep"></span><button class="btn sm" id="btnMoreDet" hidden>Mostrar más</button></div>
+  </div>
+  <div class="card" id="resT1" hidden>
     <div class="eyebrow">Tabla 1</div>
     <h2>Resumen por producto</h2>
-    <div id="liveBox"></div>
     <div class="row">
       <div class="chips" id="fChips"></div>
       <span class="sep"></span>
@@ -557,19 +558,14 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="row"><span class="small muted" id="resInfo"></span><span class="sep"></span><button class="btn sm" id="btnMore" hidden>Mostrar más</button></div>
   </div>
 
-  <div class="card">
-    <div class="eyebrow">Tabla 2</div>
-    <h2>Detalle de lecturas (una línea por conteo)</h2>
-    <div class="row">
-      <select id="dUbic" style="flex:0 1 220px"></select>
-      <input id="dSearch" placeholder="Buscar código, descripción o contador" style="min-width:0;flex:1 1 200px;max-width:320px">
-    </div>
-    <div class="tbl"><table id="det"></table></div>
-    <div class="row"><span class="small muted" id="detInfo"></span><span class="sep"></span><button class="btn sm" id="btnMoreDet" hidden>Mostrar más</button></div>
   </div>
-  </div>
-
   <div class="resRight">
+  <div class="card">
+    <div class="eyebrow">Ver resultados de</div>
+    <label class="f">Conteo<select id="rSel"></select></label>
+    <button class="btn primary" id="btnTraerRes" style="justify-content:center">Actualizar lecturas</button>
+    <div class="small muted">Con "Todos los conteos" se suman las lecturas de todos los conteos activos.</div>
+  </div>
   <div class="card smc">
     <div class="eyebrow">Reconteo y validación</div>
     <h2>Recontar las diferencias</h2>
@@ -2534,6 +2530,7 @@ const umTxt=u=>{const n=UMN(u);return n==="un"?(u?"un":"un"):n};
 let MASTER=store.get("inv_master",{});
 function enrich(items){for(const it of items){const k=key(it.cod),x=FACT[k],ms=MASTER[k];it.ce=x?x.ce:"";it.f=x?x.f:1;if(ms){if(!it.um)it.um=ms.um;it.sg=ms.sg||"";if(!it.desc)it.desc=ms.desc||""}}return items}
 const sq=s=>(+s.qty||0)*(+s.f||1);
+const uCv=(qty,ce,f,um)=>{f=+f||1;const c=ce&&f!==1;return [`<b>${fmt2(qty)}</b> <span class="small muted">${esc(c?plural(ce):umTxt(um||""))}</span>`,c?`${fmt2(qty*f)} <span class="small muted">${esc(umTxt(um||""))}</span><span class="sub">1 ${esc(ce)} = ${fmt2(f)} ${esc(umTxt(um||""))}</span>`:'<span class="muted">—</span>']};
 /* Cantidad con conversión: se ingresan BULTOS (sacos, rollos, cajas…) y debajo se ve la unidad del ERP. */
 function qBC(base,ce,f,um,signo){if(base==null||base==="")return "";f=+f||1;const s=signo&&base>0?"+":"",u=esc(umTxt(um||""));
   if(ce&&f!==1)return `<b>${s}${fmt2(base/f)}</b> <span class="small muted">${esc(plural(ce))}</span><span class="sub">= ${s}${fmt2(base)} ${u}</span>`;
@@ -3024,7 +3021,7 @@ function renderResult(){
   renderSel();
   const rows=compute(), k=kpis(rows), sc=scope();
   $("#resNote").hidden=!(erp&&erp.maestro)&&!!erp;
-  $("#kpis").innerHTML=[["Productos del conteo",fmt(k.total)],["Contados",`${fmt(k.contados)} / ${fmt(k.total)}`],["Pendientes",fmt(k.nocont)],["Cuadran",fmt(k.ok)],["Con diferencia",fmt(k.dif)],["Exactitud (IRA)",k.exact==null?"—":fmt(k.exact*100,1)+"%"]]
+  $("#kpis").innerHTML=[[`SKU contados / total${k.nocont?` · ${fmt(k.nocont)} pendientes`:""}`,`${fmt(k.contados)} / ${fmt(k.total)}`],["Cuadran / con diferencia",`${fmt(k.ok)} / ${fmt(k.dif)}`],["Exactitud (IRA)",k.exact==null?"—":fmt(k.exact*100,1)+"%"]]
     .map(([l,v])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
   $("#iraInfo").textContent=k.exact==null?"IRA = total contado ÷ total stock de los SKU del conteo × 100 (falta el stock del ERP).":`IRA = total contado ${fmt2(k.contTot)} ÷ total stock ${fmt2(k.stockTot)} de los SKU del conteo × 100 = ${fmt(k.exact*100,1)}%`;
   const ch=[["todos","Todos",rows.length],["dif","Con diferencia",k.dif],["falta","Faltantes",k.falta],["sobra","Sobrantes",k.sobra],["ok","Cuadran",k.ok],["nocont","Pendientes",k.nocont],["re","Recontados",k.re],["noerp","No existen en ERP",k.noerp]].filter(x=>x[2]||x[0]==="todos"||x[0]===rFilter);
@@ -3057,9 +3054,9 @@ function renderDetalle(){
   if(q)ls=ls.filter(s=>{const it=erp&&findItem(s.code);return deacc(s.code+" "+(it?it.desc:"")+" "+(s.user||"")).includes(q)});
   const tipo=s=>esReconteo(conteoDeScan(s))?1:0;
   ls=[...ls].sort((a,b)=>tipo(a)-tipo(b)||String(a.ubic).localeCompare(String(b.ubic))||String(a.t).localeCompare(String(b.t)));
-  $("#det").innerHTML=`<thead><tr><th>Conteo</th><th>Fecha</th><th>Contador</th><th>Ubicación</th><th>Código</th><th>Descripción</th><th class="num">Cantidad contada</th><th class="num">Total</th></tr></thead><tbody>`+
+  $("#det").innerHTML=`<thead><tr><th>Conteo</th><th>Fecha</th><th>Contador</th><th>Ubicación</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th></tr></thead><tbody>`+
     ls.slice(0,dLimit).map(s=>{const it=erp&&findItem(s.code),c=conteoDeScan(s);return `<tr><td class="small">${c?(esReconteo(c)?'<span class="pill p-warn">Reconteo</span> ':"")+esc(c.nombre):esc(s.conteo||"Este equipo")}</td><td>${new Date(s.t).toLocaleDateString("es-CL")}</td><td>${esc(s.user||"")}</td><td>${esc(s.ubic||"—")}</td><td class="code">${esc(s.code)}</td><td class="desc">${it?esc(it.desc):""}</td>
-      <td class="num">${fmt2(s.qty)} <span class="small muted">${esc(s.f?plural(s.ce):(s.um||""))}</span></td><td class="num" style="font-weight:600">${fmt2(sq(s))} <span class="small muted">${esc(s.um||"")}</span></td></tr>`}).join("")+
+      ${(()=>{const [u,c]=uCv(s.qty,s.ce||(it&&conv(it)?it.ce:""),s.f||(it&&conv(it)?it.f:1),s.um||(it?it.um:""));return `<td class="num">${u}</td><td class="num">${c}</td>`})()}</tr>`}).join("")+
     (ls.length?"":`<tr><td colspan="8" class="muted">Sin lecturas.</td></tr>`)+"</tbody>";
   $("#detInfo").textContent=`${fmt(Math.min(dLimit,ls.length))} de ${fmt(ls.length)} lecturas`;
   $("#btnMoreDet").hidden=ls.length<=dLimit;
@@ -3979,7 +3976,7 @@ function mpRows(id){
   const ls=movLect[id]||[], map=new Map(), sol=mpSolOf(id);
   for(const [cod,q,desc,um,ce,f] of sol||[]){const k=key(cod),r=map.get(k)||{cod,desc:desc||"",um:um||"",ce:ce||"",f:+f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0,S:null};r.S=(r.S||0)+(+q||0);map.set(k,r)}
   for(const d of ls){const k=key(d.k||d.code);const r=map.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0};
-    if(!r.desc&&d.desc)r.desc=d.desc;const t=(+d.qty||0)*(+d.f||1);
+    if(!r.desc&&d.desc)r.desc=d.desc;if(!r.um&&d.um)r.um=d.um;if(!(r.ce&&r.f!==1)&&d.ce&&+d.f>0&&+d.f!==1){r.ce=d.ce;r.f=+d.f}const t=(+d.qty||0)*(+d.f||1);
     if(d.rol==="E"){r.E=(r.E||0)+t;r.qE+=+d.qty||0;r.nE++}else{r.R=(r.R||0)+t;r.qR+=+d.qty||0;r.nR++}map.set(k,r)}
   const x=movLive.get(id),L=(x&&x.lados)||{},rTerm=!!(L.R&&L.R.terminado);
   return [...map.values()].map(r=>{r.dif=r.E!=null&&r.R!=null?r.R-r.E:null;
@@ -4027,7 +4024,8 @@ function renderMpCmp(){
   $("#mpTitle").innerHTML=`${esc(m.nombre)}${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}`;
   $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div></div>`}).join("");
   const rows=mpRows(m.id), cnt=s=>rows.filter(r=>s.includes(r.st)).length, hasS=rows.some(r=>r.S!=null);
-  $("#mpKpis").innerHTML=[...(hasS?[["Solicitados",rows.filter(r=>r.S!=null).length]]:[]),["Productos entregados",rows.filter(r=>r.E!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt(["ok"])],["Con diferencia",cnt(["falta","sobra","norec","noent"])],["Por recibir",cnt(["porrec"])],...(hasS?[["Por entregar",cnt(["porent"])]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  const nS=rows.filter(r=>r.S!=null).length,nE=rows.filter(r=>r.E!=null).length,nR=rows.filter(r=>r.R!=null).length;
+  $("#mpKpis").innerHTML=[[hasS?"SKU solicitados / entregados / recibidos":"SKU entregados / recibidos",hasS?`${fmt(nS)} / ${fmt(nE)} / ${fmt(nR)}`:`${fmt(nE)} / ${fmt(nR)}`],["Cuadran / con diferencia",`${fmt(cnt(["ok"]))} / ${fmt(cnt(["falta","sobra","norec","noent"]))}`],[hasS?"Por recibir / por entregar":"Por recibir",hasS?`${fmt(cnt(["porrec"]))} / ${fmt(cnt(["porent"]))}`:fmt(cnt(["porrec"]))]].map(([l,v])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
   const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["falta","sobra","norec","noent"])],["ok","Cuadran",cnt(["ok"])],["porrec","Por recibir",cnt(["porrec"])],...(hasS?[["porent","Por entregar",cnt(["porent"])]]:[])];
   $("#mpChips").innerHTML=F.map(([f,l,n])=>`<button class="chip" data-f="${f}" aria-pressed="${mpFilter===f}">${l} · ${fmt(n)}</button>`).join("");
   $$("#mpChips .chip").forEach(b=>b.onclick=()=>{mpFilter=b.dataset.f;renderMpCmp()});
@@ -4037,13 +4035,13 @@ function renderMpCmp(){
   f.sort((a,b)=>ord[a.st]-ord[b.st]||Math.abs(b.dif||0)-Math.abs(a.dif||0)||String(a.cod).localeCompare(String(b.cod)));
   $("#mpRes").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th>${hasS?'<th class="num">Solicitado</th>':""}<th class="num">Entregado</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
     (f.length?f.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)||'<span class="muted">(no está en el maestro)</span>'}</td><td>${esc(umTxt(r.um))}${r.ce&&r.f!==1?`<span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:""}</td>
-      ${hasS?`<td class="num">${mpQty(r.S,r,r.S!=null?r.S/(r.f||1):0)}</td>`:""}<td class="num">${mpQty(r.E,r,r.qE)}${r.S!=null&&r.E!=null&&r.S-r.E>1e-9?`<span class="sub" style="color:var(--warn)">faltan ${fmt2(r.S-r.E)} por entregar</span>`:""}</td><td class="num">${mpQty(r.R,r,r.qR)}</td>
-      <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${MPST[r.st][1]}">${MPST[r.st][0]}</span></td></tr>`).join("")
+      ${hasS?`<td class="num">${mpQty(r.S,r,r.S!=null?r.S/(r.f||1):0)}</td>`:""}<td class="num">${mpQty(r.E,r,r.qE)}${r.S!=null&&r.E!=null&&r.S-r.E>1e-9?`<span class="sub" style="color:var(--warn)">faltan ${r.ce&&r.f!==1?fmt2((r.S-r.E)/r.f)+" "+esc(Math.abs((r.S-r.E)/r.f-1)<1e-9?r.ce:plural(r.ce))+" (= "+fmt2(r.S-r.E)+" "+esc(umTxt(r.um))+")":fmt2(r.S-r.E)+" "+esc(umTxt(r.um))} por entregar</span>`:""}</td><td class="num">${mpQty(r.R,r,r.qR)}</td>
+      <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${MPST[r.st][1]}">${MPST[r.st][0]}</span></td></tr>`).join("")
     :`<tr><td colspan="8" class="muted">${rows.length?"Nada con este filtro.":"Todavía no llegan lecturas de los celulares."}</td></tr>`)+"</tbody>";
   const ls=[...(movLect[m.id]||[])].sort((a,b)=>String(b.t).localeCompare(String(a.t)));
   $("#mpDetBox").querySelector("summary").textContent=`Detalle de lecturas (${fmt(ls.length)})`;
-  $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Cantidad leída</th><th class="num">Total</th></tr></thead><tbody>`+
-    ls.map(d=>`<tr><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}</td><td class="num">${fmt2(d.qty)} <span class="small muted">${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))}</span></td><td class="num" style="font-weight:600">${fmt2((+d.qty||0)*(+d.f||1))} <span class="small muted">${esc(umTxt(d.um))}</span></td></tr>`).join("")+"</tbody>";
+  $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th></tr></thead><tbody>`+
+    ls.map(d=>`<tr><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}</td>${(()=>{const [u,c]=uCv(d.qty,d.ce,d.f,d.um);return `<td class="num">${u}</td><td class="num">${c}</td>`})()}</tr>`).join("")+"</tbody>";
 }
 $("#mpQ").addEventListener("input",()=>renderMpCmp());
 $("#btnMpExp").onclick=()=>{
