@@ -248,6 +248,8 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   .menuBtn{display:inline-flex}
   .brand{justify-content:flex-start}
 }
+.ptU{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.3}
+.ptU>span:last-child{display:flex;flex-direction:column;min-width:0}.ptU b{overflow-wrap:anywhere}.ptU .dot{margin-top:4px;flex:none}.ptU.off{opacity:.6}
 </style>
 
 <header class="top"><div class="in">
@@ -2444,6 +2446,25 @@ begin
    where id = p_id and finalizado is null and coalesce(meta->>'estado', 'activa') = 'activa';
   if not found then raise exception 'no_existe'; end if;
   return jsonb_build_object('id', p_id, 'vence', p_vence);
+end $$;
+
+-- Recepción PT: además de los 3 lados, lista cada usuario con permiso de PT y su señal (para ver quién está realmente en línea).
+create or replace function public.cb_pt_listar(p_clave text, p_desde timestamptz) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return jsonb_build_object(
+    'pallets', coalesce((select jsonb_agg(data || jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'pallet', pallet, 'rt', t) order by t) from cb_pt where t >= p_desde), '[]'::jsonb),
+    'cierres', coalesce((select jsonb_agg(jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'persona', persona, 't', t) order by t) from cb_pt_cierre where t >= p_desde - interval '1 day'), '[]'::jsonb),
+    'puestos', jsonb_build_object(
+        'produccion', (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_entregar' = any(permisos)),
+        'bodega',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_recibir' = any(permisos)),
+        'retail',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_retirar' = any(permisos))),
+    'usuarios', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'nombre', nombre, 'persona', persona, 'visto', visto, 'usado', usado,
+        'lado', case when 'pt_entregar' = any(permisos) then 'produccion' when 'pt_retirar' = any(permisos) then 'retail' else 'bodega' end) order by visto desc nulls last)
+      from cb_puesto where activo and permisos && array['pt_entregar','pt_recibir','pt_retirar']::text[]), '[]'::jsonb));
 end $$;
 
 revoke all on function public.cb_conteo_editar(text, uuid, text, jsonb), public.cb_conteo_items(uuid, text),
@@ -5163,7 +5184,12 @@ function renderPtPanel(){
   if($("#v-pt").hidden)return;
   const {T,ini}=ptTabla(), cnt=s=>T.filter(r=>s.includes(r.st)).length, P=ptData.puestos||{};
   const cier=p=>ptData.cierres.filter(x=>x.puesto===p).map(x=>x.t).sort().at(-1);
-  $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"],["retail","🛒 Picking retail retira"]].map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
+  const PTL={produccion:"Entrega",bodega:"Recibe",retail:"Retira"};
+  if(Array.isArray(ptData.usuarios)){const U=ptData.usuarios.filter(u=>u.usado).map(u=>({...u,on:enLinea(u.visto)})).sort((a,b)=>(b.on-a.on)||String(a.persona||a.nombre).localeCompare(String(b.persona||b.nombre)));
+    const cU=id=>ptData.cierres.filter(x=>x.usuario===id).map(x=>x.t).sort().at(-1),nOn=U.filter(u=>u.on).length;
+    $("#ptSides").innerHTML=`<div class="small muted" style="margin:-4px 0 6px">${fmt(nOn)} en línea de ${fmt(U.length)}</div>`+(U.length?U.map(u=>{const c=cU(u.id);
+      return `<div class="ptU${u.on?"":" off"}" title="${esc(u.nombre||"")}${u.visto?" · última señal "+fmtDT(u.visto):""}"><span class="dot ${u.on?"on":"off"}"></span><span><b>${esc(u.persona||u.nombre||u.id)}</b><span class="small muted">${PTL[u.lado]||""}${u.on?"":" · "+(u.visto?hace(u.visto):"sin señal")}${c?" · cierre "+hm24(c):""}</span></span></div>`}).join(""):'<div class="small muted">Ningún usuario con permiso de PT está vinculado.</div>')}
+  else $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"],["retail","🛒 Picking retail retira"]].map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
     return `<div class="mpSide"><span class="rl">${t}</span><div><span class="dot ${x.usado?(on?"on":"off"):""}"></span><b>${!x.usado?"Sin usuario vinculado":on?"En línea":"Sin señal"}</b>${x.visto&&!on?` <span class="small muted">· última señal ${hace(x.visto)}</span>`:""}</div><div class="small muted">${x.persona?esc(x.persona)+" · ":""}${c?"último cierre "+fmtDT(c):"sin cierres registrados"}</div></div>`}).join("");
   // 3 indicadores: pallets, SKU y unidades (bultos)
   const nE=T.reduce((a,r)=>a+(r.sn?r.np:(r.pe!=null?1:0)),0), nR=T.reduce((a,r)=>a+(r.sn?r.nr:(r.pr!=null?1:0)),0);

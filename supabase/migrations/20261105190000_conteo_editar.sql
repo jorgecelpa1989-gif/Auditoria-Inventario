@@ -63,6 +63,25 @@ begin
   return jsonb_build_object('id', p_id, 'vence', p_vence);
 end $$;
 
+-- Recepción PT: además de los 3 lados, lista cada usuario con permiso de PT y su señal (para ver quién está realmente en línea).
+create or replace function public.cb_pt_listar(p_clave text, p_desde timestamptz) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return jsonb_build_object(
+    'pallets', coalesce((select jsonb_agg(data || jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'pallet', pallet, 'rt', t) order by t) from cb_pt where t >= p_desde), '[]'::jsonb),
+    'cierres', coalesce((select jsonb_agg(jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'persona', persona, 't', t) order by t) from cb_pt_cierre where t >= p_desde - interval '1 day'), '[]'::jsonb),
+    'puestos', jsonb_build_object(
+        'produccion', (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_entregar' = any(permisos)),
+        'bodega',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_recibir' = any(permisos)),
+        'retail',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_retirar' = any(permisos))),
+    'usuarios', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'nombre', nombre, 'persona', persona, 'visto', visto, 'usado', usado,
+        'lado', case when 'pt_entregar' = any(permisos) then 'produccion' when 'pt_retirar' = any(permisos) then 'retail' else 'bodega' end) order by visto desc nulls last)
+      from cb_puesto where activo and permisos && array['pt_entregar','pt_recibir','pt_retirar']::text[]), '[]'::jsonb));
+end $$;
+
 revoke all on function public.cb_conteo_editar(text, uuid, text, jsonb), public.cb_conteo_items(uuid, text),
   public.cb_latido(uuid, text), public.cb_mov_extender(text, uuid, timestamptz) from public;
 grant execute on function
