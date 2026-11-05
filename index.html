@@ -226,6 +226,7 @@ nav.tabs .soon{font:600 10px var(--font);text-transform:uppercase;letter-spacing
 .dvRow+.dvRow{margin-top:8px}.dvRow .dd{flex:1;min-width:0}.dvRow .dd b{display:block}.dvRow .dd span{font-size:13px;color:var(--muted)}
 .dvGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .dvDocRO{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.dvDeclL{margin-top:6px}.dvDeclR{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}.dvDeclR+.dvDeclR{margin-top:8px}
 #dvTbl tr[data-di]{cursor:pointer}#dvTbl tr[data-di]:hover td{background:var(--chip)}#dvTbl tr.sel td{background:var(--info-bg)}
 @media (min-width:901px){body:not(.op):not(.mov):not(.puesto):not(.locked) header.top .in{max-width:none;padding-left:26px}}
 body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{display:none!important}
@@ -723,7 +724,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card">
     <div class="row"><div class="eyebrow">5 · Logística inversa</div><span class="sep"></span><span class="small muted" id="dvAt"></span><button class="btn sm" id="dvRef">Actualizar</button></div>
     <h2>Devoluciones a bodega</h2>
-    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> las recepciona escaneando lo que llega, sin ver lo declarado. Aquí ves el cuadre. Los links de los celulares están en <b>6 · Permisos</b>.</p>
+    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>6 · Permisos</b>.</p>
     <div class="notice" id="dvNote" hidden></div>
     <div class="row" style="margin-top:4px"><div class="chips" id="dvChips"></div><span class="sep"></span>
       <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option><option value="produccion">Producción</option><option value="retail">Picking retail</option><option value="distribucion">Distribución</option></select></label>
@@ -1725,7 +1726,7 @@ grant execute on function public.cb_liberar(text, uuid), public.cb_mov_liberar(t
 --
 --  Quién hace qué (por ahora; después se podrá dar a otros usuarios desde 6 · Permisos):
 --    · Producción, Picking retail y Distribución CARGAN devoluciones (guía, factura, fecha, SKU, cantidad).
---    · Bodega RECEPCIONA: escanea lo que llega, sin ver lo declarado (recepción ciega).
+--    · Bodega RECEPCIONA: ve lo declarado (guía, factura, productos y cantidades) y acepta o corrige lo que llega.
 --    · El supervisor ve el cuadre devuelto vs recibido en 5 · Logística inversa.
 -- =====================================================================
 
@@ -1758,7 +1759,7 @@ create table if not exists public.cb_dev (
   actualizado  timestamptz not null default now(),
   enviado      timestamptz,                       -- quien devuelve la envió a bodega
   lect         jsonb not null default '[]'::jsonb, -- lo que declara quien devuelve
-  rec          jsonb not null default '[]'::jsonb, -- lo que escanea bodega
+  rec          jsonb not null default '[]'::jsonb, -- lo que bodega acepta como recibido
   rec_persona  text,
   rec_inicio   timestamptz,
   recibido     timestamptz,                       -- bodega terminó la recepción
@@ -1802,14 +1803,14 @@ end $$;
 
 -- Lo que ve cada celular fijo:
 --   quien devuelve: sus devoluciones de los últimos 30 días (con su detalle, para seguir o revisar);
---   bodega: las enviadas que falta recibir, más las que recibió hoy (sin las cantidades declaradas).
+--   bodega: las enviadas que falta recibir, más las que recibió hoy, con lo declarado para aceptarlo.
 create or replace function public.cb_dev_mis(p_puesto text, p_ses text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform cb_puesto_ok(p_puesto, p_ses);
   if p_puesto = 'bodega' then
     return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'origen', d.origen, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura,
-        'fecha', d.fecha, 'enviado', d.enviado, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
+        'fecha', d.fecha, 'nota', d.nota, 'enviado', d.enviado, 'lect', d.lect, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
       from cb_dev d where d.enviado is not null and d.finalizado is null and (d.recibido is null or d.recibido > now() - interval '18 hours')), '[]'::jsonb);
   end if;
   if p_puesto not in ('produccion','retail','distribucion') then return '[]'::jsonb; end if;
@@ -4009,7 +4010,7 @@ $("#ptCamPallet").onclick=()=>ptOpenCam("pallet");$("#ptCamSku").onclick=()=>ptO
 /* =====================================================================
    LOGÍSTICA INVERSA en el celular fijo
    Producción, picking retail y distribución CARGAN devoluciones (guía, factura, fecha y productos).
-   Bodega las RECEPCIONA escaneando lo que llega (no ve lo declarado). El supervisor ve el cuadre en 5 · Logística inversa.
+   Bodega las RECEPCIONA: ve lo declarado y acepta (o corrige) lo que llega. El supervisor ve el cuadre en 5 · Logística inversa.
    ===================================================================== */
 const DEV_CARGA=["produccion","retail","distribucion"];
 const puDevCarga=()=>!!PST&&DEV_CARGA.includes(PST.puesto);
@@ -4068,7 +4069,7 @@ function dvElegir(id){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(puDevRec()){
     if(d.recibido)return toast("Esta devolución ya fue recibida");
-    dv={id:d.id,puesto:PST.puesto,modo:"rec",info:{origen:d.origen,guia:d.guia,factura:d.factura,fecha:d.fecha,persona:d.persona},lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};dvSave();return dvWork();
+    dv={id:d.id,puesto:PST.puesto,modo:"rec",info:{origen:d.origen,guia:d.guia,factura:d.factura,fecha:d.fecha,persona:d.persona,nota:d.nota||""},decl:Array.isArray(d.lect)?d.lect:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};dvSave();return dvWork();
   }
   if(d.rec_inicio||d.recibido||d.finalizado)return toast("Bodega ya "+(d.recibido?"recibió":"está recibiendo")+" esta devolución: ya no se puede corregir.");
   dv={id:d.id,puesto:PST.puesto,modo:"carga",doc:{guia:d.guia||"",factura:d.factura||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},lect:Array.isArray(d.lect)?d.lect:[],dirty:false,ver:0,enviado:d.enviado||null};dvSave();dvWork();
@@ -4077,8 +4078,8 @@ function dvWork(){
   $("#dvHome").hidden=true;$("#dvWork").hidden=false;
   if(dvRec()){const i=dv.info||{};
     $("#dvDocEb").textContent="Devolución que recibes";
-    $("#dvDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(ORIG[i.origen]||i.origen||"")}</b></span><span>Guía <b>${esc(i.guia||"—")}</b></span><span>Factura <b>${esc(i.factura||"—")}</b></span><span>Fecha <b>${fechaCL(i.fecha)}</b></span>${i.persona?`<span>Devuelve <b>${esc(i.persona)}</b></span>`:""}</div><p class="small muted" style="margin:6px 0 0">Escanea cada producto que llega y su cantidad. No ves lo declarado: el supervisor compara las dos listas.</p>`;
-    $("#dvFinEb").textContent="Al terminar de recibir";$("#dvFinTxt").textContent="Cuando hayas registrado todo lo que llegó, termina la recepción. Después ya no se puede modificar.";$("#dvFin").textContent="Terminar recepción…";
+    $("#dvDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(ORIG[i.origen]||i.origen||"")}</b></span><span>Guía <b>${esc(i.guia||"—")}</b></span><span>Factura <b>${esc(i.factura||"—")}</b></span><span>Fecha <b>${fechaCL(i.fecha)}</b></span>${i.persona?`<span>Devuelve <b>${esc(i.persona)}</b></span>`:""}</div>${i.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(i.nota)}</div>`:""}<div id="dvDecl"></div>`;
+    $("#dvFinEb").textContent="Al terminar de recibir";$("#dvFinTxt").textContent="Acepta lo que llegó tal como viene, o corrige la cantidad de lo que no calza. Después de terminar ya no se puede modificar.";$("#dvFin").textContent="Terminar recepción…";
   }else{
     $("#dvDocEb").textContent="1 · Documento de la devolución";
     $("#dvDoc").innerHTML=`<div class="dvGrid"><label class="f">N° de guía<input id="dvGuia" autocomplete="off" autocapitalize="characters" value="${esc(dv.doc.guia)}"></label>
@@ -4133,8 +4134,31 @@ function dvAdd(){
   dvHold=false;dvRender();
   if(dvCamI)$("#dvCamMsg").textContent="Listo. Apunta al siguiente producto.";else focusSel($("#dvScan"));
 }
+/* bodega: lo declarado por quien devuelve, con lo aceptado hasta ahora y botones para aceptar */
+function dvDeclRows(){
+  const m=new Map();
+  for(const l of dv.decl||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{k,cod:l.k||l.code,desc:l.desc||"",um:l.um||"",ce:l.ce||"",f:+l.f||1,D:0,R:0};r.D+=(+l.qty||0)*(+l.f||1);m.set(k,r)}
+  for(const l of dv.lect||[]){const r=m.get(key(l.k||l.code));if(r)r.R+=(+l.qty||0)*(+l.f||1)}
+  return [...m.values()];
+}
+const dvEnU=(r,base)=>r.ce&&r.f!==1?`${fmt2(base/r.f)} ${esc(plural(r.ce))} <span class="muted">(${fmt2(base)} ${esc(r.um)})</span>`:`${fmt2(base)}${r.um&&r.um!=="un"?" "+esc(r.um):""}`;
+function dvDeclRender(){
+  const box=$("#dvDecl");if(!box||!dvRec())return;
+  const rows=dvDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D);
+  box.innerHTML=`<div class="row" style="margin-top:10px"><b>Lo declarado (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pend.length?`<button class="btn sm primary" id="dvAccAll">✓ Aceptar todo tal como viene</button>`:'<span class="pill p-ok">Todo aceptado</span>'}</div>
+    <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR"><div><div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · declarado: <b>${dvEnU(r,r.D)}</b></div>
+      <div class="small">${r.R?`Recibido: <b>${dvEnU(r,r.R)}</b> ${ok?'<span class="pill p-ok">✓</span>':`<span class="pill ${dif<0?"p-bad":"p-warn"}">${dif<0?"faltan":"sobran"} ${dvEnU(r,Math.abs(dif))}</span>`}`:'<span class="muted">Sin aceptar</span>'}</div></div>
+      <div class="row" style="gap:6px">${r.R+1e-9<r.D?`<button class="btn sm primary" data-acc="${esc(r.k)}">✓ Aceptar</button>`:""}<button class="btn sm" data-edt="${esc(r.k)}">Otra cantidad</button></div></div>`}).join("")||'<p class="muted" style="margin:0">La devolución no trae productos declarados.</p>'}</div>
+    <p class="small muted" style="margin:6px 0 0">Si llegó algo que no está en la lista o una cantidad distinta, regístralo abajo con el producto y la cantidad real.</p>`;
+  const acc=r=>{const falta=r.D-r.R;if(falta<=1e-9)return false;const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc,um:r.um,qty:+(falta/r.f).toFixed(6),user:PST.persona||"",t:new Date().toISOString(),acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}dv.lect.push(l);return true};
+  $$("#dvDecl [data-acc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.acc);if(r&&acc(r)){dvDirty();audio.beep(true);dvRender();toast("✓ Aceptado: "+(r.desc||r.cod))}});
+  const all=$("#dvAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pend.length)} producto${pend.length===1?"":"s"} con la cantidad declarada.`,()=>{let n=0;for(const r of pend)if(acc(r))n++;if(n){dvDirty();audio.beep(true);dvRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#dvConfirm");
+  $$("#dvDecl [data-edt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.edt);if(!r)return;
+    const quit=dv.lect.filter(l=>key(l.k||l.code)===r.k);if(quit.length){dv.lect=dv.lect.filter(l=>key(l.k||l.code)!==r.k);dvDirty();dvRender()}
+    $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
+}
 function dvRender(){
-  if(!dv)return;const ls=[...dv.lect].reverse();
+  if(!dv)return;if(dvRec())dvDeclRender();const ls=[...dv.lect].reverse();
   $("#dvInfo").textContent=`${fmt(dv.lect.length)} líneas · ${fmt(new Set(dv.lect.map(l=>key(l.k||l.code))).size)} productos`;
   $("#dvList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-dl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#dvList [data-dl]").forEach(b=>b.onclick=()=>{const l=dv.lect.find(z=>z.lid===b.dataset.dl);if(!l)return;

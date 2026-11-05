@@ -7,7 +7,7 @@
 --
 --  Quién hace qué (por ahora; después se podrá dar a otros usuarios desde 6 · Permisos):
 --    · Producción, Picking retail y Distribución CARGAN devoluciones (guía, factura, fecha, SKU, cantidad).
---    · Bodega RECEPCIONA: escanea lo que llega, sin ver lo declarado (recepción ciega).
+--    · Bodega RECEPCIONA: ve lo declarado (guía, factura, productos y cantidades) y acepta o corrige lo que llega.
 --    · El supervisor ve el cuadre devuelto vs recibido en 5 · Logística inversa.
 -- =====================================================================
 
@@ -40,7 +40,7 @@ create table if not exists public.cb_dev (
   actualizado  timestamptz not null default now(),
   enviado      timestamptz,                       -- quien devuelve la envió a bodega
   lect         jsonb not null default '[]'::jsonb, -- lo que declara quien devuelve
-  rec          jsonb not null default '[]'::jsonb, -- lo que escanea bodega
+  rec          jsonb not null default '[]'::jsonb, -- lo que bodega acepta como recibido
   rec_persona  text,
   rec_inicio   timestamptz,
   recibido     timestamptz,                       -- bodega terminó la recepción
@@ -84,14 +84,14 @@ end $$;
 
 -- Lo que ve cada celular fijo:
 --   quien devuelve: sus devoluciones de los últimos 30 días (con su detalle, para seguir o revisar);
---   bodega: las enviadas que falta recibir, más las que recibió hoy (sin las cantidades declaradas).
+--   bodega: las enviadas que falta recibir, más las que recibió hoy, con lo declarado para aceptarlo.
 create or replace function public.cb_dev_mis(p_puesto text, p_ses text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform cb_puesto_ok(p_puesto, p_ses);
   if p_puesto = 'bodega' then
     return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'origen', d.origen, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura,
-        'fecha', d.fecha, 'enviado', d.enviado, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
+        'fecha', d.fecha, 'nota', d.nota, 'enviado', d.enviado, 'lect', d.lect, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
       from cb_dev d where d.enviado is not null and d.finalizado is null and (d.recibido is null or d.recibido > now() - interval '18 hours')), '[]'::jsonb);
   end if;
   if p_puesto not in ('produccion','retail','distribucion') then return '[]'::jsonb; end if;
