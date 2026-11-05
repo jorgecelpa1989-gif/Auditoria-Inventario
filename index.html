@@ -226,7 +226,7 @@ nav.tabs .soon{font:600 10px var(--font);text-transform:uppercase;letter-spacing
 .dvRow+.dvRow{margin-top:8px}.dvRow .dd{flex:1;min-width:0}.dvRow .dd b{display:block}.dvRow .dd span{font-size:13px;color:var(--muted)}
 .dvGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .dvDocRO{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
-.dvDeclL{margin-top:6px}.dvDeclR{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}.dvDeclR+.dvDeclR{margin-top:8px}
+.dvDeclL{margin-top:6px}.dvDeclR{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}.dvDeclR+.dvDeclR{margin-top:8px}.dvDeclR.bad{border:2px solid var(--bad);background:var(--bad-bg)}
 #dvTbl tr[data-di]{cursor:pointer}#dvTbl tr[data-di]:hover td{background:var(--chip)}#dvTbl tr.sel td{background:var(--info-bg)}
 @media (min-width:901px){body:not(.op):not(.mov):not(.puesto):not(.locked) header.top .in{max-width:none;padding-left:26px}}
 body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{display:none!important}
@@ -2245,13 +2245,13 @@ const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||
    (queda anotado en unkOk para no volver a preguntar por el mismo código). */
 const unkOk=new Set();
 const calertOpen=()=>{const o=document.getElementById("calert");return !!(o&&!o.hidden)};
-function codeAlert(code,onFix,onKeep){
+function codeAlert(code,onFix,onKeep,o){o=o||{};
   let ov=document.getElementById("calert");
   if(!ov){ov=document.createElement("div");ov.id="calert";ov.className="calert";ov.setAttribute("role","alertdialog");ov.setAttribute("aria-modal","true");ov.setAttribute("aria-labelledby","caT");document.body.appendChild(ov)}
   ov.innerHTML=`<div class="cbox2"><div class="big">⚠️</div><h2 id="caT">Código no encontrado</h2>
     <p>El código <span class="code">${esc(code)}</span> <b>NO existe</b> en la lista de productos.</p>
-    <p class="small muted">Revisa que esté bien digitado antes de seguir.</p>
-    <div class="col"><button class="btn primary" id="caFix">Corregir código</button><button class="btn" id="caKeep">Registrar igual</button></div></div>`;
+    <p class="small muted">${o.msg||"Revisa que esté bien digitado antes de seguir."}</p>
+    <div class="col"><button class="btn primary" id="caFix">${o.fix||"Corregir código"}</button><button class="btn" id="caKeep">${o.keep||"Registrar igual"}</button></div></div>`;
   ov.hidden=false;audio.beep(false);
   const close=()=>{ov.hidden=true;ov.innerHTML=""};
   $("#caFix").onclick=()=>{close();if(onFix)onFix()};
@@ -4139,20 +4139,25 @@ function dvDeclRows(){
   const m=new Map();
   for(const l of dv.decl||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{k,cod:l.k||l.code,desc:l.desc||"",um:l.um||"",ce:l.ce||"",f:+l.f||1,D:0,R:0};r.D+=(+l.qty||0)*(+l.f||1);m.set(k,r)}
   for(const l of dv.lect||[]){const r=m.get(key(l.k||l.code));if(r)r.R+=(+l.qty||0)*(+l.f||1)}
-  return [...m.values()];
+  const hay=ptItems().length>0;
+  return [...m.values()].map(r=>Object.assign(r,{noM:hay&&!ptFind(r.cod)}));
 }
 const dvEnU=(r,base)=>r.ce&&r.f!==1?`${fmt2(base/r.f)} ${esc(plural(r.ce))} <span class="muted">(${fmt2(base)} ${esc(r.um)})</span>`:`${fmt2(base)}${r.um&&r.um!=="un"?" "+esc(r.um):""}`;
 function dvDeclRender(){
   const box=$("#dvDecl");if(!box||!dvRec())return;
-  const rows=dvDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D);
-  box.innerHTML=`<div class="row" style="margin-top:10px"><b>Lo declarado (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pend.length?`<button class="btn sm primary" id="dvAccAll">✓ Aceptar todo tal como viene</button>`:'<span class="pill p-ok">Todo aceptado</span>'}</div>
-    <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR"><div><div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · declarado: <b>${dvEnU(r,r.D)}</b></div>
+  const rows=dvDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D),pendOk=pend.filter(r=>!r.noM),pendNo=pend.filter(r=>r.noM);
+  box.innerHTML=`<div class="row" style="margin-top:10px"><b>Lo declarado (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pendOk.length?`<button class="btn sm primary" id="dvAccAll">✓ Aceptar todo tal como viene</button>`:pend.length?"":'<span class="pill p-ok">Todo aceptado</span>'}</div>
+    ${pendNo.length?`<div class="pending bad" style="margin-top:6px"><div class="d">⚠ ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} NO existe${pendNo.length===1?"":"n"} en la lista de productos</div><div class="small">Revísalo${pendNo.length===1?"":"s"} con quien devuelve. "Aceptar todo" no ${pendNo.length===1?"lo":"los"} incluye: acéptalo${pendNo.length===1?"":"s"} uno a uno solo si corresponde.</div></div>`:""}
+    <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR${r.noM?" bad":""}"><div>${r.noM?'<div class="small" style="color:var(--bad);font-weight:700">⚠ Este código NO existe en la lista de productos</div>':""}<div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · declarado: <b>${dvEnU(r,r.D)}</b></div>
       <div class="small">${r.R?`Recibido: <b>${dvEnU(r,r.R)}</b> ${ok?'<span class="pill p-ok">✓</span>':`<span class="pill ${dif<0?"p-bad":"p-warn"}">${dif<0?"faltan":"sobran"} ${dvEnU(r,Math.abs(dif))}</span>`}`:'<span class="muted">Sin aceptar</span>'}</div></div>
       <div class="row" style="gap:6px">${r.R+1e-9<r.D?`<button class="btn sm primary" data-acc="${esc(r.k)}">✓ Aceptar</button>`:""}<button class="btn sm" data-edt="${esc(r.k)}">Otra cantidad</button></div></div>`}).join("")||'<p class="muted" style="margin:0">La devolución no trae productos declarados.</p>'}</div>
     <p class="small muted" style="margin:6px 0 0">Si llegó algo que no está en la lista o una cantidad distinta, regístralo abajo con el producto y la cantidad real.</p>`;
   const acc=r=>{const falta=r.D-r.R;if(falta<=1e-9)return false;const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc,um:r.um,qty:+(falta/r.f).toFixed(6),user:PST.persona||"",t:new Date().toISOString(),acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}dv.lect.push(l);return true};
-  $$("#dvDecl [data-acc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.acc);if(r&&acc(r)){dvDirty();audio.beep(true);dvRender();toast("✓ Aceptado: "+(r.desc||r.cod))}});
-  const all=$("#dvAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pend.length)} producto${pend.length===1?"":"s"} con la cantidad declarada.`,()=>{let n=0;for(const r of pend)if(acc(r))n++;if(n){dvDirty();audio.beep(true);dvRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#dvConfirm");
+  const ok1=r=>{if(acc(r)){dvDirty();audio.beep(true);dvRender();toast("✓ Aceptado: "+(r.desc||r.cod))}};
+  $$("#dvDecl [data-acc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.acc);if(!r)return;
+    if(r.noM)return codeAlert(r.cod,()=>{},()=>ok1(r),{msg:"Quien devuelve lo declaró, pero no está en el maestro. Acéptalo solo si el producto llegó y el código está bien.",fix:"No aceptar",keep:"Aceptar igual"});
+    ok1(r)});
+  const all=$("#dvAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pendOk.length)} producto${pendOk.length===1?"":"s"} con la cantidad declarada${pendNo.length?` (no incluye ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} fuera del maestro)`:""}.`,()=>{let n=0;for(const r of pendOk)if(acc(r))n++;if(n){dvDirty();audio.beep(true);dvRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#dvConfirm");
   $$("#dvDecl [data-edt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.edt);if(!r)return;
     const quit=dv.lect.filter(l=>key(l.k||l.code)===r.k);if(quit.length){dv.lect=dv.lect.filter(l=>key(l.k||l.code)!==r.k);dvDirty();dvRender()}
     $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
