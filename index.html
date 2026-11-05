@@ -222,10 +222,21 @@ nav.tabs .soon{font:600 10px var(--font);text-transform:uppercase;letter-spacing
 .navScrim{position:fixed;inset:0;z-index:24;background:rgba(38,70,92,.4)}
 .navScrim[hidden]{display:none}
 .soonCard{border-style:dashed}
+.ptGrid{display:grid;grid-template-columns:minmax(180px,215px) minmax(0,1fr);gap:14px;align-items:start}.ptLeft{display:flex;flex-direction:column;gap:14px}.ptLeft .card{margin:0}
+.ptSidesCol{display:flex;flex-direction:column;gap:8px}
+#ptRes th,#ptRes td{padding:5px 6px;font-size:13px}#ptRes th{white-space:normal;vertical-align:bottom}#ptRes td.desc{min-width:140px}#ptRes .pill{white-space:normal;display:inline-block;max-width:118px;line-height:1.25;text-align:center}#ptRes td:last-child{min-width:84px}
+@media (max-width:900px){.ptGrid{grid-template-columns:1fr}}
 .dvRow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
 .dvRow+.dvRow{margin-top:8px}.dvRow .dd{flex:1;min-width:0}.dvRow .dd b{display:block}.dvRow .dd span{font-size:13px;color:var(--muted)}
 .dvGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .dvDocRO{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.uRow{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;background:var(--panel)}.uRow+.uRow{margin-top:8px}.uRow.off{opacity:.6}
+.uPerm{display:flex;flex-wrap:wrap;gap:4px}.uPerm span{font-size:12px;background:var(--chip);border-radius:9px;padding:1px 8px}
+.uEd{border:2px solid var(--primary);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;margin-bottom:10px;background:var(--info-bg)}
+.uEd fieldset{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0;display:flex;flex-wrap:wrap;gap:6px 14px;background:var(--panel)}.uEd legend{font-size:12px;font-weight:700;color:var(--muted);padding:0 4px}
+.uEd fieldset label{display:flex;gap:6px;align-items:center;font-size:14px}
+.lbH{margin:12px 0 6px;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.selSm{font:600 13px var(--font);padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);max-width:210px}
 .dvDeclL{margin-top:6px}.dvDeclR{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}.dvDeclR+.dvDeclR{margin-top:8px}.dvDeclR.bad{border:2px solid var(--bad);background:var(--bad-bg)}
 #dvTbl tr[data-di]{cursor:pointer}#dvTbl tr[data-di]:hover td{background:var(--chip)}#dvTbl tr.sel td{background:var(--info-bg)}
 @media (min-width:901px){body:not(.op):not(.mov):not(.puesto):not(.locked) header.top .in{max-width:none;padding-left:26px}}
@@ -323,16 +334,11 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
       <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
       <div class="small" id="rotRes"></div></details>
-    <label class="small" id="cPuWrap" style="display:flex;gap:6px;align-items:center" hidden><input type="checkbox" id="cPuesto"> Asignar también al celular fijo de bodega (le aparece en su menú)</label>
+    <label class="f small" id="cPuWrap" style="max-width:420px" hidden>Asignar también a un usuario (le aparece en su menú)<select id="cPuesto"><option value="">— A nadie —</option></select></label>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
   </div>
 
-  <div class="card">
-    <h2>Conteos creados</h2>
-    <div class="tbl"><table id="conteosTbl"></table></div>
-    <div id="ctConfirm"></div>
-  </div>
 </section>
 
 <!-- ============ 2 CONTAR ============ -->
@@ -458,7 +464,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <label class="f">OT / referencia (opcional)<input id="mpRef" placeholder="Ej: OT 4512"></label>
       <label class="f supOnly">Vigencia del link<select id="mpVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label>
     </div>
-    <label class="small supOnly" id="mpPuWrap" style="display:flex;gap:6px;align-items:center" hidden><input type="checkbox" id="mpPuestos" checked> Enviar a los celulares fijos de bodega y producción</label>
+    <label class="small supOnly" id="mpPuWrap" style="display:flex;gap:6px;align-items:center" hidden><input type="checkbox" id="mpPuestos" checked> Enviar a los usuarios con permiso de MP (bodega entrega, producción recibe)</label>
     <button class="btn accent" id="btnSolGen" style="font-size:15px;padding:11px 16px;justify-content:center">Generar solicitud</button>
     <button class="linkBtn small supOnly" id="btnMpSinSol">Crear entrega sin solicitud</button>
     <span class="small muted" id="mpMsg"></span>
@@ -688,33 +694,23 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
 </section>
 <!-- ============ ENTREGA Y RECEPCIÓN DE PT (supervisor y jefe de producción) ============ -->
 <section class="view" id="v-pt" hidden>
- <div class="mpGrid">
-  <div class="mpMain">
-  <div class="notice" id="ptNote" hidden></div>
+ <div class="notice" id="ptNote" hidden></div>
+ <div class="ptGrid">
+  <div class="ptLeft">
+    <div class="card"><div class="eyebrow">Usuarios</div><div class="ptSidesCol" id="ptSides"></div></div>
+    <div class="card"><div class="eyebrow">Cierres de turno</div><div id="ptCierres" class="small"></div></div>
+  </div>
+  <div class="ptMain">
   <div class="card">
-    <div class="eyebrow">Producto terminado</div>
+    <div class="eyebrow">4 · Recepción PT</div>
     <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción (bodega y retail)</h2><span class="sep"></span>
       <select id="ptDesde" style="flex:0 1 190px"><option value="turno">Turno actual</option><option value="hoy" selected>Hoy</option><option value="24">Últimas 24 horas</option><option value="168">Últimos 7 días</option></select>
       <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button></div>
-    <div class="mpSides" id="ptSides"></div>
     <div class="kpis" id="ptKpis"></div>
     <div class="row"><div class="chips" id="ptChips"></div><span class="sep"></span><input id="ptQ" placeholder="Buscar pallet, código o descripción" style="flex:0 1 280px"></div>
     <div class="tbl" style="max-height:none"><table id="ptRes"></table></div>
-    <div class="small muted">Los pallets con número se comparan uno a uno. Cantidades en la unidad del ERP; con equivalencia, debajo en esa unidad.</div>
-    <div id="ptSnBox" hidden>
-      <h3 style="margin:8px 0 4px;font-size:15px">Pallets sin número · cuadre por producto</h3>
-      <div class="small muted" style="margin-bottom:6px">Lo registrado sin N° de pallet se compara por SKU: total entregado por producción contra total recibido por bodega y retail en el período.</div>
-      <div class="tbl" style="max-height:none"><table id="ptSn"></table></div>
-    </div>
-    <details><summary class="small" style="cursor:pointer;font-weight:600">Resumen por producto</summary>
-      <div class="tbl" style="margin-top:8px"><table id="ptProd"></table></div></details>
+    <div class="small muted">Se ingresan bultos (sacos, rollos, cajas…): la columna Conversión muestra su equivalente en la unidad del ERP. Los pallets con número se comparan uno a uno; los sin número, por producto (fila "Sin N°").</div>
   </div>
-  </div>
-  <div class="mpRight">
-    <div class="card">
-      <div class="eyebrow">Cierres de turno</div>
-      <div id="ptCierres" class="small"></div>
-    </div>
   </div>
  </div>
 </section>
@@ -727,10 +723,27 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>6 · Permisos</b>.</p>
     <div class="notice" id="dvNote" hidden></div>
     <div class="row" style="margin-top:4px"><div class="chips" id="dvChips"></div><span class="sep"></span>
-      <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option><option value="produccion">Producción</option><option value="retail">Picking retail</option><option value="distribucion">Distribución</option></select></label>
+      <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option></select></label>
       <label class="f" style="flex:1 1 200px">Buscar<input id="dvQ" placeholder="Guía, factura, persona o SKU"></label></div>
     <div class="tbl" style="max-height:460px"><table id="dvTbl"></table></div>
   </div>
+  <details class="card mpFold" id="dpCard" open hidden>
+    <summary><b>＋ Nueva devolución desde el panel</b> <span class="small muted" id="dpInfo"></span></summary>
+    <p class="small" style="margin:8px 0 0">Para cargar una devolución desde este PC. Se ingresan <b>bultos</b> (sacos, rollos, cajas…) y se ve su conversión. Al enviarla, el celular de bodega la ve al instante para recibirla.</p>
+    <div class="dvGrid"><label class="f">Área / origen<input id="dpArea" list="uAreas2" placeholder="Ej: Distribución" autocomplete="off"></label>
+      <label class="f">Quien devuelve<input id="dpPers" placeholder="Nombre" autocomplete="off" autocapitalize="characters"></label>
+      <label class="f">N° de guía<input id="dpGuia" autocomplete="off" autocapitalize="characters"></label>
+      <label class="f">N° de factura<input id="dpFact" autocomplete="off" autocapitalize="characters"></label>
+      <label class="f">Fecha de la devolución<input id="dpFecha" type="date"></label></div>
+    <datalist id="uAreas2"><option value="Producción"><option value="Picking retail"><option value="Distribución"><option value="Clientes"><option value="Compras"></datalist>
+    <label class="f">Observación (opcional)<input id="dpNota" maxlength="300" placeholder="Ej: cliente, motivo o estado del material" autocomplete="off"></label>
+    <div class="row" style="align-items:flex-end"><label class="f" style="flex:1 1 260px">Producto (código, código de barras o nombre)<input id="dpScan" autocomplete="off" autocapitalize="characters" placeholder="Escanea o escribe y Enter"></label>
+      <label class="f" style="flex:0 1 160px"><span id="dpQtyL">Cantidad</span><input id="dpQty" inputmode="decimal" placeholder="0" autocomplete="off"></label><button class="btn primary" id="dpAdd">Agregar</button></div>
+    <div class="small" id="dpHint"></div><div class="sugg" id="dpSugg" hidden></div><div class="small muted" id="dpCat"></div>
+    <div class="tbl" style="max-height:320px"><table id="dpList"></table></div>
+    <div class="row"><button class="btn accent" id="dpSend">Enviar a bodega…</button></div>
+    <div id="dpConfirm"></div>
+  </details>
   <div class="card" id="dvDet" hidden>
     <div class="row"><div class="eyebrow">Cuadre devuelto vs recibido</div><span class="sep"></span><button class="btn sm" id="dvX">Cerrar vista</button></div>
     <h2 id="dvDetT" style="margin:0"></h2>
@@ -747,7 +760,23 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card">
     <div class="eyebrow">6 · Permisos</div>
     <h2>Accesos, claves y celulares</h2>
-    <p class="small" style="margin:0">Todo lo que da acceso a la app, en un solo lugar: la conexión con Supabase y tu clave de supervisor, los celulares fijos y el acceso del jefe de producción. Para liberar el celular de un contador, usa el botón <b>🔓 Liberar celular</b> en el conteo (1 · Panel) o en la entrega (2 · Entrega MP).</p>
+    <p class="small" style="margin:0">Todo lo que da acceso a la app, en un solo lugar: los <b>usuarios</b> (PC y celulares, con sus permisos), <b>liberar o bloquear</b> cualquier acceso entregado (usuarios, links de conteo y de entrega de MP), la conexión con Supabase y tu clave de supervisor, y el acceso del jefe de producción.</p>
+  </div>
+  <div class="card" id="uEdCard">
+    <div class="eyebrow">Crear usuario</div>
+    <div id="uEd"></div>
+  </div>
+  <details class="card mpFold" id="puAdm" open>
+    <summary><b>Usuarios</b> <span class="small muted" id="puAdmSum"></span></summary>
+    <p class="small" style="margin:8px 0 0">Crea un usuario para cada persona o equipo (PC o celular) y marca lo que puede hacer. Le mandas su link: queda amarrado al primer equipo que lo abre (uno a la vez). Si cambia de equipo, toca <b>Nuevo acceso</b>. Los celulares fijos de bodega, producción, retail y distribución ya son usuarios: sus links siguen funcionando.</p>
+    <div id="puAdmBox"></div>
+  </details>
+
+  <div class="card" id="lbCard">
+    <div class="row"><div class="eyebrow">Liberar o bloquear accesos</div><span class="sep"></span><span class="small muted" id="lbAt"></span><button class="btn sm" id="lbRef">Actualizar</button></div>
+    <p class="small" style="margin:0"><b>Liberar</b>: el mismo link se puede abrir en otro equipo (por ejemplo, si cambió de celular o se bloqueó un iPhone). <b>Bloquear</b>: nadie puede usar ese acceso hasta que lo desbloquees.</p>
+    <div id="lbBox"></div>
+    <div id="lbConfirm"></div>
   </div>
   <div class="card" id="sbCard">
     <div class="row"><div class="eyebrow">Configuración (una sola vez) · recomendado</div><span class="sep"></span><span class="pill" id="sbState"></span></div>
@@ -1885,6 +1914,471 @@ grant execute on function
   public.cb_dev_recibir(text, text, uuid, text, jsonb, boolean),
   public.cb_dev_listar(text, timestamptz), public.cb_dev_cerrar(text, uuid), public.cb_dev_eliminar(text, uuid)
 to anon, authenticated;
+
+-- =====================================================================
+--  CONTROL DE OPERACIONES · Grupo Vector
+--  Actualización 08: USUARIOS CON PERMISOS
+--  Pegar completo en SQL Editor de Supabase y tocar RUN (una sola vez).
+--  No borra datos. Se puede ejecutar más de una vez. Requiere la actualización 07.
+--  Compatible con la versión anterior de la app: los 4 celulares fijos (bodega, produccion, retail,
+--  distribucion) pasan a ser usuarios con los mismos permisos que tenían y sus links siguen funcionando.
+--
+--  Permisos:
+--    conteo        recibir los conteos de inventario que el supervisor le asigna
+--    mp_entregar   entregar materia prima      · mp_recibir   recibir materia prima      (uno u otro)
+--    pt_entregar   entregar producto terminado · pt_recibir   recibir PT en bodega
+--    pt_retirar    retirar PT para despacho (picking retail)                          (uno de los tres)
+--    dev_cargar    cargar devoluciones         · dev_recibir  recepcionar devoluciones
+-- =====================================================================
+
+create extension if not exists pgcrypto with schema extensions;
+
+-- ---------- Usuarios: la tabla de celulares fijos gana nombre, área, permisos y estado ----------
+alter table public.cb_puesto drop constraint if exists cb_puesto_id_check;
+alter table public.cb_puesto add column if not exists nombre   text;
+alter table public.cb_puesto add column if not exists area     text;
+alter table public.cb_puesto add column if not exists permisos text[] not null default '{}';
+alter table public.cb_puesto add column if not exists activo   boolean not null default true;
+alter table public.cb_puesto add constraint cb_puesto_id_check check (id ~ '^[a-z0-9_]{2,40}$');
+
+create or replace function public.cb_u_defecto(p_id text) returns text[]
+language sql immutable as $$
+  select case p_id
+    when 'bodega'       then array['conteo','mp_entregar','pt_recibir','dev_recibir']
+    when 'produccion'   then array['mp_recibir','pt_entregar','dev_cargar']
+    when 'retail'       then array['pt_retirar','dev_cargar']
+    when 'distribucion' then array['dev_cargar']
+    else array[]::text[] end
+$$;
+create or replace function public.cb_u_area_defecto(p_id text) returns text
+language sql immutable as $$
+  select case p_id when 'bodega' then 'Bodega' when 'produccion' then 'Producción'
+    when 'retail' then 'Picking retail' when 'distribucion' then 'Distribución' else null end
+$$;
+
+-- Los celulares fijos que ya existen quedan como usuarios (solo la primera vez: nombre vacío).
+update public.cb_puesto set permisos = public.cb_u_defecto(id), area = coalesce(area, public.cb_u_area_defecto(id)),
+       nombre = 'Celular de ' || coalesce(public.cb_u_area_defecto(id), id)
+ where nombre is null;
+
+create or replace function public.cb_u_tiene(p_id text, p_perm text) returns boolean
+language sql stable security definer set search_path = public, extensions as $$
+  select exists (select 1 from cb_puesto where id = p_id and activo and p_perm = any(permisos))
+$$;
+
+-- Lado de producto terminado del usuario: E entrega (producción), R recibe (bodega), D retira para despacho (retail).
+create or replace function public.cb_u_lado_pt(p_id text) returns text
+language sql stable security definer set search_path = public, extensions as $$
+  select case when 'pt_entregar' = any(permisos) then 'E' when 'pt_retirar' = any(permisos) then 'D'
+              when 'pt_recibir' = any(permisos) then 'R' end
+    from cb_puesto where id = p_id and activo
+$$;
+
+create or replace function public.cb_puesto_ok(p_puesto text, p_ses text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a cb_puesto;
+begin
+  select * into a from cb_puesto where id = p_puesto;
+  if not found or a.sesion_hash is null or a.sesion_hash <> extensions.crypt(coalesce(p_ses,''), a.sesion_hash) then
+    perform pg_sleep(0.5); raise exception 'puesto_invalido';
+  end if;
+  if not a.activo then raise exception 'usuario_inactivo'; end if;
+  update cb_puesto set visto = now() where id = p_puesto;
+end $$;
+
+create or replace function public.cb_puesto_vincular(p_puesto text, p_token text, p_equipo text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare a cb_puesto; v_ses text := encode(extensions.gen_random_bytes(24), 'hex');
+begin
+  select * into a from cb_puesto where id = p_puesto for update;
+  if not found or a.hash <> extensions.crypt(coalesce(p_token,''), a.hash) then perform pg_sleep(0.5); raise exception 'puesto_invalido'; end if;
+  if not a.activo then raise exception 'usuario_inactivo'; end if;
+  if a.usado is not null then raise exception 'puesto_usado'; end if;
+  update cb_puesto set usado = now(), visto = now(), equipo = left(p_equipo, 120), sesion_hash = extensions.crypt(v_ses, extensions.gen_salt('bf')) where id = p_puesto;
+  return v_ses;
+end $$;
+
+-- Nuevo acceso (link) para un usuario: el equipo anterior queda desconectado.
+create or replace function public.cb_puesto_link(p_clave text, p_puesto text, p_token text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if coalesce(p_puesto,'') !~ '^[a-z0-9_]{2,40}$' then raise exception 'datos_invalidos'; end if;
+  if length(coalesce(p_token,'')) < 16 then raise exception 'clave_corta'; end if;
+  if exists (select 1 from cb_puesto where id = p_puesto) then
+    update cb_puesto set hash = extensions.crypt(p_token, extensions.gen_salt('bf')), creado = now(), usado = null, sesion_hash = null, equipo = null, visto = null
+     where id = p_puesto;
+  elsif p_puesto in ('bodega','produccion','retail','distribucion') then
+    insert into cb_puesto(id, hash, nombre, area, permisos)
+    values (p_puesto, extensions.crypt(p_token, extensions.gen_salt('bf')), 'Celular de ' || cb_u_area_defecto(p_puesto), cb_u_area_defecto(p_puesto), cb_u_defecto(p_puesto));
+  else
+    raise exception 'no_existe';
+  end if;
+end $$;
+
+-- Supervisor: lista de usuarios con su estado.
+create or replace function public.cb_puesto_estado(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_object_agg(id, jsonb_build_object('creado', creado, 'usado', usado, 'equipo', equipo, 'visto', visto, 'persona', persona,
+      'nombre', nombre, 'area', area, 'permisos', to_jsonb(permisos), 'activo', activo)) from cb_puesto), '{}'::jsonb);
+end $$;
+
+create or replace function public.cb_u_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_agg(jsonb_build_object('id', id, 'nombre', nombre, 'area', area, 'permisos', to_jsonb(permisos), 'activo', activo,
+      'creado', creado, 'usado', usado, 'equipo', equipo, 'visto', visto, 'persona', persona) order by creado) from cb_puesto), '[]'::jsonb);
+end $$;
+
+-- Supervisor: crear (p_id vacío) o editar un usuario.
+create or replace function public.cb_u_guardar(p_clave text, p_id text, p_nombre text, p_area text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[];
+begin
+  perform cb_check(p_clave);
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('conteo','mp_entregar','mp_recibir','pt_entregar','pt_recibir','pt_retirar','dev_cargar','dev_recibir')) then raise exception 'datos_invalidos'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'mp\_%') > 1 then raise exception 'mp_uno'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'pt\_%') > 1 then raise exception 'pt_uno'; end if;
+  if v_id is null then
+    v_id := 'u_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_puesto(id, hash, nombre, area, permisos, activo)
+    values (v_id, extensions.crypt(encode(extensions.gen_random_bytes(16), 'hex'), extensions.gen_salt('bf')), left(trim(p_nombre), 80), left(trim(coalesce(p_area,'')), 60), v_perm, coalesce(p_activo, true));
+  else
+    update cb_puesto set nombre = left(trim(p_nombre), 80), area = left(trim(coalesce(p_area,'')), 60), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
+
+create or replace function public.cb_u_eliminar(p_clave text, p_id text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_conteos set puesto = null where puesto = p_id;
+  delete from cb_puesto where id = p_id;
+end $$;
+
+-- Tareas del usuario según sus permisos (y sus datos, para armar su menú).
+create or replace function public.cb_puesto_tareas(p_puesto text, p_ses text, p_persona text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare a cb_puesto; v_rol text;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_persona is not null and p_persona <> '' then update cb_puesto set persona = left(p_persona, 80) where id = p_puesto; end if;
+  select * into a from cb_puesto where id = p_puesto;
+  v_rol := case when 'mp_entregar' = any(a.permisos) then 'E' when 'mp_recibir' = any(a.permisos) then 'R' end;
+  return jsonb_build_object(
+    'yo', jsonb_build_object('id', a.id, 'nombre', a.nombre, 'area', a.area, 'permisos', to_jsonb(a.permisos)),
+    'mp', case when v_rol is null then '[]'::jsonb else coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'nombre', m.nombre, 'ref', m.meta->>'ref', 'por', m.meta->>'por', 'token', m.link_token,
+              'creado', m.creado, 'vence', m.vence, 'productos', jsonb_array_length(coalesce(m.meta->'sol','[]'::jsonb)),
+              'terminado', (select l.terminado from cb_mov_lado l where l.mov = m.id and l.rol = v_rol)) order by m.creado)
+            from cb_mov m where coalesce(m.meta->>'estado','activa') = 'activa' and m.meta->>'puestos' = 'true' and m.finalizado is null
+              and m.link_token is not null and (m.vence is null or m.vence > now())), '[]'::jsonb) end,
+    'conteos', case when 'conteo' = any(a.permisos) then coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'nombre', c.nombre, 'token', c.link_token,
+              'creado', c.creado, 'vence', c.vence, 'productos', jsonb_array_length(c.items), 'terminado', c.terminado) order by c.creado)
+            from cb_conteos c where c.puesto = p_puesto and c.finalizado is null and c.link_token is not null and (c.vence is null or c.vence > now())), '[]'::jsonb)
+            else '[]'::jsonb end,
+    'pt_cierre', (select max(t) from cb_pt_cierre where puesto = p_puesto));
+end $$;
+
+-- Asignar un conteo a un usuario con permiso de conteo ('' = quitar).
+create or replace function public.cb_conteo_asignar(p_clave text, p_id uuid, p_puesto text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if nullif(p_puesto, '') is not null and not cb_u_tiene(p_puesto, 'conteo') then raise exception 'sin_permiso'; end if;
+  update cb_conteos set puesto = nullif(p_puesto, '') where id = p_id;
+end $$;
+
+-- ---------- Producto terminado: el lado (E/R/D) sale del permiso del usuario ----------
+alter table public.cb_pt drop constraint if exists cb_pt_puesto_check;
+alter table public.cb_pt add column if not exists lado text;
+update public.cb_pt set lado = case puesto when 'produccion' then 'E' when 'retail' then 'D' else 'R' end where lado is null;
+alter table public.cb_pt_cierre add column if not exists lado text;
+update public.cb_pt_cierre set lado = case puesto when 'produccion' then 'E' when 'retail' then 'D' else 'R' end where lado is null;
+
+create or replace function public.cb_pt_registrar(p_puesto text, p_ses text, p_data jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_lado text;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  v_lado := cb_u_lado_pt(p_puesto);
+  if v_lado is null then raise exception 'sin_permiso'; end if;
+  if coalesce(p_data->>'lid','') = '' or coalesce(p_data->>'pallet','') = '' then raise exception 'datos_invalidos'; end if;
+  insert into cb_pt(lid, puesto, pallet, data, lado) values (p_data->>'lid', p_puesto, upper(left(p_data->>'pallet', 60)), p_data, v_lado)
+  on conflict (lid) do update set pallet = excluded.pallet, data = excluded.data where cb_pt.puesto = p_puesto;
+end $$;
+
+create or replace function public.cb_pt_buscar(p_puesto text, p_ses text, p_pallet text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  return (select data from cb_pt where lado = 'E' and pallet = upper(p_pallet) and t > now() - interval '30 days' order by t desc limit 1);
+end $$;
+
+create or replace function public.cb_pt_cerrar(p_puesto text, p_ses text, p_persona text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  insert into cb_pt_cierre(puesto, persona, lado) values (p_puesto, left(p_persona, 80), cb_u_lado_pt(p_puesto));
+end $$;
+
+-- El panel de PT sigue viendo tres grupos (produccion entrega, bodega recibe, retail retira) aunque haya varios usuarios.
+create or replace function public.cb_pt_listar(p_clave text, p_desde timestamptz) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return jsonb_build_object(
+    'pallets', coalesce((select jsonb_agg(data || jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'pallet', pallet, 'rt', t) order by t) from cb_pt where t >= p_desde), '[]'::jsonb),
+    'cierres', coalesce((select jsonb_agg(jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'persona', persona, 't', t) order by t) from cb_pt_cierre where t >= p_desde - interval '1 day'), '[]'::jsonb),
+    'puestos', jsonb_build_object(
+        'produccion', (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_entregar' = any(permisos)),
+        'bodega',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_recibir' = any(permisos)),
+        'retail',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_retirar' = any(permisos))));
+end $$;
+
+-- ---------- Devoluciones: permisos dev_cargar / dev_recibir y el área de quien devuelve ----------
+alter table public.cb_dev drop constraint if exists cb_dev_origen_check;
+alter table public.cb_dev add column if not exists area text;
+update public.cb_dev set area = coalesce(cb_u_area_defecto(origen), origen) where area is null;
+
+create or replace function public.cb_dev_guardar(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_lect jsonb, p_enviar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev; v_id uuid := p_id; v_fecha date;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'dev_cargar') then raise exception 'sin_permiso'; end if;
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if p_enviar then
+    if coalesce(trim(p_doc->>'guia'),'') = '' then raise exception 'falta_guia'; end if;
+    if coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_factura'; end if;
+    if v_fecha is null then raise exception 'fecha_invalida'; end if;
+    if jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  end if;
+  if v_id is not null then
+    select * into d from cb_dev where id = v_id for update;
+    if not found then v_id := null;
+    elsif d.origen <> p_puesto then raise exception 'sin_permiso';
+    elsif d.rec_inicio is not null or d.finalizado is not null then raise exception 'en_recepcion';
+    end if;
+  end if;
+  if v_id is null then
+    insert into cb_dev(id, origen, area) values (coalesce(p_id, gen_random_uuid()), p_puesto, (select coalesce(nullif(area,''), nombre) from cb_puesto where id = p_puesto)) returning id into v_id;
+  end if;
+  update cb_dev set persona = left(coalesce(p_doc->>'persona', persona), 80), guia = left(trim(p_doc->>'guia'), 40),
+         factura = left(trim(p_doc->>'factura'), 40), fecha = v_fecha, nota = left(p_doc->>'nota', 300),
+         lect = p_lect, actualizado = now(), enviado = case when p_enviar then coalesce(enviado, now()) else enviado end
+   where id = v_id;
+  return jsonb_build_object('id', v_id, 'enviado', (select enviado from cb_dev where id = v_id));
+end $$;
+
+-- p_modo: 'carga' (sus devoluciones) o 'rec' (por recibir). Sin modo: recibe si tiene el permiso de recibir.
+drop function if exists public.cb_dev_mis(text, text);
+create or replace function public.cb_dev_mis(p_puesto text, p_ses text, p_modo text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_rec boolean;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  v_rec := case p_modo when 'rec' then true when 'carga' then false else cb_u_tiene(p_puesto, 'dev_recibir') end;
+  if v_rec then
+    if not cb_u_tiene(p_puesto, 'dev_recibir') then return '[]'::jsonb; end if;
+    return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'origen', d.origen, 'area', d.area, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura,
+        'fecha', d.fecha, 'nota', d.nota, 'enviado', d.enviado, 'lect', d.lect, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
+      from cb_dev d where d.enviado is not null and d.finalizado is null and (d.recibido is null or d.recibido > now() - interval '18 hours')), '[]'::jsonb);
+  end if;
+  if not cb_u_tiene(p_puesto, 'dev_cargar') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'area', d.area, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura, 'fecha', d.fecha, 'nota', d.nota,
+      'creado', d.creado, 'enviado', d.enviado, 'lect', d.lect, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido, 'finalizado', d.finalizado) order by d.creado desc)
+    from cb_dev d where d.origen = p_puesto and d.creado > now() - interval '30 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_dev_recibir(p_puesto text, p_ses text, p_id uuid, p_persona text, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'dev_recibir') then raise exception 'sin_permiso'; end if;
+  if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
+  select * into d from cb_dev where id = p_id for update;
+  if not found or d.enviado is null then raise exception 'no_existe'; end if;
+  if d.finalizado is not null then raise exception 'finalizado'; end if;
+  if d.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p_terminar and jsonb_array_length(p_rec) = 0 then raise exception 'sin_productos'; end if;
+  update cb_dev set rec = p_rec, rec_persona = left(p_persona, 80), rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end);
+end $$;
+
+-- ---------- Permisos de ejecución ----------
+revoke execute on function public.cb_u_defecto(text), public.cb_u_area_defecto(text), public.cb_u_tiene(text, text), public.cb_u_lado_pt(text)
+  from public, anon, authenticated;
+grant execute on function
+  public.cb_puesto_link(text, text, text), public.cb_puesto_estado(text), public.cb_puesto_vincular(text, text, text),
+  public.cb_u_listar(text), public.cb_u_guardar(text, text, text, text, jsonb, boolean), public.cb_u_eliminar(text, text),
+  public.cb_puesto_tareas(text, text, text), public.cb_conteo_asignar(text, uuid, text),
+  public.cb_pt_registrar(text, text, jsonb), public.cb_pt_buscar(text, text, text), public.cb_pt_cerrar(text, text, text), public.cb_pt_listar(text, timestamptz),
+  public.cb_dev_guardar(text, text, uuid, jsonb, jsonb, boolean), public.cb_dev_mis(text, text, text), public.cb_dev_recibir(text, text, uuid, text, jsonb, boolean)
+to anon, authenticated;
+
+-- =====================================================================
+--  08 (continuación): LIBERAR O BLOQUEAR ACCESOS + DEVOLUCIÓN CREADA DESDE EL PANEL
+--  · Usuario: liberar = su mismo link se puede abrir en otro equipo; bloquear = desactivar.
+--  · Link de conteo y lado de Entrega MP: bloquear = nadie puede abrirlo ni enviar hasta desbloquear.
+-- =====================================================================
+
+-- Usuario: soltar el equipo vinculado sin cambiar su link.
+create or replace function public.cb_u_liberar(p_clave text, p_id text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_puesto set usado = null, sesion_hash = null, equipo = null where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+-- Link de conteo: bloquear (p_si) o desbloquear.
+create or replace function public.cb_bloquear(p_clave text, p_id uuid, p_si boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_si then update cb_conteos set device = '__bloqueado__', secret_hash = null where id = p_id;
+  else update cb_conteos set device = null, secret_hash = null where id = p_id and device = '__bloqueado__'; end if;
+end $$;
+
+create or replace function public.cb_abrir(p_id uuid, p_token text, p_device text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos; v_secret text := encode(extensions.gen_random_bytes(16), 'hex');
+begin
+  select * into c from cb_conteos where id = p_id for update;
+  if not found or c.token_hash <> extensions.crypt(coalesce(p_token,''), c.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if c.finalizado is not null then raise exception 'finalizado'; end if;
+  if c.vence is not null and c.vence < now() then raise exception 'vencido'; end if;
+  if c.device = '__bloqueado__' then raise exception 'bloqueado'; end if;
+  if c.device is not null and c.device <> p_device then raise exception 'usado'; end if;
+  update cb_conteos set device = p_device, secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')),
+         abierto = coalesce(abierto, now()) where id = p_id;
+  return jsonb_build_object('nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'items', c.items, 'meta', c.meta, 'secret', v_secret,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_lecturas where conteo = p_id), '[]'::jsonb));
+end $$;
+
+create or replace function public.cb_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'finalizado', c.finalizado,
+      'abierto', c.abierto, 'contador', c.contador, 'ultimo_envio', c.ultimo_envio, 'n_lecturas', c.n_lecturas,
+      'visto', c.visto, 'terminado', c.terminado, 'puesto', c.puesto, 'asignable', c.link_token is not null,
+      'libre', c.device is null, 'bloqueado', c.device = '__bloqueado__', 'token', c.link_token,
+      'productos', jsonb_array_length(c.items),
+      'contados', (select count(distinct l.data->>'k') from cb_lecturas l where l.conteo = c.id)
+    ) order by c.creado desc)
+    from cb_conteos c where c.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+-- Lado de Entrega MP: bloquear (p_si) o desbloquear.
+create or replace function public.cb_mov_bloquear(p_clave text, p_id uuid, p_rol text, p_si boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if p_si then
+    insert into cb_mov_lado(mov, rol, device, secret_hash) values (p_id, p_rol, '__bloqueado__', extensions.crypt(encode(extensions.gen_random_bytes(16),'hex'), extensions.gen_salt('bf')))
+    on conflict (mov, rol) do update set device = '__bloqueado__', secret_hash = excluded.secret_hash;
+  else
+    delete from cb_mov_lado where mov = p_id and rol = p_rol and device = '__bloqueado__';
+  end if;
+end $$;
+
+create or replace function public.cb_mov_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'finalizado', m.finalizado, 'meta', m.meta, 'token', case when r = 'admin' then m.link_token end,
+      'lados', coalesce((select jsonb_object_agg(l.rol, jsonb_build_object(
+          'persona', l.persona, 'abierto', l.abierto, 'visto', l.visto, 'terminado', l.terminado,
+          'ultimo_envio', l.ultimo_envio, 'n_lecturas', l.n_lecturas, 'bloqueado', l.device = '__bloqueado__')) from cb_mov_lado l where l.mov = m.id), '{}'::jsonb)
+    ) order by m.creado desc)
+    from cb_mov m where m.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_abrir(p_id uuid, p_token text, p_device text, p_rol text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; l cb_mov_lado; v_secret text := encode(extensions.gen_random_bytes(16), 'hex'); v_mio text; v_stock jsonb; v_at timestamptz;
+begin
+  select * into m from cb_mov where id = p_id;
+  if not found or m.token_hash <> extensions.crypt(coalesce(p_token,''), m.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if coalesce(m.meta ->> 'estado', 'activa') = 'solicitada' then perform pg_sleep(0.5); raise exception 'no_existe'; end if;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() then raise exception 'vencido'; end if;
+  select rol into v_mio from cb_mov_lado where mov = p_id and device = p_device limit 1;
+  if p_rol is null then
+    return jsonb_build_object('nombre', m.nombre, 'meta', m.meta, 'mio', v_mio,
+      'tomados', coalesce((select jsonb_object_agg(rol, coalesce(persona,'')) from cb_mov_lado where mov = p_id), '{}'::jsonb));
+  end if;
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if v_mio is not null and v_mio <> p_rol then raise exception 'otro_rol'; end if;
+  select * into l from cb_mov_lado where mov = p_id and rol = p_rol for update;
+  if found and l.device = '__bloqueado__' then raise exception 'bloqueado'; end if;
+  if found and l.device <> p_device then raise exception 'rol_tomado'; end if;
+  if found then
+    update cb_mov_lado set secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')), visto = now(), terminado = null where mov = p_id and rol = p_rol;
+  else
+    insert into cb_mov_lado(mov, rol, device, secret_hash, visto) values (p_id, p_rol, p_device, extensions.crypt(v_secret, extensions.gen_salt('bf')), now());
+  end if;
+  if p_rol = 'E' then
+    select c.actualizado,
+           (select jsonb_object_agg(k, c.stock -> k) from (select s ->> 0 as k from jsonb_array_elements(coalesce(m.meta -> 'sol', '[]'::jsonb)) s) q where c.stock ? k)
+      into v_at, v_stock from cb_catalogo c where c.id = 1;
+  end if;
+  return jsonb_build_object('nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'items', m.items, 'meta', m.meta, 'secret', v_secret, 'rol', p_rol,
+    'stock', v_stock, 'stock_at', v_at,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_mov_lect where mov = p_id and rol = p_rol), '[]'::jsonb));
+end $$;
+
+-- Devolución creada desde el panel del PC (supervisor): queda enviada a bodega.
+create or replace function public.cb_dev_crear_panel(p_clave text, p_area text, p_doc jsonb, p_lect jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_id uuid; v_fecha date;
+begin
+  perform cb_check(p_clave);
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  if jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  if coalesce(trim(p_doc->>'guia'),'') = '' then raise exception 'falta_guia'; end if;
+  if coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_factura'; end if;
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if v_fecha is null then raise exception 'fecha_invalida'; end if;
+  insert into cb_dev(origen, area, persona, guia, factura, fecha, nota, lect, enviado)
+  values ('panel', left(coalesce(nullif(trim(p_area),''), 'Panel'), 60), left(p_doc->>'persona', 80), left(trim(p_doc->>'guia'), 40), left(trim(p_doc->>'factura'), 40),
+          v_fecha, left(p_doc->>'nota', 300), p_lect, now())
+  returning id into v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+
+grant execute on function
+  public.cb_u_liberar(text, text), public.cb_bloquear(text, uuid, boolean), public.cb_abrir(uuid, text, text), public.cb_listar(text),
+  public.cb_mov_bloquear(text, uuid, text, boolean), public.cb_mov_listar(text), public.cb_mov_abrir(uuid, text, text, text),
+  public.cb_dev_crear_panel(text, text, jsonb, jsonb)
+to anon, authenticated;
 </script>
   </div>
 
@@ -1909,12 +2403,6 @@ to anon, authenticated;
     <p class="small">La llave queda guardada solo en este computador. No la compartas ni la mandes por WhatsApp.</p>
   </div>
 
-  <details class="card mpFold" id="puAdm" open>
-    <summary><b>Celulares fijos</b> <span class="small muted" id="puAdmSum"></span></summary>
-    <p class="small" style="margin:8px 0 0">Un link para cada celular: <b>bodega</b>, <b>producción</b>, <b>picking retail</b> y <b>distribución</b> (devoluciones de clientes). Producción, retail y distribución <b>cargan devoluciones</b>; bodega las <b>recepciona</b>. Cada uno queda amarrado al primer celular que lo abre y siempre abierto: ahí les llegan las tareas que asignas.</p>
-    <div id="puAdmBox"></div>
-  </details>
-
   <details class="card mpFold" id="mpAcc" open>
     <summary><b>Acceso para producción</b> <span class="small muted" id="mpAccSum"></span></summary>
     <p class="small" style="margin:8px 0 0">Un link para que el jefe de producción vea y use <b>solo esta pestaña</b> desde su computador, en tiempo real. No ve conteos, stock ni costos.</p>
@@ -1923,8 +2411,8 @@ to anon, authenticated;
   </details>
   <div class="card soonCard">
     <div class="row"><div class="eyebrow">Próximamente</div><span class="sep"></span><span class="pill p-warn">En construcción</span></div>
-    <h2>Crear usuarios nuevos</h2>
-    <p class="small" style="margin:0">Desde aquí podrás crear usuarios para <b>PC</b> y para <b>celulares</b>, elegir qué secciones ve cada uno y quitarles el acceso cuando lo necesites.</p>
+    <h2>Ver secciones del panel</h2>
+    <p class="small" style="margin:0">Pronto: permisos para que un usuario vea en su PC, solo lectura, secciones como Inventario, Entrega MP, Recepción PT o Logística inversa.</p>
   </div>
 </section>
 
@@ -2046,6 +2534,10 @@ const umTxt=u=>{const n=UMN(u);return n==="un"?(u?"un":"un"):n};
 let MASTER=store.get("inv_master",{});
 function enrich(items){for(const it of items){const k=key(it.cod),x=FACT[k],ms=MASTER[k];it.ce=x?x.ce:"";it.f=x?x.f:1;if(ms){if(!it.um)it.um=ms.um;it.sg=ms.sg||"";if(!it.desc)it.desc=ms.desc||""}}return items}
 const sq=s=>(+s.qty||0)*(+s.f||1);
+/* Cantidad con conversión: se ingresan BULTOS (sacos, rollos, cajas…) y debajo se ve la unidad del ERP. */
+function qBC(base,ce,f,um,signo){if(base==null||base==="")return "";f=+f||1;const s=signo&&base>0?"+":"",u=esc(umTxt(um||""));
+  if(ce&&f!==1)return `<b>${s}${fmt2(base/f)}</b> <span class="small muted">${esc(plural(ce))}</span><span class="sub">= ${s}${fmt2(base)} ${u}</span>`;
+  return `<b>${s}${fmt2(base)}</b> <span class="small muted">${u}</span>`}
 const plural=ce=>!ce?"":/[AEIOU]$/i.test(ce)?ce+"S":ce.replace(/ÓN$/i,"ON")+"ES";
 const conv=it=>!!(it&&it.ce&&(it.f||1)>0&&!(it.ce==="UNIDAD"&&(it.f||1)===1));
 function saveScans(){store.set("inv_scans",scans);updStatus()}
@@ -2062,13 +2554,14 @@ function show(v){
   if(v!=="ptcel"&&typeof ptStopCam==="function")ptStopCam();
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   menuOpen(false);
-  if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm()}
+  if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm();if(typeof lbEnter==="function")lbEnter()}
   if(v==="devol"&&typeof devEnter==="function")devEnter();
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
   if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult)}
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
+  if(v==="erp"&&typeof uCargar==="function"&&nubeOn())uCargar().then(()=>{if(typeof renderConteosOnly==="function")renderConteosOnly()});
   if(v!=="contar")stopCam();
   if(v==="mp"&&typeof mpEnter==="function")mpEnter();
   if(v!=="opmov"&&typeof omStopCam==="function")omStopCam();
@@ -2544,8 +3037,8 @@ function renderResult(){
   f.sort((a,b)=>(ord[a.st]-ord[b.st])||Math.abs(b.dif||0)-Math.abs(a.dif||0)||String(a.cod).localeCompare(String(b.cod)));
   const hasRe=rows.some(r=>r.c2!=null), hasDR=rows.some(r=>r.disp!=null||r.res!=null);
   $("#res").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th>${hasDR?'<th class="num">Disponible</th><th class="num">Reserva</th><th class="num">Stock total</th>':'<th class="num">Sistema</th>'}<th class="num">${hasRe?"1er conteo":"Contado"}</th>${hasRe?'<th class="num">Reconteo</th>':""}<th class="num">Diferencia</th><th>Estado</th>${hasRe?"<th>Validación</th>":""}<th class="num" title="Cantidad de lecturas (escaneos) del producto, igual que en la Tabla 2">Lecturas</th><th class="num" title="Ubicaciones distintas donde se encontró el producto">Ubic.</th></tr></thead><tbody>`+
-    f.slice(0,rLimit).map(r=>`<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td>${esc(r.um||"")}</td>${hasDR?`<td class="num">${fmt2(r.disp)}</td><td class="num">${fmt2(r.res)}</td>`:""}<td class="num" style="font-weight:600">${fmt2(r.stock)}</td><td class="num">${fmt2(r.c1)}</td>${hasRe?`<td class="num">${fmt2(r.c2)}</td>`:""}
-    <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td>${hasRe?`<td>${r.val?`<span class="pill ${VALID[r.val][1]}">${VALID[r.val][0]}</span>`:""}</td>`:""}<td class="num">${r.n||""}</td><td class="num" title="${esc(r.ubl||"")}">${r.nub||""}</td></tr>`).join("")+
+    f.slice(0,rLimit).map(r=>{const it=findItem(r.cod),cv=it&&conv(it)?`<span class="sub">1 ${esc(it.ce)} = ${fmt2(it.f)}</span>`:"",bb=(v,s)=>v==null||v===""||!(it&&conv(it))?"":`<span class="sub">${s&&v>0?"+":""}${fmt2(v/it.f)} ${esc(plural(it.ce))}</span>`;return `<tr><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}</td><td>${esc(r.um||"")}${cv}</td>${hasDR?`<td class="num">${fmt2(r.disp)}</td><td class="num">${fmt2(r.res)}</td>`:""}<td class="num" style="font-weight:600">${fmt2(r.stock)}${bb(r.stock)}</td><td class="num">${fmt2(r.c1)}${bb(r.c1)}</td>${hasRe?`<td class="num">${fmt2(r.c2)}${bb(r.c2)}</td>`:""}
+    <td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"};font-weight:600">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}${r.dif==null?"":bb(r.dif,true)}</td><td><span class="pill ${STATES[r.st][1]}">${STATES[r.st][0]}</span></td>${hasRe?`<td>${r.val?`<span class="pill ${VALID[r.val][1]}">${VALID[r.val][0]}</span>`:""}</td>`:""}<td class="num">${r.n||""}</td><td class="num" title="${esc(r.ubl||"")}">${r.nub||""}</td></tr>`}).join("")+
     (f.length?"":`<tr><td colspan="14" class="muted">${scans.length?"Nada con este filtro.":"Todavía no hay lecturas. Tráelas con el botón de arriba."}</td></tr>`)+"</tbody>";
   $("#resInfo").textContent=`Mostrando ${fmt(Math.min(rLimit,f.length))} de ${fmt(f.length)} productos · La diferencia se calcula contra el ${hasDR?"Stock total (disponible + reserva)":"stock del sistema"}${hasRe?" · Diferencia y estado usan el reconteo cuando existe":""} · Lecturas = veces escaneado · Ubic. = ubicaciones distintas (pasa el mouse para verlas)`;
   $("#btnMore").hidden=f.length<=rLimit;
@@ -2600,9 +3093,9 @@ $("#btnReconteo").onclick=async()=>{
   $("#btnReconteo").disabled=true;
   try{const c=await crearNube(m,its,null,true);c.codes=its.map(i=>i.cod);if(raiz)c.reconteoDe=raiz.id;
     conteos.unshift(c);store.set("inv_conteos",conteos);renderConteos();
-    $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)} · Manda este link a quien hará el reconteo (idealmente otra persona):</div>
-      <input id="reLink" readonly value="${esc(c.link)}" style="font:13px var(--mono)"><div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="reCopy">Copiar link</button></div></div>`;
-    $("#reCopy").onclick=()=>copyText(c.link,$("#reLink"));
+    $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)}</div>
+      <div class="small">Mándalo a quien hará el reconteo (idealmente otra persona) desde <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div><div class="row">${'<button class="btn primary" data-irperm>Ir a 6 · Permisos</button>'}</div></div>`;
+    irPermisos($("#reRes"));
     toast("Reconteo creado");renderResult();
   }catch(e){toast(sbMsg(e))}finally{$("#btnReconteo").disabled=false}
 };
@@ -2749,7 +3242,7 @@ $("#rotCodes").oninput=renderRot;
 
 /* ================= PANEL: crear conteo y compartir link ================= */
 const GH="https://api.github.com", RAW="https://gist.githubusercontent.com/";
-const DEFAULT_APP="https://jorgecelpa1989-gif.github.io/Conteo--Bodega/";
+const DEFAULT_APP="https://jorgecelpa1989-gif.github.io/Auditoria-Inventario/";
 let gh=store.get("inv_gh",{token:"",login:""});
 let conteos=store.get("inv_conteos",[]);
 const appUrl=()=>{let u=norm(cfg.appUrl||"");
@@ -2799,7 +3292,7 @@ $("#btnCrear").onclick=async()=>{
   try{
    if(nubeOn()){
     const c=await crearNube(m,its,sel,rot);
-    if($("#cPuesto").checked&&!$("#cPuWrap").hidden){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:"bodega"});c.puesto="bodega"}catch(e){toast("El conteo se creó, pero no se pudo asignar al celular de bodega")}}
+    const puA="";if(puA){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puA});c.puesto=puA}catch(e){toast("El conteo se creó, pero no se pudo asignar a "+uNombre(puA))}}
     conteos.unshift(c);store.set("inv_conteos",conteos);
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
     cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
@@ -2833,27 +3326,31 @@ async function closeLink(c){
 function showCreated(c){
   const box=$("#crearRes");box.dataset.id=c.id;
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
+  if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
+    <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
+    <div class="small">Para mandarlo al contador (WhatsApp o copiar link), asignarlo a un usuario, liberarlo o bloquearlo: <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
+    <div class="row"><button class="btn primary" data-irperm>Ir a 6 · Permisos</button></div></div>`;irPermisos(box);return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
-    <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
+    <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
-    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div>
-    ${c.nube?`<div class="small" style="border-top:1px solid var(--line);padding-top:8px">Envío automático activo: el link funciona en <b>un solo celular</b> (el primero que lo abre) y sus lecturas llegan solas a la tabla de abajo.</div></div>`:`<div class="small" style="border-top:1px solid var(--line);padding-top:8px">Cuando el contador te confirme que <b>ya lo abrió</b>, cierra el link para que no se pueda abrir en otro celular.</div>
-    <div class="row"><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`}`;
-  $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));
-  if($("#btnCloseLink"))$("#btnCloseLink").onclick=()=>closeLink(c);
-  $("#linkOut").onclick=e=>e.target.select();
+    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`;
+  $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));$("#btnCloseLink").onclick=()=>closeLink(c);$("#linkOut").onclick=e=>e.target.select();
 }
+function irPermisos(box){if(box)box.querySelectorAll("[data-irperm]").forEach(b=>b.onclick=()=>{show("permisos");setTimeout(()=>{const c=$("#lbCard");if(c)c.scrollIntoView({behavior:"smooth",block:"start"})},150)})}
 const isVenc=v=>!!v&&Date.now()>Date.parse(v);
 let autoClosing=false;
 async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.nube&&!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
 function renderConteos(){renderConteosOnly();autoCloseExpired()}
 function renderConteosOnly(){
+  if(!$("#conteosTbl")){
+    $("#cPuWrap").hidden=true;
+    if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();return}
   const hasN=conteos.some(c=>c.nube);
   $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
    (conteos.length?conteos.map((c,i)=>{
      if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&(x.finalizado||x.terminado))c.fin=true;
        return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
-       <td><div class="row" style="gap:6px;flex-wrap:nowrap">${x&&(!x.abierto||x.libre)&&!x.finalizado&&c.link?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&SB.pu&&SB.pu.bodega?(x.puesto?`<button class="btn sm" data-pq="${i}" title="Quitar del celular de bodega">📱 En bodega ✕</button>`:`<button class="btn sm accent" data-pa="${i}">📱 Asignar a bodega</button>`):""}${x&&x.abierto&&x.libre===false&&!x.finalizado?`<button class="btn sm" data-lb="${i}" title="Si el celular del contador quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
+       <td style="min-width:220px"><div class="row" style="gap:6px;flex-wrap:wrap">${x&&(!x.abierto||x.libre)&&!x.finalizado&&c.link?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&usersCon("conteo").length?`<select class="selSm" data-pa="${i}" title="Usuario que lo ve en su menú">${uOpts("conteo",x.puesto,"📱 Asignar a…")}</select>`:""}${x&&x.abierto&&x.libre===false&&!x.finalizado?`<button class="btn sm" data-lb="${i}" title="Si el celular del contador quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
      return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
     <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
     <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
@@ -2862,9 +3359,9 @@ function renderConteosOnly(){
   $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
   $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
   $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
-  $$("#conteosTbl [data-pa],#conteosTbl [data-pq]").forEach(b=>b.onclick=async()=>{const c=conteos[+(b.dataset.pa||b.dataset.pq)];
-    try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:b.dataset.pa?"bodega":""});toast(b.dataset.pa?"Conteo asignado al celular de bodega":"Conteo quitado del celular de bodega");refreshNube(true)}catch(e){toast(sbMsg(e))}});
-  $("#cPuWrap").hidden=!(nubeOn()&&SB.pu&&SB.pu.bodega);
+  $$("#conteosTbl select[data-pa]").forEach(s=>s.onchange=async()=>{const c=conteos[+s.dataset.pa],pu=s.value;
+    try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:pu});toast(pu?"Conteo asignado a "+uNombre(pu):"Conteo quitado del usuario");refreshNube(true)}catch(e){toast(sbMsg(e));refreshNube(true)}});
+  $("#cPuWrap").hidden=!(nubeOn()&&usersCon("conteo").length);if(!$("#cPuWrap").hidden){const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— A nadie —")}
   $$("#conteosTbl [data-lb]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.lb],x=nubeLive.get(c.id)||{};
     confirmBox(`Liberar el celular de "${esc(c.nombre)}"${x.contador?" ("+esc(x.contador)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas ya recibidas.`,async()=>{try{await rpc(SB,"cb_liberar",{p_clave:SB.admin,p_id:c.id});await refreshNube(true);toast("Celular liberado: reenvía el mismo link al contador")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
   $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
@@ -2893,7 +3390,7 @@ async function rpc(conf,fn,args){
   return j;
 }
 const SBMSG={acceso_produccion:"La clave no es válida o fue cambiada. Pide un link nuevo al supervisor.",clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
-  usado:"Este link ya se abrió en otro celular. Pide al supervisor que libere el celular desde el Panel y vuelve a abrir el mismo link.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
+  bloqueado:"El supervisor bloqueó este link. Habla con él para que lo desbloquee.",usado:"Este link ya se abrió en otro celular. Pide al supervisor que libere el celular (6 · Permisos) y vuelve a abrir el mismo link.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
   no_existe:"El link no es válido o el conteo fue eliminado. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para enviar este conteo.",sin_conexion:"Sin conexión a internet.",sin_productos:"El conteo no tiene productos."};
 const sbMsg=e=>SBMSG[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script SQL en Supabase (paso 2 de las instrucciones).":/Invalid API key|401|JWT|apikey/i.test(e.message)?"La clave pública (anon / publishable) no es válida.":e.message);
 const rndKey=n=>{const a=new Uint8Array(n);crypto.getRandomValues(a);return [...a].map(b=>"abcdefghjkmnpqrstuvwxyz23456789"[b%31]).join("")};
@@ -3212,7 +3709,7 @@ setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>
 var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
     movLect={}, movSeen={}, mpFilter="todos", movHide=store.get("inv_movhide",[]);
 const ROL={E:"Entrega",R:"Recepción"};
-const movMsg=e=>({rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere desde el Panel y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
+const movMsg=e=>({bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (6 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
 
 /* ---------- ¿Quién usa esta pestaña? supervisor (clave de Supabase) o jefe de producción (link propio) ---------- */
 // PRD = {url,key,tok,ses} en el PC del jefe de producción: tok viene en su link, ses es la llave que recibe ESE equipo al vincularse.
@@ -3489,7 +3986,7 @@ function mpRows(id){
     r.st=r.E==null&&r.R==null?"porent":r.E!=null&&r.R==null?(rTerm?"norec":"porrec"):r.E==null?"noent":Math.abs(r.dif)<1e-9?"ok":r.dif<0?"falta":"sobra";return r});
 }
 const MPST={porent:["Por entregar","p-mut"],ok:["Cuadra","p-ok"],falta:["Recibió menos","p-bad"],sobra:["Recibió más","p-warn"],porrec:["Por recibir","p-info"],norec:["No recibido","p-bad"],noent:["Recibido sin entrega","p-bad"]};
-function mpQty(t,r,n){if(t==null)return "";const u=esc(umTxt(r.um));return `${fmt2(t)} <span class="small muted">${u}</span>${r.ce&&r.f!==1?`<span class="sub">${fmt2(n)} ${esc(plural(r.ce))}</span>`:""}`}
+function mpQty(t,r,n){if(t==null)return "";return qBC(t,r.ce,r.f,r.um)}
 async function activarMov(m){
   const b=$("#btnAct");b.disabled=true;
   try{const asig=$("#actPu")&&$("#actPu").checked;
@@ -3528,9 +4025,7 @@ function renderMpCmp(){
   if($("#actCopy"))$("#actCopy").onclick=()=>copyText(m.link);
   $("#mpSides").hidden=sol;
   $("#mpTitle").innerHTML=`${esc(m.nombre)}${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}`;
-  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div>${l&&!l.terminado&&x&&!x.finalizado&&!prodMode()&&nubeOn()?`<button class="btn sm" data-ml="${r}" style="align-self:flex-start;margin-top:4px" title="Si ese celular quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}</div>`}).join("");
-  $$("#mpSides [data-ml]").forEach(b=>b.onclick=()=>{const r=b.dataset.ml,l=L[r]||{};
-    confirmBox(`Liberar el celular de ${r==="E"?"quien entrega":"quien recibe"}${l.persona?" ("+esc(l.persona)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link en ese rol lo toma y recupera sus ${fmt(l.n_lecturas||0)} lecturas.`,async()=>{try{await rpc(SB,"cb_mov_liberar",{p_clave:SB.admin,p_id:m.id,p_rol:r});await refreshMov(true);toast("Celular liberado: reenvía el mismo link")}catch(e){toast(movMsg(e))}},"#mpConfirm");$("#mpConfirm")&&$("#mpConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
+  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div></div>`}).join("");
   const rows=mpRows(m.id), cnt=s=>rows.filter(r=>s.includes(r.st)).length, hasS=rows.some(r=>r.S!=null);
   $("#mpKpis").innerHTML=[...(hasS?[["Solicitados",rows.filter(r=>r.S!=null).length]]:[]),["Productos entregados",rows.filter(r=>r.E!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt(["ok"])],["Con diferencia",cnt(["falta","sobra","norec","noent"])],["Por recibir",cnt(["porrec"])],...(hasS?[["Por entregar",cnt(["porent"])]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
   const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["falta","sobra","norec","noent"])],["ok","Cuadran",cnt(["ok"])],["porrec","Por recibir",cnt(["porrec"])],...(hasS?[["porent","Por entregar",cnt(["porent"])]]:[])];
@@ -3759,11 +4254,16 @@ $("#omCam").onclick=omOpenCam;$("#omCamStop").onclick=omStopCam;
 var PST=store.get("inv_puesto",null), puestoForce=false, puestoReady=Promise.resolve(), puVista="menu",
     puTareas={mp:[],conteos:[],pt_cierre:null}, puVistos=store.get("inv_puvistos",[]), puCat=store.get("inv_pucat",null);
 const PUN={bodega:"Bodega",produccion:"Producción",retail:"Picking retail",distribucion:"Distribución"};
-const esReceptorPT=()=>!!PST&&PST.puesto!=="produccion";   // bodega o retail reciben PT
+// Permisos del usuario (los manda el servidor en cb_puesto_tareas.yo; si aún no llegan, los de su celular fijo).
+const DEF_PERM={bodega:["conteo","mp_entregar","pt_recibir","dev_recibir"],produccion:["mp_recibir","pt_entregar","dev_cargar"],retail:["pt_retirar","dev_cargar"],distribucion:["dev_cargar"]};
+const puPerms=()=>(PST&&(Array.isArray(PST.perm)?PST.perm:DEF_PERM[PST.puesto]))||[];
+const can=p=>puPerms().includes(p);
+const puNombre=()=>PST?(PST.nombre||("Celular de "+(PUN[PST.puesto]||PST.puesto))):"";
+const esReceptorPT=()=>!!PST&&!can("pt_entregar");   // bodega o retail reciben PT
 const puestoMode=()=>!!(PST&&PST.url&&PST.key&&PST.puesto&&(PST.ses||PST.tok))&&(puestoForce||!isSupDevice());
 const pconf=()=>({url:PST.url,key:PST.key});
 const prpc=async(fn,args)=>{await puestoReady;return rpc(pconf(),fn,Object.assign({p_puesto:PST.puesto,p_ses:PST.ses},args||{}))};
-const puMsg=e=>({puesto_usado:"Este link ya se abrió en otro celular y quedó amarrado a ese celular. Pide un link nuevo al supervisor.",puesto_invalido:"El link del celular no es válido o fue cambiado. Pide uno nuevo al supervisor."}[e.message]||sbMsg(e));
+const puMsg=e=>({usuario_inactivo:"Tu usuario fue desactivado. Habla con el supervisor.",sin_permiso:"Tu usuario no tiene permiso para esta acción. Pídeselo al supervisor.",puesto_usado:"Este link ya se abrió en otro celular y quedó amarrado a ese celular. Pide un link nuevo al supervisor.",puesto_invalido:"El link del celular no es válido o fue cambiado. Pide uno nuevo al supervisor."}[e.message]||sbMsg(e));
 
 /* ---------- Abrir el link del celular fijo ---------- */
 function checkPuestoLink(){
@@ -3771,7 +4271,7 @@ function checkPuestoLink(){
   const pu=q.get("puesto"),tok=q.get("t");if(!pu)return false;
   const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), pk=q.get("k")||"";
   try{history.replaceState(null,"",location.pathname+"#puesto")}catch(e){}
-  if(!PUN[pu]||!tok||!url||!pk){lockScreen("El link está incompleto. Pide uno nuevo al supervisor.","No se puede abrir este link","⚠️",true);return true}
+  if(!/^[a-z0-9_]{2,40}$/.test(pu)||!tok||!url||!pk){lockScreen("El link está incompleto. Pide uno nuevo al supervisor.","No se puede abrir este link","⚠️",true);return true}
   puestoForce=true;
   if(PST&&PST.puesto===pu&&PST.tok===tok&&PST.ses)return true;
   PST={url,key:pk,puesto:pu,tok,ses:"",persona:(PST&&PST.persona)||cfg.user||""};
@@ -3801,12 +4301,13 @@ var puBusy=false;
 async function puRefresh(){
   if(!puestoMode()||puBusy)return;puBusy=true;
   try{puTareas=await prpc("cb_puesto_tareas",{p_persona:PST.persona||null})||puTareas;
+    if(puTareas.yo){PST.perm=Array.isArray(puTareas.yo.permisos)?puTareas.yo.permisos:PST.perm;PST.nombre=puTareas.yo.nombre||PST.nombre;PST.area=puTareas.yo.area||"";store.set("inv_puesto",PST)}
     await puDevRefresh();
     const ids=[...puTareas.mp.filter(t=>!t.terminado),...puTareas.conteos.filter(t=>!t.terminado)].map(t=>t.id).concat(puDevRec()?(puDev||[]).filter(d=>!d.recibido).map(d=>"dev:"+d.id):[]), nuevas=ids.filter(id=>!puVistos.includes(id));
     if(nuevas.length){puVistos=puVistos.concat(nuevas).slice(-200);store.set("inv_puvistos",puVistos);audio.beep(true);setTimeout(()=>audio.beep(true),220);toast("🔴 Tienes una tarea nueva")}
     if(puVista==="menu")renderPuesto();
-    if(puVista==="dev"&&dv==null&&!$("#dvHome").hidden)dvHomeRender();
-  }catch(e){if(/puesto_invalido/.test(e.message))lockScreen(puMsg(e),"Celular desconectado","🔒",true)}
+    if(puVista==="dev"&&dv==null&&!$("#dvHome").hidden){await puDevRefresh(dvModo).catch(()=>{});dvHomeRender()}
+  }catch(e){if(/puesto_invalido/.test(e.message))lockScreen(puMsg(e),"Celular desconectado","🔒",true);else if(/usuario_inactivo/.test(e.message))lockScreen(puMsg(e),"Usuario desactivado","🔒",true)}
   finally{puBusy=false}
 }
 setInterval(()=>{if(puestoMode()&&!document.hidden)puRefresh()},20000);
@@ -3814,22 +4315,22 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden&&puestoMod
 
 function renderPuesto(){
   if(!PST)return;
-  const bod=PST.puesto==="bodega", pend=a=>a.filter(t=>!t.terminado).length;
-  $("#puHead").innerHTML=`<div class="row"><span class="pill p-info" style="font-size:13px">📱 Celular de ${PUN[PST.puesto]}</span><span class="sep"></span><span class="small muted">conectado</span></div>
+  const pend=a=>a.filter(t=>!t.terminado).length;
+  $("#puHead").innerHTML=`<div class="row"><span class="pill p-info" style="font-size:13px">📱 ${esc(puNombre())}</span>${PST.area?`<span class="small muted">${esc(PST.area)}</span>`:""}<span class="sep"></span><span class="small muted">conectado</span></div>
     <label class="f">Operario<input id="puPersona" value="${esc(PST.persona||"")}" placeholder="Tu nombre" autocapitalize="characters"></label>`;
   $("#puPersona").onchange=e=>{PST.persona=norm(e.target.value).toUpperCase();e.target.value=PST.persona;cfg.user=PST.persona;store.set("inv_cfg",cfg);store.set("inv_puesto",PST);puRefresh()};
   const nMp=puTareas.mp.length,pMp=pend(puTareas.mp),nC=puTareas.conteos.length,pC=pend(puTareas.conteos);
-  const devN=(puDev||[]).filter(d=>!d.recibido).length;
-  const items=PST.puesto==="distribucion"?[]:PST.puesto==="retail"?[
-    {k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"}]
-   :bod?[
-    {k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} asignada${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas",dot:pMp},
-    {k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"},
-    {k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC}]
-   :[{k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp},
-    {k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"}];
-  if(puDevCarga())items.push({k:"dev",ic:"↩️",t:PST.puesto==="produccion"?"Cargar devolución de MP":PST.puesto==="distribucion"?"Cargar devolución de cliente":"Cargar devolución",s:"Devolución a bodega: N° de guía, N° de factura, fecha y productos"});
-  if(puDevRec())items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} devolución${devN>1?"es":""} por recibir`:"Sin devoluciones por recibir",dot:devN});
+  const devN=puDevModo==="rec"?(puDev||[]).filter(d=>!d.recibido).length:0;
+  const items=[];
+  if(can("mp_entregar"))items.push({k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} asignada${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas",dot:pMp});
+  if(can("mp_recibir"))items.push({k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp});
+  if(can("pt_entregar"))items.push({k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"});
+  if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
+  if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
+  if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
+  if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía, N° de factura, fecha y productos"});
+  if(can("dev_recibir"))items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} devolución${devN>1?"es":""} por recibir`:"Sin devoluciones por recibir",dot:devN});
+  if(!items.length){$("#puMenu").innerHTML='<div class="card contarCard"><p class="muted" style="margin:0">Tu usuario todavía no tiene permisos. Pídele al supervisor que te los asigne: aparecerán aquí solos.</p></div>';$("#puList").innerHTML="";return}
   $("#puMenu").innerHTML=items.map(x=>`<button class="puBtn" data-pk="${x.k}"><span class="ic">${x.ic}</span><span><b>${x.t}</b><span class="s">${x.s}</span></span>${x.dot?`<span class="dotR">${x.dot}</span>`:""}</button>`).join("");
   $$("#puMenu [data-pk]").forEach(b=>b.onclick=()=>puAbrir(b.dataset.pk));
   $("#puList").innerHTML="";
@@ -3837,7 +4338,7 @@ function renderPuesto(){
 function puAbrir(k){
   if(!PST.persona){toast("Escribe tu nombre arriba");return $("#puPersona").focus()}
   if(k==="pt")return ptAbrir();
-  if(k==="dev"||k==="devrec")return dvAbrir();
+  if(k==="dev"||k==="devrec")return dvAbrir(k==="devrec"?"rec":"carga");
   const lista=k==="mp"?puTareas.mp:puTareas.conteos;
   if(!lista.length)return toast(k==="mp"?"No tienes entregas asignadas por ahora":"No tienes conteos asignados por ahora");
   if(lista.length===1)return k==="mp"?puAbrirMov(lista[0]):puAbrirConteo(lista[0]);
@@ -3845,7 +4346,7 @@ function puAbrir(k){
   $$("#puList [data-pi]").forEach(b=>b.onclick=()=>{const t=lista[+b.dataset.pi];k==="mp"?puAbrirMov(t):puAbrirConteo(t)});
 }
 async function puAbrirMov(t){
-  const rol=PST.puesto==="bodega"?"E":"R";
+  const rol=can("mp_entregar")?"E":"R";
   cfg.user=PST.persona;store.set("inv_cfg",cfg);
   $("#omBarT").textContent=rol==="E"?"Entrega de materia prima":"Recepción de materia prima";
   puVista="mp";puestoApply();
@@ -3867,34 +4368,139 @@ async function puAbrirConteo(t){
   }catch(e){toast(e.message&&!SBMSG[e.message]&&!/[_]/.test(e.message)?e.message:sbMsg(e));puestoMenu()}
 }
 
-/* ---------- Supervisor: crear y controlar los links de los celulares fijos (pestaña 2) ---------- */
+/* ---------- Supervisor: USUARIOS (PC y celulares) con sus permisos — pestaña 6 · Permisos ---------- */
+var USERS=store.get("inv_users",[]), uEdit=null, uBusy=false;
+const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones"};
+const AREAS=["Bodega","Producción","Picking retail","Distribución","Compras","Despacho","Calidad"];
+function usersCon(p){return (USERS||[]).filter(u=>u.activo!==false&&(u.permisos||[]).includes(p))}
+function uNombre(id){const u=(USERS||[]).find(x=>x.id===id);return u?(u.nombre||u.id):(PUN[id]?"Celular de "+PUN[id]:id)}
+function uOpts(p,sel,vacio){const L=usersCon(p);return `<option value="">${esc(vacio||"—")}</option>`+L.map(u=>`<option value="${esc(u.id)}" ${u.id===sel?"selected":""}>${esc(u.nombre||u.id)}${u.area?" · "+esc(u.area):""}</option>`).join("")+(sel&&!L.some(u=>u.id===sel)?`<option value="${esc(sel)}" selected>${esc(uNombre(sel))}</option>`:"")}
+function uLink(id){const tok=SB.pu&&SB.pu[id];return tok?appUrl()+"?puesto="+encodeURIComponent(id)+"&t="+encodeURIComponent(tok)+sbLinkParams():""}
+async function uCargar(){
+  try{const r=await rpc(SB,"cb_u_listar",{p_clave:SB.admin});USERS=Array.isArray(r)?r:[]}
+  catch(e){ // Supabase sin la actualización 08: se arma con los celulares fijos de antes
+    try{const est=await rpc(SB,"cb_puesto_estado",{p_clave:SB.admin})||{};USERS=Object.keys(est).map(id=>Object.assign({id,nombre:"Celular de "+(PUN[id]||id),area:PUN[id]||"",permisos:DEF_PERM[id]||[],activo:true,legado:true},est[id]))}catch(x){}
+  }
+  store.set("inv_users",USERS);
+}
 function renderPuAdm(){
   const box=$("#puAdmBox");if(!box)return;
   $("#puAdm").hidden=prodMode()||!nubeOn();
   const w=$("#mpPuWrap");if(w)w.hidden=prodMode()||!hayPuestos();
   if(prodMode()||!nubeOn())return;
   SB.pu=SB.pu||{};
-  box.innerHTML=["bodega","produccion","retail","distribucion"].map(p=>{const tok=SB.pu[p];
-    if(!tok)return `<div class="puAdmRow"><b>Celular de ${PUN[p]}</b><button class="btn sm primary" data-pnew="${p}">Crear link</button></div>`;
-    const link=appUrl()+"?puesto="+p+"&t="+encodeURIComponent(tok)+sbLinkParams();
-    return `<div class="puAdmRow" style="flex-direction:column;align-items:stretch"><b>Celular de ${PUN[p]}</b><input readonly value="${esc(link)}" id="pul-${p}">
-      <div class="row" style="gap:6px"><a class="btn sm primary" href="${esc(waLink(`Celular de ${PUN[p]} · Control de Operaciones. Ábrelo una sola vez en el celular asignado:\n`+link))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-pcp="${p}">Copiar</button><button class="btn sm danger" data-prot="${p}">Cambiar link…</button></div>
-      <div class="small" id="pue-${p}"></div></div>`}).join("")+`<div id="puConfirm"></div>`;
-  $$("#puAdmBox [data-pnew]").forEach(b=>b.onclick=()=>puAdmSet(b.dataset.pnew));
-  $$("#puAdmBox [data-pcp]").forEach(b=>b.onclick=()=>copyText($("#pul-"+b.dataset.pcp).value,$("#pul-"+b.dataset.pcp)));
-  $$("#puAdmBox [data-prot]").forEach(b=>b.onclick=()=>confirmBox(`Se crea un link nuevo para el celular de ${PUN[b.dataset.prot]} y el actual queda desconectado.`,()=>puAdmSet(b.dataset.prot),"#puConfirm"));
-  rpc(SB,"cb_puesto_estado",{p_clave:SB.admin}).then(e=>{let n=0;
-    for(const p of ["bodega","produccion","retail","distribucion"]){const el=$("#pue-"+p),x=e&&e[p];if(!el)continue;
-      if(x&&x.usado){n++;el.innerHTML=`<span class="dot ${enLinea(x.visto)?"on":"off"}"></span>Vinculado a <b>${esc(x.equipo||"un celular")}</b>${x.persona?" · "+esc(x.persona):""} · ${enLinea(x.visto)?"en línea":"última conexión "+(x.visto?hace(x.visto):"—")}`}
-      else el.textContent="Aún no se abre: quedará amarrado al primer celular que lo abra."}
-    $("#puAdmSum").textContent=n?`· ${n} vinculado${n>1?"s":""}`:""}).catch(()=>{});
+  uPintar();
+  if(!uBusy){uBusy=true;uCargar().then(()=>{uPintar();if(typeof renderConteosOnly==="function")renderConteosOnly();const w2=$("#mpPuWrap");if(w2)w2.hidden=prodMode()||!hayPuestos()}).finally(()=>uBusy=false)}
 }
-async function puAdmSet(p){
+function uEstado(u){
+  if(u.activo===false)return '<span class="pill p-mut">Desactivado</span>';
+  if(!u.usado)return uLink(u.id)?'<span class="pill p-warn">Link sin abrir</span>':'<span class="pill p-mut">Sin acceso: genera uno</span>';
+  const on=enLinea(u.visto);
+  return `<span class="small"><span class="dot ${on?"on":"off"}"></span>Vinculado a <b>${esc(u.equipo||"un equipo")}</b>${u.persona?" · "+esc(u.persona):""} · ${on?"en línea":"última conexión "+(u.visto?hace(u.visto):"—")}</span>`;
+}
+function uPintar(){
+  const box=$("#puAdmBox");if(!box)return;
+  const L=USERS||[],leg=L.some(u=>u.legado);
+  $("#puAdmSum").textContent=L.length?`· ${fmt(L.length)} usuario${L.length>1?"s":""} · ${fmt(L.filter(u=>u.usado&&u.activo!==false).length)} vinculado${L.filter(u=>u.usado).length===1?"":"s"}`:"";
+  box.innerHTML=(leg?'<div class="notice small">Falta ejecutar en Supabase la actualización 08 (usuarios). Por ahora solo se ven los celulares fijos.</div>':"")+
+    ""+
+    (L.length?L.map(u=>{const link=uLink(u.id);return `<div class="uRow${u.activo===false?" off":""}">
+      <div class="row" style="gap:8px"><b>${esc(u.nombre||u.id)}</b>${u.area?`<span class="small muted">${esc(u.area)}</span>`:""}<span class="sep"></span>${uEstado(u)}</div>
+      <div class="uPerm">${(u.permisos||[]).length?(u.permisos||[]).map(p=>`<span>${esc(PERM_TXT[p]||p)}</span>`).join(""):'<span class="muted">Sin permisos</span>'}</div>
+      ${link&&!u.usado&&u.activo!==false?`<input readonly value="${esc(link)}" id="ul-${esc(u.id)}" style="font:12px var(--mono);padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%">`:""}
+      <div class="row" style="gap:6px">${link&&!u.usado&&u.activo!==false?`<a class="btn sm primary" href="${esc(waLink(`${u.nombre||"Usuario"} · Control de Operaciones. Ábrelo una sola vez en el equipo asignado (PC o celular):\n`+link))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-ucp="${esc(u.id)}">Copiar link</button>`:""}
+        ${leg?"":`<button class="btn sm" data-ued="${esc(u.id)}">Editar</button>`}<button class="btn sm" data-uln="${esc(u.id)}">${u.usado||link?"Nuevo acceso…":"Generar acceso"}</button>
+        ${leg?"":`<span class="sep"></span><button class="btn sm danger" data-udl="${esc(u.id)}">Eliminar…</button>`}</div></div>`}).join(""):'<p class="muted" style="margin:0">Todavía no hay usuarios. Crea el primero con ＋ Nuevo usuario.</p>')+`<div id="puConfirm"></div>`;
+  $$("#puAdmBox [data-ued]").forEach(b=>b.onclick=()=>{uEditor(L.find(u=>u.id===b.dataset.ued));$("#uEdCard").scrollIntoView({behavior:"smooth",block:"start"})});
+  $$("#puAdmBox [data-ucp]").forEach(b=>b.onclick=()=>{const el=$("#ul-"+b.dataset.ucp);copyText(el?el.value:uLink(b.dataset.ucp),el)});
+  $$("#puAdmBox [data-uln]").forEach(b=>b.onclick=()=>{const u=L.find(x=>x.id===b.dataset.uln);if(!u)return;
+    if(!u.usado&&!uLink(u.id))return puAdmSet(u.id);
+    confirmBox(`Se crea un acceso nuevo para ${esc(u.nombre||u.id)} y el equipo actual queda desconectado.`,()=>puAdmSet(u.id),"#puConfirm")});
+  $$("#puAdmBox [data-udl]").forEach(b=>b.onclick=()=>{const u=L.find(x=>x.id===b.dataset.udl);if(!u)return;
+    confirmBox(`Eliminar a ${esc(u.nombre||u.id)}: pierde el acceso y sus conteos asignados quedan sin asignar. Lo que ya registró se mantiene.`,async()=>{try{await rpc(SB,"cb_u_eliminar",{p_clave:SB.admin,p_id:u.id});if(SB.pu)delete SB.pu[u.id];store.set("inv_sb",SB);await uCargar();uPintar();toast("Usuario eliminado")}catch(e){toast(uMsg(e))}},"#puConfirm")});
+  const ed=$("#uEd");if(ed&&!ed.innerHTML)uEditor(null,true);
+  $("#uEdCard").hidden=leg;if(typeof lbRender==="function")lbRender();
+}
+const uMsg=e=>({falta_nombre:"Escribe el nombre del usuario.",mp_uno:"Elige solo una opción de MP.",pt_uno:"Elige solo una opción de PT.",no_existe:"Ese usuario ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 08 (usuarios).":movMsg(e)));
+function uEditor(u,keep){
+  const el=$("#uEd");if(!el)return;
+  if(!keep)uEdit=u?{id:u.id}:{id:null};
+  const P=new Set((u&&u.permisos)||[]),mp=[...P].find(p=>p.startsWith("mp_"))||"",pt=[...P].find(p=>p.startsWith("pt_"))||"";
+  const rad=(n,v,cur,t)=>`<label><input type="radio" name="${n}" value="${v}" ${cur===v?"checked":""}> ${t}</label>`;
+  el.innerHTML=`<div class="uEd"><b>${u?"Editar usuario: "+esc(u.nombre||u.id):"Nuevo usuario"}</b>
+    <div class="row"><label class="f" style="flex:1 1 220px">Nombre<input id="uNom" value="${esc((u&&u.nombre)||"")}" placeholder="Ej: Pedro Soto, o Celular de despacho" autocomplete="off"></label>
+      <label class="f" style="flex:1 1 180px">Área<input id="uArea" list="uAreas" value="${esc((u&&u.area)||"")}" placeholder="Ej: Distribución" autocomplete="off"></label></div>
+    <datalist id="uAreas">${AREAS.map(a=>`<option value="${esc(a)}">`).join("")}</datalist>
+    <fieldset><legend>Conteos</legend><label><input type="checkbox" id="uP_conteo" ${P.has("conteo")?"checked":""}> Recibe los conteos de inventario que le asignes</label></fieldset>
+    <fieldset><legend>Materia prima (MP)</legend>${rad("uMp","",mp,"No")}${rad("uMp","mp_entregar",mp,"Entrega MP (bodega)")}${rad("uMp","mp_recibir",mp,"Recibe MP (producción)")}</fieldset>
+    <fieldset><legend>Producto terminado (PT)</legend>${rad("uPt","",pt,"No")}${rad("uPt","pt_entregar",pt,"Entrega PT (producción)")}${rad("uPt","pt_recibir",pt,"Recibe PT (bodega)")}${rad("uPt","pt_retirar",pt,"Retira PT para despacho (retail)")}</fieldset>
+    <fieldset><legend>Devoluciones</legend><label><input type="checkbox" id="uP_dev_cargar" ${P.has("dev_cargar")?"checked":""}> Carga devoluciones</label><label><input type="checkbox" id="uP_dev_recibir" ${P.has("dev_recibir")?"checked":""}> Recepciona devoluciones</label></fieldset>
+    <div class="row"><button class="btn primary" id="uSave">${u?"Guardar cambios":"Crear usuario y su link"}</button>${u?'<button class="btn" id="uCancel">Cancelar</button>':""}</div></div>`;
+  if($("#uCancel"))$("#uCancel").onclick=()=>{uEdit=null;uEditor(null,true)};
+  $("#uSave").onclick=()=>{const perm=[];if($("#uP_conteo").checked)perm.push("conteo");const m=(document.querySelector('input[name="uMp"]:checked')||{}).value,t=(document.querySelector('input[name="uPt"]:checked')||{}).value;
+    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");
+    uGuardar(u,{nombre:norm($("#uNom").value),area:norm($("#uArea").value),permisos:perm},!u)};
+  if(!keep)setTimeout(()=>{try{$("#uNom").focus()}catch(e){}},50);
+}
+async function uGuardar(u,cambios,nuevo){
+  const d=Object.assign({nombre:u&&u.nombre,area:u&&u.area,permisos:(u&&u.permisos)||[],activo:u?u.activo!==false:true},cambios);
+  if(!d.nombre){toast("Escribe el nombre del usuario");const n=$("#uNom");if(n)n.focus();return}
+  try{const id=await rpc(SB,"cb_u_guardar",{p_clave:SB.admin,p_id:u?u.id:"",p_nombre:d.nombre,p_area:d.area||"",p_permisos:d.permisos,p_activo:d.activo});
+    uEdit=null;uEditor(null,true);
+    if(nuevo){await puAdmSet(id,true);toast("Usuario creado: mándale su link por WhatsApp")}else{await uCargar();uPintar();toast(cambios.activo===undefined?"Cambios guardados: le llegan en unos segundos":d.activo?"Usuario activado":"Usuario desactivado")}
+    if(typeof renderConteosOnly==="function")renderConteosOnly();
+  }catch(e){toast(uMsg(e))}
+}
+async function puAdmSet(p,silent){
   const tok=rndKey(24);
-  try{await rpc(SB,"cb_puesto_link",{p_clave:SB.admin,p_puesto:p,p_token:tok});SB.pu=SB.pu||{};SB.pu[p]=tok;store.set("inv_sb",SB);renderPuAdm();catSync(true);toast("Link del celular de "+PUN[p]+" listo")}
-  catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script actualizacion_04_puestos.sql.":movMsg(e))}
+  try{await rpc(SB,"cb_puesto_link",{p_clave:SB.admin,p_puesto:p,p_token:tok});SB.pu=SB.pu||{};SB.pu[p]=tok;store.set("inv_sb",SB);await uCargar();uPintar();catSync(true);if(!silent)toast("Acceso nuevo de "+uNombre(p)+" listo: mándale el link")}
+  catch(e){toast(uMsg(e))}
 }
-const hayPuestos=()=>!!(SB.pu&&(SB.pu.bodega||SB.pu.produccion));
+/* ---------- 6 · Permisos → Liberar o bloquear accesos: usuarios, links de conteo y lados de Entrega MP ---------- */
+var lbAt=null, lbBusy=false;
+const LBMSG=e=>({bloqueado:"Ese acceso está bloqueado."}[e.message]||uMsg(e));
+function conteoLink(id,x){const c=conteos.find(z=>z.id===id);if(c&&c.link)return c.link;return x&&x.token?appUrl()+"?nube="+id+"."+x.token+sbLinkParams():""}
+async function lbRefresh(){
+  if(!nubeOn()||lbBusy)return;lbBusy=true;
+  try{await Promise.all([uCargar().catch(()=>{}),refreshNube(true),typeof refreshMov==="function"?refreshMov(false):null]);lbAt=new Date()}finally{lbBusy=false;lbRender()}
+}
+function lbEnter(){lbRender();lbRefresh()}
+setInterval(()=>{if(nubeOn()&&!document.hidden&&$("#v-permisos")&&!$("#v-permisos").hidden&&!$("#lbConfirm").innerHTML)lbRefresh()},20000);
+function lbRender(){
+  const box=$("#lbBox");if(!box)return;
+  $("#lbCard").hidden=prodMode()||!nubeOn();if($("#lbCard").hidden)return;
+  $("#lbAt").textContent=lbAt?"actualizado "+hhmm(lbAt)+" · cada 20 s":"";
+  const U=(USERS||[]).filter(u=>!u.legado||true);
+  const C=[...nubeLive.values()].filter(x=>!x.finalizado&&!x.terminado&&!(x.vence&&isVenc(x.vence)&&!x.abierto));
+  const M=[...movLive.values()].filter(x=>!x.finalizado&&!esSolicitada(x)&&!(x.vence&&isVenc(x.vence)));
+  const ROLN={E:"📦 Quien entrega",R:"📥 Quien recibe"};
+  const estC=x=>x.bloqueado?'<span class="pill p-bad">Bloqueado</span>':!x.abierto?'<span class="pill p-info">Sin abrir</span>':x.libre?'<span class="pill p-warn">Liberado</span>':'<span class="pill p-ok">En uso</span>';
+  box.innerHTML=`
+    <h3 class="lbH">Usuarios</h3>${U.length?U.map(u=>`<div class="uRow${u.activo===false?" off":""}"><div class="row" style="gap:8px"><b>${esc(u.nombre||u.id)}</b>${u.area?`<span class="small muted">${esc(u.area)}</span>`:""}<span class="sep"></span>${u.activo===false?'<span class="pill p-bad">Bloqueado</span>':u.usado?`<span class="small">${esc(u.equipo||"Vinculado")}${u.visto?" · "+(enLinea(u.visto)?"en línea":hace(u.visto)):""}</span>`:'<span class="pill p-mut">Sin equipo vinculado</span>'}</div>
+      <div class="row" style="gap:6px">${u.usado&&u.activo!==false&&!u.legado?`<button class="btn sm" data-lbu="${esc(u.id)}">🔓 Liberar equipo</button>`:""}${u.legado?"":`<button class="btn sm ${u.activo===false?"primary":"danger"}" data-lbk="${esc(u.id)}">${u.activo===false?"Desbloquear":"⛔ Bloquear"}</button>`}</div></div>`).join(""):'<p class="muted small" style="margin:0">Sin usuarios.</p>'}
+    <h3 class="lbH">Links de conteo</h3>${C.length?C.map(x=>{const link=conteoLink(x.id,x),i=x.id;return `<div class="uRow"><div class="row" style="gap:8px"><b>${esc(x.nombre)}</b><span class="small muted">${x.contador?esc(x.contador)+" · ":""}${fmt(x.n_lecturas||0)} lecturas${x.vence?" · vence "+fmtDT(x.vence):""}</span><span class="sep"></span>${estC(x)}</div>
+      <div class="row" style="gap:6px">${link&&(!x.abierto||x.libre)&&!x.bloqueado?`<a class="btn sm primary" href="${esc(waLink(`Conteo: ${x.nombre}\nÁbrelo en tu celular:\n${link}`))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-lbcp="${esc(i)}">Copiar link</button>`:""}
+        ${x.asignable&&usersCon("conteo").length?`<select class="selSm" data-lba="${esc(i)}" title="Usuario que lo ve en su menú">${uOpts("conteo",x.puesto,"📱 Asignar a…")}</select>`:""}
+        ${x.abierto&&!x.libre&&!x.bloqueado?`<button class="btn sm" data-lbl="${esc(i)}">🔓 Liberar celular</button>`:""}<button class="btn sm ${x.bloqueado?"primary":"danger"}" data-lbb="${esc(i)}">${x.bloqueado?"Desbloquear":"⛔ Bloquear"}</button><span class="sep"></span><button class="btn sm" data-lbf="${esc(i)}">Finalizar…</button></div></div>`}).join(""):'<p class="muted small" style="margin:0">No hay conteos abiertos.</p>'}
+    <h3 class="lbH">Entregas de materia prima</h3>${M.length?M.map(x=>{const L=x.lados||{};return `<div class="uRow"><div class="row" style="gap:8px"><b>${esc(x.nombre)}</b>${x.meta&&x.meta.ref?`<span class="small muted">${esc(x.meta.ref)}</span>`:""}</div>
+      ${["E","R"].map(r=>{const l=L[r];return `<div class="row" style="gap:6px"><span class="small" style="min-width:130px">${ROLN[r]}</span>${l?(l.bloqueado?'<span class="pill p-bad">Bloqueado</span>':`<span class="small">${esc(l.persona||"sin nombre")} · ${fmt(l.n_lecturas||0)} lecturas${l.terminado?" · terminó":""}</span>`):'<span class="pill p-mut">Sin abrir</span>'}<span class="sep"></span>
+        ${l&&!l.bloqueado&&!l.terminado?`<button class="btn sm" data-lbml="${esc(x.id)}|${r}">🔓 Liberar</button>`:""}<button class="btn sm ${l&&l.bloqueado?"primary":"danger"}" data-lbmb="${esc(x.id)}|${r}|${l&&l.bloqueado?0:1}">${l&&l.bloqueado?"Desbloquear":"⛔ Bloquear"}</button></div>`}).join("")}</div>`}).join(""):'<p class="muted small" style="margin:0">No hay entregas abiertas.</p>'}`;
+  const ok=async(fn,args,msg)=>{try{await rpc(SB,fn,Object.assign({p_clave:SB.admin},args));toast(msg);await lbRefresh()}catch(e){toast(LBMSG(e))}};
+  $$("#lbBox [data-lbu]").forEach(b=>b.onclick=()=>{const u=U.find(x=>x.id===b.dataset.lbu);confirmBox(`Liberar el equipo de ${esc(u.nombre||u.id)}: su mismo link se podrá abrir en otro equipo. El equipo actual queda desconectado.`,()=>ok("cb_u_liberar",{p_id:u.id},"Equipo liberado: el usuario abre su mismo link en el equipo nuevo"),"#lbConfirm")});
+  $$("#lbBox [data-lbk]").forEach(b=>b.onclick=()=>{const u=U.find(x=>x.id===b.dataset.lbk);if(u.activo===false)return uGuardar(u,{activo:true}).then(lbRender);
+    confirmBox(`Bloquear a ${esc(u.nombre||u.id)}: no podrá usar la app hasta que lo desbloquees.`,()=>uGuardar(u,{activo:false}).then(lbRender),"#lbConfirm")});
+  $$("#lbBox [data-lbcp]").forEach(b=>b.onclick=()=>copyText(conteoLink(b.dataset.lbcp,nubeLive.get(b.dataset.lbcp))));
+  $$("#lbBox select[data-lba]").forEach(s=>s.onchange=()=>ok("cb_conteo_asignar",{p_id:s.dataset.lba,p_puesto:s.value},s.value?"Conteo asignado a "+uNombre(s.value):"Conteo quitado del usuario"));
+  $$("#lbBox [data-lbl]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbl);confirmBox(`Liberar el celular de "${esc(x.nombre)}": ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas.`,()=>ok("cb_liberar",{p_id:x.id},"Celular liberado: reenvía el mismo link"),"#lbConfirm")});
+  $$("#lbBox [data-lbb]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbb);if(x.bloqueado)return ok("cb_bloquear",{p_id:x.id,p_si:false},"Link desbloqueado: puede abrirse de nuevo");
+    confirmBox(`Bloquear el link de "${esc(x.nombre)}": nadie podrá abrirlo ni enviar lecturas hasta que lo desbloquees. Las lecturas recibidas se mantienen.`,()=>ok("cb_bloquear",{p_id:x.id,p_si:true},"Link de conteo bloqueado"),"#lbConfirm")});
+  $$("#lbBox [data-lbf]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbf);confirmBox(`Finalizar "${esc(x.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,()=>ok("cb_finalizar",{p_id:x.id},"Conteo finalizado"),"#lbConfirm")});
+  $$("#lbBox [data-lbml]").forEach(b=>b.onclick=()=>{const [id,r]=b.dataset.lbml.split("|"),x=movLive.get(id);confirmBox(`Liberar el celular de ${r==="E"?"quien entrega":"quien recibe"} en "${esc(x.nombre)}": el próximo que abra el link en ese rol lo toma y recupera sus lecturas.`,()=>ok("cb_mov_liberar",{p_id:id,p_rol:r},"Celular liberado"),"#lbConfirm")});
+  $$("#lbBox [data-lbmb]").forEach(b=>b.onclick=()=>{const [id,r,si]=b.dataset.lbmb.split("|"),x=movLive.get(id);if(si==="0")return ok("cb_mov_bloquear",{p_id:id,p_rol:r,p_si:false},"Desbloqueado");
+    confirmBox(`Bloquear a ${r==="E"?"quien entrega":"quien recibe"} en "${esc(x.nombre)}": nadie podrá abrir ese rol ni enviar hasta que lo desbloquees.`,()=>ok("cb_mov_bloquear",{p_id:id,p_rol:r,p_si:true},"Bloqueado"),"#lbConfirm")});
+}
+$("#lbRef").onclick=()=>lbRefresh();
+const hayPuestos=()=>(USERS||[]).some(u=>u.activo!==false&&(u.permisos||[]).some(x=>x.startsWith("mp_")))||!!(SB.pu&&(SB.pu.bodega||SB.pu.produccion));
 
 /* =====================================================================
    PT en el celular fijo: producción registra cada pallet que sale de máquina, bodega cada pallet que recibe.
@@ -3907,7 +4513,7 @@ const ptItems=()=>(puCat&&puCat.items)||[];
 const ptFind=c=>{const i=ptIdx.get(key(c));return i==null?null:ptItems()[i]};
 async function ptAbrir(){
   puVista="pt";puestoApply();
-  $("#ptTitle").textContent=PST.puesto==="retail"?"Recepción de PT · retiro para despacho":esReceptorPT()?"Recepción de producto terminado":"Entrega de producto terminado";
+  $("#ptTitle").textContent=can("pt_retirar")?"Recepción de PT · retiro para despacho":esReceptorPT()?"Recepción de producto terminado":"Entrega de producto terminado";
   try{
     if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
       if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}
@@ -4028,9 +4634,11 @@ $("#ptCamPallet").onclick=()=>ptOpenCam("pallet");$("#ptCamSku").onclick=()=>ptO
    Producción, picking retail y distribución CARGAN devoluciones (guía, factura, fecha y productos).
    Bodega las RECEPCIONA: ve lo declarado y acepta (o corrige) lo que llega. El supervisor ve el cuadre en 5 · Logística inversa.
    ===================================================================== */
-const DEV_CARGA=["produccion","retail","distribucion"];
-const puDevCarga=()=>!!PST&&DEV_CARGA.includes(PST.puesto);
-const puDevRec=()=>!!PST&&PST.puesto==="bodega";
+const puDevCarga=()=>can("dev_cargar");
+const puDevRec=()=>can("dev_recibir");
+var dvModo="carga", puDevModo="";          // modo de la pantalla de devoluciones: "carga" (quien devuelve) o "rec" (bodega)
+const dvModoRec=()=>dvModo==="rec";
+const dvOrigen=d=>(d&&(d.area||ORIG[d.origen]||d.origen))||"";
 const ORIG={produccion:"Producción",retail:"Picking retail",distribucion:"Distribución"};
 var puDev=[], dv=store.get("inv_dv",null), dvT=null, dvSyncing=false, dvCamI=null, dvHold=false, dvLast={c:"",miss:99}, dvChk="";
 const dvSave=()=>store.set("inv_dv",dv);
@@ -4041,29 +4649,30 @@ const uuid4=()=>{try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}c
 const DV_BLOQ={noKeep:true,msg:"En las devoluciones solo se pueden registrar productos de la lista. Revisa el código o búscalo por nombre."};
 const dvMsg=e=>({codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Falta el N° de guía.",falta_factura:"Falta el N° de factura.",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
 const dvEstado=d=>d.finalizado?["Cerrada","p-mut"]:d.recibido?["Recibida","p-ok"]:d.rec_inicio?["En recepción","p-info"]:d.enviado?["Enviada a bodega","p-warn"]:["Borrador","p-mut"];
-async function puDevRefresh(){if(!(puDevCarga()||puDevRec()))return;try{const r=await prpc("cb_dev_mis");puDev=Array.isArray(r)?r:[]}catch(e){if(/puesto_invalido/.test(e.message))throw e}}
+async function puDevRefresh(m){if(!(puDevCarga()||puDevRec()))return;m=m||(puVista==="dev"?dvModo:(puDevRec()?"rec":"carga"));
+  try{let r;try{r=await prpc("cb_dev_mis",{p_modo:m})}catch(e){if(/PGRST202|function/.test(e.message))r=await prpc("cb_dev_mis");else throw e}puDev=Array.isArray(r)?r:[];puDevModo=m}catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e}}
 async function dvCatalogo(){
   try{if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
     if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}}catch(e){}
   ptIndex();
 }
-async function dvAbrir(){
-  puVista="dev";puestoApply();
-  $("#dvTitle").textContent=puDevRec()?"Recepción de devoluciones":PST.puesto==="produccion"?"Devolución de MP a bodega":PST.puesto==="distribucion"?"Devolución de clientes":"Devolución a bodega";
+async function dvAbrir(modo){
+  dvModo=modo||(puDevCarga()?"carga":"rec");puVista="dev";puestoApply();
+  $("#dvTitle").textContent=dvModoRec()?"Recepción de devoluciones":"Devolución a bodega"+(PST.area?" · "+PST.area:"");
   await dvCatalogo();
-  try{await puDevRefresh()}catch(e){}
-  if(dv&&dv.puesto===PST.puesto&&!dv.fin)return dvWork();
+  try{await puDevRefresh(dvModo)}catch(e){}
+  if(dv&&dv.puesto===PST.puesto&&!dv.fin&&dv.modo===dvModo)return dvWork();
   dvHomeRender();
 }
 function dvRowHtml(d,ro){
   const [t,c]=dvEstado(d);
-  return `<button class="dvRow" data-dv="${esc(d.id)}" ${ro?"disabled":""}><span class="dd"><b>Guía ${esc(d.guia||"—")} · Factura ${esc(d.factura||"—")}</b><span>${puDevRec()?esc(ORIG[d.origen]||d.origen)+" · ":""}${fechaCL(d.fecha)}${d.persona?" · "+esc(d.persona):""}${!puDevRec()&&d.lect?" · "+fmt(d.lect.length)+" líneas":""}</span></span><span class="pill ${c}">${t}</span></button>`;
+  return `<button class="dvRow" data-dv="${esc(d.id)}" ${ro?"disabled":""}><span class="dd"><b>Guía ${esc(d.guia||"—")} · Factura ${esc(d.factura||"—")}</b><span>${dvModoRec()?esc(dvOrigen(d))+" · ":""}${fechaCL(d.fecha)}${d.persona?" · "+esc(d.persona):""}${!dvModoRec()&&d.lect?" · "+fmt(d.lect.length)+" líneas":""}</span></span><span class="pill ${c}">${t}</span></button>`;
 }
 function dvHomeRender(){
   if(dv&&dv.fin){dv=null;dvSave()}
   $("#dvWork").hidden=true;$("#dvHome").hidden=false;dvStopCam();
-  const L=puDev||[];
-  if(puDevRec()){
+  const L=puDevModo===dvModo?(puDev||[]):[];
+  if(dvModoRec()){
     const pend=L.filter(d=>!d.recibido), hechas=L.filter(d=>d.recibido);
     $("#dvHome").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Devoluciones por recibir</h2>
       ${pend.length?pend.map(d=>dvRowHtml(d)).join(""):'<p class="muted" style="margin:0">No hay devoluciones enviadas a bodega por ahora. La lista se actualiza sola cada 20 s.</p>'}
@@ -4084,9 +4693,9 @@ async function dvNueva(){
 function dvElegir(id){
   const d=(puDev||[]).find(x=>x.id===id);if(!d)return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
-  if(puDevRec()){
+  if(dvModoRec()){
     if(d.recibido)return toast("Esta devolución ya fue recibida");
-    dv={id:d.id,puesto:PST.puesto,modo:"rec",info:{origen:d.origen,guia:d.guia,factura:d.factura,fecha:d.fecha,persona:d.persona,nota:d.nota||""},decl:Array.isArray(d.lect)?d.lect:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};dvSave();return dvWork();
+    dv={id:d.id,puesto:PST.puesto,modo:"rec",info:{origen:d.origen,area:d.area,guia:d.guia,factura:d.factura,fecha:d.fecha,persona:d.persona,nota:d.nota||""},decl:Array.isArray(d.lect)?d.lect:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};dvSave();return dvWork();
   }
   if(d.rec_inicio||d.recibido||d.finalizado)return toast("Bodega ya "+(d.recibido?"recibió":"está recibiendo")+" esta devolución: ya no se puede corregir.");
   dv={id:d.id,puesto:PST.puesto,modo:"carga",doc:{guia:d.guia||"",factura:d.factura||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},lect:Array.isArray(d.lect)?d.lect:[],dirty:false,ver:0,enviado:d.enviado||null};dvSave();dvWork();
@@ -4095,7 +4704,7 @@ function dvWork(){
   $("#dvHome").hidden=true;$("#dvWork").hidden=false;
   if(dvRec()){const i=dv.info||{};
     $("#dvDocEb").textContent="Devolución que recibes";
-    $("#dvDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(ORIG[i.origen]||i.origen||"")}</b></span><span>Guía <b>${esc(i.guia||"—")}</b></span><span>Factura <b>${esc(i.factura||"—")}</b></span><span>Fecha <b>${fechaCL(i.fecha)}</b></span>${i.persona?`<span>Devuelve <b>${esc(i.persona)}</b></span>`:""}</div>${i.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(i.nota)}</div>`:""}<div id="dvDecl"></div>`;
+    $("#dvDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(dvOrigen(i))}</b></span><span>Guía <b>${esc(i.guia||"—")}</b></span><span>Factura <b>${esc(i.factura||"—")}</b></span><span>Fecha <b>${fechaCL(i.fecha)}</b></span>${i.persona?`<span>Devuelve <b>${esc(i.persona)}</b></span>`:""}</div>${i.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(i.nota)}</div>`:""}<div id="dvDecl"></div>`;
     $("#dvFinEb").textContent="Al terminar de recibir";$("#dvFinTxt").textContent="Acepta lo que llegó tal como viene, o corrige la cantidad de lo que no calza. Después de terminar ya no se puede modificar.";$("#dvFin").textContent="Terminar recepción…";
   }else{
     $("#dvDocEb").textContent="1 · Documento de la devolución";
@@ -4248,7 +4857,7 @@ var devList=[], devSel=store.get("inv_devsel",null), devF=store.get("inv_devf","
 const devSt=d=>d.finalizado?"cerr":d.recibido?"rec":d.rec_inicio?"enrec":d.enviado?"pend":"borr";
 const DEVST={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],norec:["No llegó","p-bad"],nodecl:["No declarado","p-warn"],porrec:["Por recibir","p-info"]};
 function devEnter(){
-  const on=nubeOn();$("#dvNote").hidden=on;
+  const on=nubeOn();$("#dvNote").hidden=on;if(typeof dpEnter==="function")dpEnter();
   if(!on){$("#dvNote").innerHTML='Para ver las devoluciones, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.';$("#dvTbl").innerHTML="";$("#dvDet").hidden=true;$("#dvChips").innerHTML="";return}
   devRender();devRefresh(true);
 }
@@ -4260,8 +4869,8 @@ async function devRefresh(silent){
 }
 setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-devol").hidden)devRefresh(true)},20000);
 function devCuadre(d){
-  const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",D:null,R:null};
-    r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";r[side]=(r[side]||0)+(+l.qty||0)*(+l.f||1);m.set(k,r)}};
+  const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",ce:"",f:1,D:null,R:null};
+    r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}r[side]=(r[side]||0)+(+l.qty||0)*(+l.f||1);m.set(k,r)}};
   add(d.lect,"D");add(d.rec,"R");
   return [...m.values()].map(r=>{if(!r.desc&&erp&&typeof findItem==="function"){const it=findItem(r.cod);if(it){r.desc=it.desc;r.um=r.um||umTxt(it.um)}}
     r.dif=(r.R||0)-(r.D||0);r.st=r.D==null?(d.rec_inicio?"nodecl":"porrec"):r.R==null?(d.recibido?"norec":"porrec"):Math.abs(r.dif)<1e-9?"ok":r.dif<0?"falta":"sobra";return r});
@@ -4270,14 +4879,15 @@ function devRender(){
   const F=[["pend","Por recibir",d=>["pend","enrec"].includes(devSt(d))],["rec","Recibidas",d=>devSt(d)==="rec"],["dif","Con diferencia",d=>["rec","cerr"].includes(devSt(d))&&devCuadre(d).some(r=>r.st!=="ok")],["borr","Borradores",d=>devSt(d)==="borr"],["cerr","Cerradas",d=>devSt(d)==="cerr"],["todas","Todas",()=>true]];
   if(!F.some(f=>f[0]===devF))devF="pend";
   const o=$("#dvOrig").value,q=deacc($("#dvQ").value||"");
-  const base=devList.filter(d=>(!o||d.origen===o)&&(!q||deacc([d.guia,d.factura,d.persona,d.rec_persona,...(d.lect||[]).map(l=>l.code+" "+(l.desc||""))].join(" ")).includes(q)));
+  {const sel=$("#dvOrig"),areas=[...new Set(devList.map(dvOrigen).filter(Boolean))].sort();if(sel.dataset.k!==areas.join("|")){sel.innerHTML='<option value="">Todos</option>'+areas.map(a=>`<option>${esc(a)}</option>`).join("");sel.dataset.k=areas.join("|");sel.value=areas.includes(o)?o:""}}
+  const base=devList.filter(d=>(!o||dvOrigen(d)===o)&&(!q||deacc([d.guia,d.factura,d.persona,d.rec_persona,...(d.lect||[]).map(l=>l.code+" "+(l.desc||""))].join(" ")).includes(q)));
   $("#dvChips").innerHTML=F.map(([k,l,fn])=>`<button class="chip" data-f="${k}" aria-pressed="${devF===k}">${l} · ${fmt(base.filter(fn).length)}</button>`).join("");
   $$("#dvChips .chip").forEach(b=>b.onclick=()=>{devF=b.dataset.f;store.set("inv_devf",devF);devRender()});
   const fn=F.find(f=>f[0]===devF)[2], L=base.filter(fn);
   $("#dvAt").textContent=devAt?"actualizado "+hhmm(devAt)+" · cada 20 s":"";
   $("#dvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Origen</th><th>Guía</th><th>Factura</th><th>Devuelve</th><th>Recibe</th><th class="num">Líneas</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
     (L.length?L.map(d=>{const s=devSt(d),[t,c]=dvEstado(d),cu=s==="rec"||s==="cerr"?devCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
-      return `<tr data-di="${esc(d.id)}" class="${d.id===devSel?"sel":""}"><td>${fechaCL(d.fecha)}</td><td>${esc(ORIG[d.origen]||d.origen)}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.factura||"—")}</td><td>${esc(d.persona||"—")}</td><td>${esc(d.rec_persona||"—")}</td><td class="num">${fmt((d.lect||[]).length)}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
+      return `<tr data-di="${esc(d.id)}" class="${d.id===devSel?"sel":""}"><td>${fechaCL(d.fecha)}</td><td>${esc(dvOrigen(d))}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.factura||"—")}</td><td>${esc(d.persona||"—")}</td><td>${esc(d.rec_persona||"—")}</td><td class="num">${fmt((d.lect||[]).length)}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
      :`<tr><td colspan="9" class="muted">${devList.length?"No hay devoluciones con este filtro.":"Todavía no hay devoluciones. Las cargan los celulares fijos de producción, retail y distribución."}</td></tr>`)+"</tbody>";
   $$("#dvTbl [data-di]").forEach(tr=>tr.onclick=()=>{devSel=tr.dataset.di;store.set("inv_devsel",devSel);devRender();$("#dvDet").scrollIntoView({behavior:"smooth",block:"start"})});
   devDetRender();
@@ -4285,22 +4895,82 @@ function devRender(){
 function devDetRender(){
   const d=devList.find(x=>x.id===devSel);$("#dvDet").hidden=!d;if(!d)return;
   const rows=devCuadre(d),[t]=dvEstado(d),cnt=s=>rows.filter(r=>r.st===s).length;
-  $("#dvDetT").textContent=`${ORIG[d.origen]||d.origen} · Guía ${d.guia||"—"} · Factura ${d.factura||"—"}`;
+  $("#dvDetT").textContent=`${dvOrigen(d)} · Guía ${d.guia||"—"} · Factura ${d.factura||"—"}`;
   $("#dvDetS").innerHTML=`Fecha ${fechaCL(d.fecha)} · ${t}${d.persona?" · devuelve "+esc(d.persona):""}${d.enviado?" · enviada "+fmtDT(d.enviado):""}${d.rec_persona?" · recibe "+esc(d.rec_persona):""}${d.recibido?" · recibida "+fmtDT(d.recibido):""}${d.nota?`<br>Observación: ${esc(d.nota)}`:""}`;
   $("#dvKpis").innerHTML=[["Productos declarados",rows.filter(r=>r.D!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt("ok")],["Faltantes",cnt("falta")+cnt("norec")],["Sobrantes / no declarados",cnt("sobra")+cnt("nodecl")]].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
   const ord={falta:0,norec:1,nodecl:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
   $("#dvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Devuelto</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
-    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}</td><td>${esc(r.um||"")}</td><td class="num">${r.D==null?"—":fmt2(r.D)}</td><td class="num">${r.R==null?"—":fmt2(r.R)}</td><td class="num">${r.D==null||r.R==null?"—":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${DEVST[r.st][1]}">${DEVST[r.st][0]}</span></td></tr>`).join(""):`<tr><td colspan="7" class="muted">Sin productos todavía.</td></tr>`)+"</tbody>";
+    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td><td class="num">${r.D==null?"—":qBC(r.D,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.D==null||r.R==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${DEVST[r.st][1]}">${DEVST[r.st][0]}</span></td></tr>`).join(""):`<tr><td colspan="7" class="muted">Sin productos todavía.</td></tr>`)+"</tbody>";
   $("#dvCerrar").hidden=!!d.finalizado;$("#dvConfirmS").innerHTML="";
 }
+/* ---------- 5 · Logística inversa: crear una devolución desde el panel del PC ---------- */
+var dpLect=[], dpCat=null, dpIdx=new Map(), dpChk="";
+function dpItems(){return movCatalog()||dpCat||[]}
+function dpIndex(){dpIdx=new Map();dpItems().forEach((it,i)=>{if(it.cod)dpIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!dpIdx.has(k))dpIdx.set(k,i)})})}
+const dpFind=c=>{const i=dpIdx.get(key(c));return i==null?null:dpItems()[i]};
+async function dpEnter(){
+  const box=$("#dpCard");if(!box)return;box.hidden=!nubeOn()||prodMode();if(box.hidden)return;
+  if(!$("#dpFecha").value)$("#dpFecha").value=hoyISO();
+  if(!movCatalog()&&!dpCat){try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(r&&r.items)dpCat=r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}catch(e){}}
+  dpIndex();dpRender();
+  $("#dpCat").textContent=dpItems().length?`Lista de productos: ${fmt(dpItems().length)} productos${movCatalog()?" (informe del ERP de este PC)":" (desde Supabase)"}.`:"Sin lista de productos: carga el informe del ERP en 1 · Panel.";
+}
+function dpPend(v){
+  const it=dpFind(v),h=$("#dpHint");
+  if(!v){h.innerHTML="";$("#dpQtyL").textContent="Cantidad";return null}
+  h.innerHTML=it?`<b>${esc(it.desc||"(sin descripción)")}</b> <span class="muted">· ${esc(it.cod)} · unidad ERP: ${esc(umTxt(it.um))}</span>${conv(it)?`<div class="small">Se ingresa en <b>${esc(plural(it.ce))}</b> · 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</div>`:""}`:'<span style="color:var(--bad);font-weight:600">Este código NO existe en la lista de productos</span>';
+  $("#dpQtyL").textContent=it&&conv(it)?"Cantidad ("+plural(it.ce).toLowerCase()+")":"Cantidad"+(it?" ("+umTxt(it.um)+")":"");
+  return it;
+}
+function dpRead(){
+  const raw=norm($("#dpScan").value);if(!raw)return;
+  if(!dpFind(raw)&&esTextoBusqueda(raw)){const res=buscarNombre(dpItems(),raw),box=$("#dpSugg");box.hidden=false;
+    box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(raw)}"</span></button>`;
+    $$("#dpSugg [data-n]").forEach(b=>b.onclick=()=>{box.hidden=true;$("#dpScan").value=res[+b.dataset.n].cod;dpRead()});return}
+  $("#dpSugg").hidden=true;const v=codeStr(raw);$("#dpScan").value=v;dpChk=v;
+  const it=dpPend(v);
+  if(!it&&dpItems().length)return codeAlert(v,()=>focusSel($("#dpScan")),null,DV_BLOQ);
+  focusSel($("#dpQty"));
+}
+function dpAdd(){
+  const code=codeStr($("#dpScan").value);if(!code){toast("Escribe el código o el nombre del producto");return focusSel($("#dpScan"))}
+  const q=num($("#dpQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#dpQty"))}
+  const it=dpFind(code);if(!it&&dpItems().length){dpPend(code);return codeAlert(code,()=>focusSel($("#dpScan")),null,DV_BLOQ)}
+  const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:norm($("#dpPers").value).toUpperCase()||"PANEL",t:new Date().toISOString()};
+  if(conv(it)){l.f=+it.f;l.ce=it.ce}
+  dpLect.push(l);audio.beep(true);$("#dpScan").value="";$("#dpQty").value="";dpPend("");dpChk="";dpRender();focusSel($("#dpScan"));
+}
+function dpRender(){
+  const ls=[...dpLect].reverse();
+  $("#dpInfo").textContent=`${fmt(dpLect.length)} líneas`;
+  $("#dpList").innerHTML=ls.length?`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th></th></tr></thead><tbody>`+ls.map(l=>`<tr><td class="code">${esc(l.code)}</td><td class="desc">${esc(l.desc||"")}</td><td class="num">${qBC((+l.qty||0)*(+l.f||1),l.ce,l.f,l.um)}</td><td><button class="btn sm" data-dpx="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join("")+"</tbody>":'<tbody><tr><td class="muted">Agrega los productos que se devuelven.</td></tr></tbody>';
+  $$("#dpList [data-dpx]").forEach(b=>b.onclick=()=>{dpLect=dpLect.filter(l=>l.lid!==b.dataset.dpx);dpRender()});
+}
+async function dpEnviar(){
+  const doc={guia:norm($("#dpGuia").value).toUpperCase(),factura:norm($("#dpFact").value).toUpperCase(),fecha:$("#dpFecha").value,nota:norm($("#dpNota").value),persona:norm($("#dpPers").value).toUpperCase()};
+  if(!doc.guia){toast("Falta el N° de guía");return $("#dpGuia").focus()}
+  if(!doc.factura){toast("Falta el N° de factura");return $("#dpFact").focus()}
+  if(!doc.fecha){toast("Falta la fecha");return $("#dpFecha").focus()}
+  if(!dpLect.length){toast("Agrega al menos un producto");return focusSel($("#dpScan"))}
+  const area=norm($("#dpArea").value)||"Panel";
+  confirmBox(`Enviar a bodega la devolución guía ${esc(doc.guia)} · factura ${esc(doc.factura)} (${esc(area)}) con ${fmt(dpLect.length)} líneas.`,async()=>{
+    try{await rpc(SB,"cb_dev_crear_panel",{p_clave:SB.admin,p_area:area,p_doc:doc,p_lect:dpLect});
+      dpLect=[];["#dpGuia","#dpFact","#dpNota"].forEach(s=>$(s).value="");dpRender();toast("✓ Devolución enviada a bodega");devF="pend";await devRefresh(false)}
+    catch(e){toast(dvMsg(e))}},"#dpConfirm");
+}
+$("#dpScan").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();dpRead()}});
+$("#dpScan").addEventListener("input",()=>{$("#dpHint").innerHTML="";$("#dpSugg").hidden=true});
+$("#dpScan").addEventListener("blur",()=>setTimeout(()=>{const v=codeStr(norm($("#dpScan").value));if(!v||v===dpChk||calertOpen()||!$("#dpSugg").hidden)return;if(esTextoBusqueda(v)&&!dpFind(v))return;dpChk=v;const it=dpPend(v);if(!it&&dpItems().length)codeAlert(v,()=>focusSel($("#dpScan")),null,DV_BLOQ)},150));
+$("#dpQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();dpAdd()}});
+$("#dpAdd").onclick=dpAdd;$("#dpSend").onclick=dpEnviar;
 $("#dvRef").onclick=()=>devRefresh(false);$("#dvOrig").onchange=devRender;$("#dvQ").oninput=devRender;
 $("#dvX").onclick=()=>{devSel=null;store.set("inv_devsel",null);devRender()};
 $("#dvCerrar").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Cerrar la devolución guía ${esc(d.guia||"—")}: queda como histórico y bodega ya no la ve.`,async()=>{try{await rpc(SB,"cb_dev_cerrar",{p_clave:SB.admin,p_id:d.id});await devRefresh(false);toast("Devolución cerrada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
 $("#dvDel").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Eliminar la devolución guía ${esc(d.guia||"—")} con todo su detalle. No se puede deshacer.`,async()=>{try{await rpc(SB,"cb_dev_eliminar",{p_clave:SB.admin,p_id:d.id});devSel=null;store.set("inv_devsel",null);await devRefresh(false);toast("Devolución eliminada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
 $("#dvXlsx").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;const rows=devCuadre(d);
-  const aoa=[["Devolución",ORIG[d.origen]||d.origen],["N° de guía",d.guia||""],["N° de factura",d.factura||""],["Fecha",fechaCL(d.fecha)],["Devuelve",d.persona||""],["Recibe",d.rec_persona||""],["Estado",dvEstado(d)[0]],[],
-    ["Código","Descripción","Unidad","Devuelto","Recibido","Diferencia","Estado"],...rows.map(r=>[r.cod,r.desc||"",r.um||"",r.D==null?"":r.D,r.R==null?"":r.R,r.D==null||r.R==null?"":r.dif,DEVST[r.st][0]])];
-  const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=[{wch:14},{wch:40},{wch:8},{wch:11},{wch:11},{wch:11},{wch:14}];
+  const aoa=[["Devolución",dvOrigen(d)],["N° de guía",d.guia||""],["N° de factura",d.factura||""],["Fecha",fechaCL(d.fecha)],["Devuelve",d.persona||""],["Recibe",d.rec_persona||""],["Estado",dvEstado(d)[0]],[],
+    ["Código","Descripción","Bulto","Devuelto (bultos)","Recibido (bultos)","Unidad ERP","Devuelto","Recibido","Diferencia","Estado"],...rows.map(r=>[r.cod,r.desc||"",r.ce&&r.f!==1?r.ce+" = "+r.f+" "+umTxt(r.um):"",r.D==null||!(r.ce&&r.f!==1)?"":r.D/r.f,r.R==null||!(r.ce&&r.f!==1)?"":r.R/r.f,umTxt(r.um),r.D==null?"":r.D,r.R==null?"":r.R,r.D==null||r.R==null?"":r.dif,DEVST[r.st][0]])];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=[{wch:14},{wch:40},{wch:18},{wch:12},{wch:12},{wch:8},{wch:11},{wch:11},{wch:11},{wch:14}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Cuadre");
   const det=[["Lado","Código","Descripción","Cantidad","Equivale a","Unidad","Persona","Hora"],...(d.lect||[]).map(l=>["Devuelve",l.code,l.desc||"",+l.qty||0,(+l.qty||0)*(+l.f||1),l.um||"",l.user||"",l.t||""]),...(d.rec||[]).map(l=>["Recibe",l.code,l.desc||"",+l.qty||0,(+l.qty||0)*(+l.f||1),l.um||"",l.user||"",l.t||""])];
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(det),"Detalle");
@@ -4354,48 +5024,54 @@ function ptRows(){
   return {rows,ini,snRows};
 }
 const PTST={ok:["Recibido OK","p-ok"],dif:["Diferencia de cantidad","p-bad"],otro:["Producto distinto","p-bad"],transito:["En tránsito","p-info"],sinprod:["Sin registro de producción","p-warn"]};
-function ptQ(t,r,n){if(t==null)return "";return `${fmt2(t)} <span class="small muted">${esc(umTxt(r.um))}</span>${r.ce&&r.f!==1?`<span class="sub">${fmt2(n)} ${esc(plural(r.ce))}</span>`:""}`}
+function ptQ(t,r,n){if(t==null)return "";return qBC(t,r.ce,r.f,r.um)}
+/* Una sola tabla: pallets con número (uno a uno) + pallets sin número (una fila por producto). */
+const PTSN2ST={ok:"ok",faltan:"dif",sobran:"dif",transito:"transito",sinprod:"sinprod"};
+function ptTabla(){
+  const {rows,ini,snRows}=ptRows(),T=[];
+  for(const r of rows)T.push({pallet:r.pallet,cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,pe:r.pe,pr:r.pr,dif:r.dif,st:r.st,
+    rec:r.r?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
+  for(const o of snRows)T.push({sn:true,pallet:`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`,cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
+    rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
+  return {T,ini};
+}
+const hm24=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hour12:false});
+const ptBul=(base,r)=>base==null?"":(r.ce&&r.f!==1?`<b>${fmt2(base/r.f)}</b> <span class="small muted">${esc(plural(r.ce))}</span>`:`<b>${fmt2(base)}</b> <span class="small muted">${esc(umTxt(r.um))}</span>`);
+const ptConv=(base,r)=>base==null?"":(r.ce&&r.f!==1?`${fmt2(base)} <span class="small muted">${esc(umTxt(r.um))}</span><span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:'<span class="muted">—</span>');
 function renderPtPanel(){
   if($("#v-pt").hidden)return;
-  const {rows,ini,snRows}=ptRows(), cnt=s=>rows.filter(r=>s.includes(r.st)).length, P=ptData.puestos||{};
+  const {T,ini}=ptTabla(), cnt=s=>T.filter(r=>s.includes(r.st)).length, P=ptData.puestos||{};
   const cier=p=>ptData.cierres.filter(x=>x.puesto===p).map(x=>x.t).sort().at(-1);
   $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"],["retail","🛒 Picking retail retira"]].map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
-    return `<div class="mpSide"><span class="rl">${t}</span><div><span class="dot ${x.usado?(on?"on":"off"):""}"></span><b>${!x.usado?"Celular sin vincular":on?"En línea":"Sin señal"}</b>${x.visto&&!on?` <span class="small muted">· última señal ${hace(x.visto)}</span>`:""}</div><div class="small muted">${x.persona?esc(x.persona)+" · ":""}${c?"último cierre de turno "+fmtDT(c):"sin cierres registrados"}</div></div>`}).join("");
-  const snP=snRows.reduce((a,o)=>a+o.np,0),snR=snRows.reduce((a,o)=>a+o.nr,0),snD=snRows.filter(o=>o.st!=="ok").length;
-  $("#ptKpis").innerHTML=[["Pallets producidos",rows.filter(r=>r.e).length+snP],["Pallets recibidos",rows.filter(r=>r.r).length+snR],...(ptData.pallets.some(d=>d.puesto==="retail")?[["Retirados por retail",rows.filter(r=>r.r&&r.r.puesto==="retail").length+snRows.reduce((a,o)=>a+(o.nrr||0),0)]]:[]),["Recibidos OK",cnt(["ok"])],["En tránsito",cnt(["transito"])],["Con diferencia",cnt(["dif","otro"])],["Sin registro de producción",cnt(["sinprod"])],...(snRows.length?[["Productos sin N° con diferencia",snD]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
-  const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["dif","otro"])],["transito","En tránsito",cnt(["transito"])],["sinprod","Sin registro de producción",cnt(["sinprod"])],["ok","Recibidos OK",cnt(["ok"])]];
+    return `<div class="mpSide"><span class="rl">${t}</span><div><span class="dot ${x.usado?(on?"on":"off"):""}"></span><b>${!x.usado?"Sin usuario vinculado":on?"En línea":"Sin señal"}</b>${x.visto&&!on?` <span class="small muted">· última señal ${hace(x.visto)}</span>`:""}</div><div class="small muted">${x.persona?esc(x.persona)+" · ":""}${c?"último cierre "+fmtDT(c):"sin cierres registrados"}</div></div>`}).join("");
+  // 3 indicadores: pallets, SKU y unidades (bultos)
+  const nE=T.reduce((a,r)=>a+(r.sn?r.np:(r.pe!=null?1:0)),0), nR=T.reduce((a,r)=>a+(r.sn?r.nr:(r.pr!=null?1:0)),0);
+  const sku=new Set(T.map(r=>key(r.cod))).size;
+  const bE=T.reduce((a,r)=>a+(r.pe!=null?r.pe/(r.ce&&r.f!==1?r.f:1):0),0), bR=T.reduce((a,r)=>a+(r.pr!=null?r.pr/(r.ce&&r.f!==1?r.f:1):0),0);
+  $("#ptKpis").innerHTML=[[`${fmt(nE)} / ${fmt(nR)}`,"Pallets · entregados / recibidos"],[fmt(sku),"SKU · productos distintos"],[`${fmt2(bE)} / ${fmt2(bR)}`,"Unidades (bultos) · entregadas / recibidas"]].map(([v,l])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
+  const F=[["todos","Todos",T.length],["dif","Con diferencia",cnt(["dif","otro"])],["transito","En tránsito",cnt(["transito"])],["sinprod","Sin registro de producción",cnt(["sinprod"])],["ok","Recibidos OK",cnt(["ok"])]];
   $("#ptChips").innerHTML=F.map(([f,l,n])=>`<button class="chip" data-f="${f}" aria-pressed="${ptFilter===f}">${l} · ${fmt(n)}</button>`).join("");
   $$("#ptChips .chip").forEach(b=>b.onclick=()=>{ptFilter=b.dataset.f;renderPtPanel()});
   const q=deacc($("#ptQ").value), ord={dif:0,otro:1,sinprod:2,transito:3,ok:4};
-  let f=rows.filter(r=>ptFilter==="todos"||(ptFilter==="dif"?["dif","otro"].includes(r.st):r.st===ptFilter));
+  let f=T.filter(r=>ptFilter==="todos"||(ptFilter==="dif"?["dif","otro"].includes(r.st):r.st===ptFilter));
   if(q)f=f.filter(r=>deacc(r.pallet+" "+r.cod+" "+r.desc).includes(q));
   f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
-  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Producido</th><th>Hora prod.</th><th class="num">Recibido</th><th>Recibió · hora</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
-    (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.st==="otro"?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.r.desc||r.r.code)}</span>`:""}</td>
-      <td class="num">${ptQ(r.pe,r,r.e?+r.e.qty:0)}</td><td class="small">${r.e?hhmm(r.e.t)+(r.e.user?" · "+esc(r.e.user):""):""}</td>
-      <td class="num">${ptQ(r.pr,r,r.r?+r.r.qty:0)}</td><td class="small">${r.r?`<b>${PTREC[r.r.puesto]||""}</b> · `+hhmm(r.r.t)+(r.r.user?" · "+esc(r.r.user):""):""}</td>
-      <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":(r.dif>0?"+":"")+fmt2(r.dif)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td></tr>`).join("")
-    :`<tr><td colspan="9" class="muted">${rows.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
-  // pallets sin número: cuadre por SKU
-  $("#ptSnBox").hidden=!snRows.length;
-  const so={faltan:0,sinprod:1,sobran:2,transito:3,ok:4};
-  $("#ptSn").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Pallets prod.</th><th class="num">Producido</th><th class="num">Pallets recib.</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
-    [...snRows].sort((a,b)=>so[a.st]-so[b.st]||Math.abs(b.dif)-Math.abs(a.dif)).map(o=>`<tr><td class="code">${esc(o.cod)}</td><td class="desc">${esc(o.desc)}</td><td class="num">${fmt(o.np)}</td><td class="num">${ptQ(o.np?o.p:null,o,o.p/(o.f||1))}</td><td class="num">${fmt(o.nr)}${o.nrr?`<span class="sub">bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)}</span>`:""}</td><td class="num">${ptQ(o.nr?o.rc:null,o,o.rc/(o.f||1))}</td>
-      <td class="num" style="font-weight:600;color:${o.dif<0?"var(--bad)":o.dif>0?"var(--warn)":"inherit"}">${(o.dif>0?"+":"")+fmt2(o.dif)}</td><td><span class="pill ${PTSN[o.st][1]}">${PTSN[o.st][0]}</span></td></tr>`).join("")+"</tbody>";
-  // resumen por producto (con número y sin número)
-  const pm=new Map();for(const o of snRows){pm.set(key(o.cod),{cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,np:o.np,nr:o.nr,p:o.p,rc:o.rc})}
-  for(const r of rows){const k=key(r.cod),o=pm.get(k)||{cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,np:0,nr:0,p:0,rc:0};if(r.e){o.np++;o.p+=r.pe}if(r.r&&r.st!=="otro"){o.nr++;o.rc+=r.pr}pm.set(k,o)}
-  $("#ptProd").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Pallets prod.</th><th class="num">Producido</th><th class="num">Pallets recib.</th><th class="num">Recibido</th><th class="num">Diferencia</th></tr></thead><tbody>`+
-    [...pm.values()].map(o=>`<tr><td class="code">${esc(o.cod)}</td><td class="desc">${esc(o.desc)}</td><td class="num">${fmt(o.np)}</td><td class="num">${ptQ(o.p,o,o.p/(o.f||1))}</td><td class="num">${fmt(o.nr)}</td><td class="num">${ptQ(o.rc,o,o.rc/(o.f||1))}</td><td class="num" style="font-weight:600">${fmt2(o.rc-o.p)}</td></tr>`).join("")+"</tbody>";
+  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th><th>Pallet recibido</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th><th>Hora de captura</th></tr></thead><tbody>`+
+    (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.otro?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.otro)}</span>`:""}</td>
+      <td class="num">${ptBul(r.pe,r)}</td><td class="num">${ptConv(r.pe,r)}</td><td class="small">${r.rec?esc(r.rec):'<span class="muted">—</span>'}</td>
+      <td class="num">${r.pr==null?"":qBC(r.pr,r.ce,r.f,r.um)}</td>
+      <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td>
+      <td class="small" style="white-space:nowrap" title="${r.uE?"Producción: "+esc(r.uE):""}">${r.tE?"Prod. "+hm24(r.tE):""}${r.tE&&r.tR?"<br>":""}${r.tR?"Recep. "+hm24(r.tR):""}${!r.tE&&!r.tR?'<span class="muted">—</span>':""}</td></tr>`).join("")
+    :`<tr><td colspan="10" class="muted">${T.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
   $("#ptCierres").innerHTML=`<div class="muted" style="margin-bottom:6px">Desde ${fmtDT(ini)}${ptAt?` · actualizado ${hhmm(ptAt)}, se refresca cada 20 s`:""}</div>`+
     ([...ptData.cierres].reverse().slice(0,12).map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--line)"><b>${c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto}</b> cerró turno · ${fmtDT(c.t)}${c.persona?" · "+esc(c.persona):""}</div>`).join("")||'<div class="muted">Sin cierres de turno todavía.</div>');
 }
 $("#ptExp").onclick=()=>{
-  const {rows}=ptRows(), wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Producido":r.pe??"","Hora producción":r.e?fmtDT(r.e.t):"","Operario producción":r.e?r.e.user||"":"","Recibido":r.pr??"","Recibido por":r.r?PTREC[r.r.puesto]||"":"","Hora recepción":r.r?fmtDT(r.r.t):"","Operario recepción":r.r?r.r.user||"":"","Diferencia":r.dif??"","Estado":PTST[r.st][0]}))),"Pallets");
-  const {snRows}=ptRows();
-  if(snRows.length)XLSX.utils.book_append_sheet(wb,sheetFrom(snRows.map(o=>({"Código":o.cod,"Descripción":o.desc,"Unidad ERP":umTxt(o.um),"Pallets producción":o.np,"Producido":o.p,"Pallets recibidos":o.nr,"Pallets bodega":o.nrb||0,"Pallets retail":o.nrr||0,"Recibido":o.rc,"Recibido bodega":o.rb||0,"Recibido retail":o.rr||0,"Diferencia":o.dif,"Estado":PTSN[o.st][0]}))),"Sin número por producto");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Celular":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
+  const {T}=ptTabla(), wb=XLSX.utils.book_new(), cv=r=>r.ce&&r.f!==1;
+  XLSX.utils.book_append_sheet(wb,sheetFrom(T.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Unidades (bultos)":r.pe==null?"":cv(r)?r.pe/r.f:r.pe,"Bulto":cv(r)?r.ce:umTxt(r.um),
+    "Conversión":r.pe==null?"":r.pe,"Unidad ERP":umTxt(r.um),"Pallet recibido":r.rec,"Recibido (bultos)":r.pr==null?"":cv(r)?r.pr/r.f:r.pr,"Recibido":r.pr??"","Diferencia":r.dif??"","Estado":PTST[r.st][0],
+    "Hora producción":r.tE?fmtDT(r.tE):"","Hora recepción":r.tR?fmtDT(r.tR):""}))),"Pallets");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Lado":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
   saveWb(wb,"PT_"+new Date().toISOString().slice(0,10)+".xlsx");
 };
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
