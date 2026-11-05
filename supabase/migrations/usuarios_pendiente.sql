@@ -314,3 +314,151 @@ grant execute on function
   public.cb_pt_registrar(text, text, jsonb), public.cb_pt_buscar(text, text, text), public.cb_pt_cerrar(text, text, text), public.cb_pt_listar(text, timestamptz),
   public.cb_dev_guardar(text, text, uuid, jsonb, jsonb, boolean), public.cb_dev_mis(text, text, text), public.cb_dev_recibir(text, text, uuid, text, jsonb, boolean)
 to anon, authenticated;
+
+-- =====================================================================
+--  08 (continuación): LIBERAR O BLOQUEAR ACCESOS + DEVOLUCIÓN CREADA DESDE EL PANEL
+--  · Usuario: liberar = su mismo link se puede abrir en otro equipo; bloquear = desactivar.
+--  · Link de conteo y lado de Entrega MP: bloquear = nadie puede abrirlo ni enviar hasta desbloquear.
+-- =====================================================================
+
+-- Usuario: soltar el equipo vinculado sin cambiar su link.
+create or replace function public.cb_u_liberar(p_clave text, p_id text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  update cb_puesto set usado = null, sesion_hash = null, equipo = null where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+-- Link de conteo: bloquear (p_si) o desbloquear.
+create or replace function public.cb_bloquear(p_clave text, p_id uuid, p_si boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_si then update cb_conteos set device = '__bloqueado__', secret_hash = null where id = p_id;
+  else update cb_conteos set device = null, secret_hash = null where id = p_id and device = '__bloqueado__'; end if;
+end $$;
+
+create or replace function public.cb_abrir(p_id uuid, p_token text, p_device text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos; v_secret text := encode(extensions.gen_random_bytes(16), 'hex');
+begin
+  select * into c from cb_conteos where id = p_id for update;
+  if not found or c.token_hash <> extensions.crypt(coalesce(p_token,''), c.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if c.finalizado is not null then raise exception 'finalizado'; end if;
+  if c.vence is not null and c.vence < now() then raise exception 'vencido'; end if;
+  if c.device = '__bloqueado__' then raise exception 'bloqueado'; end if;
+  if c.device is not null and c.device <> p_device then raise exception 'usado'; end if;
+  update cb_conteos set device = p_device, secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')),
+         abierto = coalesce(abierto, now()) where id = p_id;
+  return jsonb_build_object('nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'items', c.items, 'meta', c.meta, 'secret', v_secret,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_lecturas where conteo = p_id), '[]'::jsonb));
+end $$;
+
+create or replace function public.cb_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', c.id, 'nombre', c.nombre, 'creado', c.creado, 'vence', c.vence, 'finalizado', c.finalizado,
+      'abierto', c.abierto, 'contador', c.contador, 'ultimo_envio', c.ultimo_envio, 'n_lecturas', c.n_lecturas,
+      'visto', c.visto, 'terminado', c.terminado, 'puesto', c.puesto, 'asignable', c.link_token is not null,
+      'libre', c.device is null, 'bloqueado', c.device = '__bloqueado__', 'token', c.link_token,
+      'productos', jsonb_array_length(c.items),
+      'contados', (select count(distinct l.data->>'k') from cb_lecturas l where l.conteo = c.id)
+    ) order by c.creado desc)
+    from cb_conteos c where c.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+-- Lado de Entrega MP: bloquear (p_si) o desbloquear.
+create or replace function public.cb_mov_bloquear(p_clave text, p_id uuid, p_rol text, p_si boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if p_si then
+    insert into cb_mov_lado(mov, rol, device, secret_hash) values (p_id, p_rol, '__bloqueado__', extensions.crypt(encode(extensions.gen_random_bytes(16),'hex'), extensions.gen_salt('bf')))
+    on conflict (mov, rol) do update set device = '__bloqueado__', secret_hash = excluded.secret_hash;
+  else
+    delete from cb_mov_lado where mov = p_id and rol = p_rol and device = '__bloqueado__';
+  end if;
+end $$;
+
+create or replace function public.cb_mov_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_rol(p_clave);
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'finalizado', m.finalizado, 'meta', m.meta, 'token', case when r = 'admin' then m.link_token end,
+      'lados', coalesce((select jsonb_object_agg(l.rol, jsonb_build_object(
+          'persona', l.persona, 'abierto', l.abierto, 'visto', l.visto, 'terminado', l.terminado,
+          'ultimo_envio', l.ultimo_envio, 'n_lecturas', l.n_lecturas, 'bloqueado', l.device = '__bloqueado__')) from cb_mov_lado l where l.mov = m.id), '{}'::jsonb)
+    ) order by m.creado desc)
+    from cb_mov m where m.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_abrir(p_id uuid, p_token text, p_device text, p_rol text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; l cb_mov_lado; v_secret text := encode(extensions.gen_random_bytes(16), 'hex'); v_mio text; v_stock jsonb; v_at timestamptz;
+begin
+  select * into m from cb_mov where id = p_id;
+  if not found or m.token_hash <> extensions.crypt(coalesce(p_token,''), m.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if coalesce(m.meta ->> 'estado', 'activa') = 'solicitada' then perform pg_sleep(0.5); raise exception 'no_existe'; end if;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() then raise exception 'vencido'; end if;
+  select rol into v_mio from cb_mov_lado where mov = p_id and device = p_device limit 1;
+  if p_rol is null then
+    return jsonb_build_object('nombre', m.nombre, 'meta', m.meta, 'mio', v_mio,
+      'tomados', coalesce((select jsonb_object_agg(rol, coalesce(persona,'')) from cb_mov_lado where mov = p_id), '{}'::jsonb));
+  end if;
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if v_mio is not null and v_mio <> p_rol then raise exception 'otro_rol'; end if;
+  select * into l from cb_mov_lado where mov = p_id and rol = p_rol for update;
+  if found and l.device = '__bloqueado__' then raise exception 'bloqueado'; end if;
+  if found and l.device <> p_device then raise exception 'rol_tomado'; end if;
+  if found then
+    update cb_mov_lado set secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')), visto = now(), terminado = null where mov = p_id and rol = p_rol;
+  else
+    insert into cb_mov_lado(mov, rol, device, secret_hash, visto) values (p_id, p_rol, p_device, extensions.crypt(v_secret, extensions.gen_salt('bf')), now());
+  end if;
+  if p_rol = 'E' then
+    select c.actualizado,
+           (select jsonb_object_agg(k, c.stock -> k) from (select s ->> 0 as k from jsonb_array_elements(coalesce(m.meta -> 'sol', '[]'::jsonb)) s) q where c.stock ? k)
+      into v_at, v_stock from cb_catalogo c where c.id = 1;
+  end if;
+  return jsonb_build_object('nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'items', m.items, 'meta', m.meta, 'secret', v_secret, 'rol', p_rol,
+    'stock', v_stock, 'stock_at', v_at,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_mov_lect where mov = p_id and rol = p_rol), '[]'::jsonb));
+end $$;
+
+-- Devolución creada desde el panel del PC (supervisor): queda enviada a bodega.
+create or replace function public.cb_dev_crear_panel(p_clave text, p_area text, p_doc jsonb, p_lect jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_id uuid; v_fecha date;
+begin
+  perform cb_check(p_clave);
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  if jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  if coalesce(trim(p_doc->>'guia'),'') = '' then raise exception 'falta_guia'; end if;
+  if coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_factura'; end if;
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if v_fecha is null then raise exception 'fecha_invalida'; end if;
+  insert into cb_dev(origen, area, persona, guia, factura, fecha, nota, lect, enviado)
+  values ('panel', left(coalesce(nullif(trim(p_area),''), 'Panel'), 60), left(p_doc->>'persona', 80), left(trim(p_doc->>'guia'), 40), left(trim(p_doc->>'factura'), 40),
+          v_fecha, left(p_doc->>'nota', 300), p_lect, now())
+  returning id into v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+
+grant execute on function
+  public.cb_u_liberar(text, text), public.cb_bloquear(text, uuid, boolean), public.cb_abrir(uuid, text, text), public.cb_listar(text),
+  public.cb_mov_bloquear(text, uuid, text, boolean), public.cb_mov_listar(text), public.cb_mov_abrir(uuid, text, text, text),
+  public.cb_dev_crear_panel(text, text, jsonb, jsonb)
+to anon, authenticated;
