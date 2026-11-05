@@ -1,5 +1,5 @@
 // Guarda la app y la lista de productos en el celular para que funcionen sin señal.
-const CACHE = "conteo-bodega-cdcbcdf471";
+const CACHE = "conteo-bodega-f70d620489";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => {
@@ -24,12 +24,4 @@ self.addEventListener("fetch", e => {
       return Response.error();
     })
   );
-});
-// Aviso de tarea nueva: al tocar la notificación se abre (o enfoca) la app.
-self.addEventListener("notificationclick", e => {
-  e.notification.close();
-  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(ws => {
-    for (const w of ws) { if ("focus" in w) return w.focus(); }
-    return self.clients.openWindow ? self.clients.openWindow("./index.html") : null;
-  }));
 });
