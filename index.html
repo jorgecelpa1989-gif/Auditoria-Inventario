@@ -3093,9 +3093,9 @@ $("#btnReconteo").onclick=async()=>{
   $("#btnReconteo").disabled=true;
   try{const c=await crearNube(m,its,null,true);c.codes=its.map(i=>i.cod);if(raiz)c.reconteoDe=raiz.id;
     conteos.unshift(c);store.set("inv_conteos",conteos);renderConteos();
-    $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)} · Manda este link a quien hará el reconteo (idealmente otra persona):</div>
-      <input id="reLink" readonly value="${esc(c.link)}" style="font:13px var(--mono)"><div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="reCopy">Copiar link</button></div></div>`;
-    $("#reCopy").onclick=()=>copyText(c.link,$("#reLink"));
+    $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)}</div>
+      <div class="small">Mándalo a quien hará el reconteo (idealmente otra persona) desde <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div><div class="row">${'<button class="btn primary" data-irperm>Ir a 6 · Permisos</button>'}</div></div>`;
+    irPermisos($("#reRes"));
     toast("Reconteo creado");renderResult();
   }catch(e){toast(sbMsg(e))}finally{$("#btnReconteo").disabled=false}
 };
@@ -3292,7 +3292,7 @@ $("#btnCrear").onclick=async()=>{
   try{
    if(nubeOn()){
     const c=await crearNube(m,its,sel,rot);
-    const puA=$("#cPuesto").value;if(puA&&!$("#cPuWrap").hidden){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puA});c.puesto=puA}catch(e){toast("El conteo se creó, pero no se pudo asignar a "+uNombre(puA))}}
+    const puA="";if(puA){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puA});c.puesto=puA}catch(e){toast("El conteo se creó, pero no se pudo asignar a "+uNombre(puA))}}
     conteos.unshift(c);store.set("inv_conteos",conteos);
     erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
     cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
@@ -3326,23 +3326,24 @@ async function closeLink(c){
 function showCreated(c){
   const box=$("#crearRes");box.dataset.id=c.id;
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
+  if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
+    <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
+    <div class="small">Para mandarlo al contador (WhatsApp o copiar link), asignarlo a un usuario, liberarlo o bloquearlo: <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
+    <div class="row"><button class="btn primary" data-irperm>Ir a 6 · Permisos</button></div></div>`;irPermisos(box);return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
-    <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
+    <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
-    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button></div>
-    ${c.nube?`<div class="small" style="border-top:1px solid var(--line);padding-top:8px">Envío automático activo: el link funciona en <b>un solo celular</b> (el primero que lo abre) y sus lecturas llegan solas a la tabla de abajo.</div></div>`:`<div class="small" style="border-top:1px solid var(--line);padding-top:8px">Cuando el contador te confirme que <b>ya lo abrió</b>, cierra el link para que no se pueda abrir en otro celular.</div>
-    <div class="row"><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`}`;
-  $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));
-  if($("#btnCloseLink"))$("#btnCloseLink").onclick=()=>closeLink(c);
-  $("#linkOut").onclick=e=>e.target.select();
+    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`;
+  $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));$("#btnCloseLink").onclick=()=>closeLink(c);$("#linkOut").onclick=e=>e.target.select();
 }
+function irPermisos(box){if(box)box.querySelectorAll("[data-irperm]").forEach(b=>b.onclick=()=>{show("permisos");setTimeout(()=>{const c=$("#lbCard");if(c)c.scrollIntoView({behavior:"smooth",block:"start"})},150)})}
 const isVenc=v=>!!v&&Date.now()>Date.parse(v);
 let autoClosing=false;
 async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.nube&&!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
 function renderConteos(){renderConteosOnly();autoCloseExpired()}
 function renderConteosOnly(){
   if(!$("#conteosTbl")){
-    $("#cPuWrap").hidden=!(nubeOn()&&usersCon("conteo").length);if(!$("#cPuWrap").hidden){const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— A nadie —")}
+    $("#cPuWrap").hidden=true;
     if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();return}
   const hasN=conteos.some(c=>c.nube);
   $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
@@ -4024,9 +4025,7 @@ function renderMpCmp(){
   if($("#actCopy"))$("#actCopy").onclick=()=>copyText(m.link);
   $("#mpSides").hidden=sol;
   $("#mpTitle").innerHTML=`${esc(m.nombre)}${m.ref?` <span class="small muted">· ${esc(m.ref)}</span>`:""}`;
-  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div>${l&&!l.terminado&&x&&!x.finalizado&&!prodMode()&&nubeOn()?`<button class="btn sm" data-ml="${r}" style="align-self:flex-start;margin-top:4px" title="Si ese celular quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}</div>`}).join("");
-  $$("#mpSides [data-ml]").forEach(b=>b.onclick=()=>{const r=b.dataset.ml,l=L[r]||{};
-    confirmBox(`Liberar el celular de ${r==="E"?"quien entrega":"quien recibe"}${l.persona?" ("+esc(l.persona)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link en ese rol lo toma y recupera sus ${fmt(l.n_lecturas||0)} lecturas.`,async()=>{try{await rpc(SB,"cb_mov_liberar",{p_clave:SB.admin,p_id:m.id,p_rol:r});await refreshMov(true);toast("Celular liberado: reenvía el mismo link")}catch(e){toast(movMsg(e))}},"#mpConfirm");$("#mpConfirm")&&$("#mpConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
+  $("#mpSides").innerHTML=["E","R"].map(r=>{const l=L[r],[d,t,det]=ladoEstado(l,x);return `<div class="mpSide"><span class="rl">${r==="E"?"📦 Quien entrega":"📥 Quien recibe"}</span><div><span class="dot ${d}"></span><b>${t}</b>${det?` <span class="small muted">· ${det}</span>`:""}</div><div class="small muted">${l&&l.persona?esc(l.persona):"Sin nombre todavía"}${l?" · "+fmt(l.n_lecturas)+" lecturas":""}</div></div>`}).join("");
   const rows=mpRows(m.id), cnt=s=>rows.filter(r=>s.includes(r.st)).length, hasS=rows.some(r=>r.S!=null);
   $("#mpKpis").innerHTML=[...(hasS?[["Solicitados",rows.filter(r=>r.S!=null).length]]:[]),["Productos entregados",rows.filter(r=>r.E!=null).length],["Productos recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt(["ok"])],["Con diferencia",cnt(["falta","sobra","norec","noent"])],["Por recibir",cnt(["porrec"])],...(hasS?[["Por entregar",cnt(["porent"])]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
   const F=[["todos","Todos",rows.length],["dif","Con diferencia",cnt(["falta","sobra","norec","noent"])],["ok","Cuadran",cnt(["ok"])],["porrec","Por recibir",cnt(["porrec"])],...(hasS?[["porent","Por entregar",cnt(["porent"])]]:[])];
@@ -4411,13 +4410,12 @@ function uPintar(){
       ${link&&!u.usado&&u.activo!==false?`<input readonly value="${esc(link)}" id="ul-${esc(u.id)}" style="font:12px var(--mono);padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%">`:""}
       <div class="row" style="gap:6px">${link&&!u.usado&&u.activo!==false?`<a class="btn sm primary" href="${esc(waLink(`${u.nombre||"Usuario"} · Control de Operaciones. Ábrelo una sola vez en el equipo asignado (PC o celular):\n`+link))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-ucp="${esc(u.id)}">Copiar link</button>`:""}
         ${leg?"":`<button class="btn sm" data-ued="${esc(u.id)}">Editar</button>`}<button class="btn sm" data-uln="${esc(u.id)}">${u.usado||link?"Nuevo acceso…":"Generar acceso"}</button>
-        ${leg?"":`<button class="btn sm" data-uac="${esc(u.id)}">${u.activo===false?"Activar":"Desactivar"}</button><span class="sep"></span><button class="btn sm danger" data-udl="${esc(u.id)}">Eliminar…</button>`}</div></div>`}).join(""):'<p class="muted" style="margin:0">Todavía no hay usuarios. Crea el primero con ＋ Nuevo usuario.</p>')+`<div id="puConfirm"></div>`;
+        ${leg?"":`<span class="sep"></span><button class="btn sm danger" data-udl="${esc(u.id)}">Eliminar…</button>`}</div></div>`}).join(""):'<p class="muted" style="margin:0">Todavía no hay usuarios. Crea el primero con ＋ Nuevo usuario.</p>')+`<div id="puConfirm"></div>`;
   $$("#puAdmBox [data-ued]").forEach(b=>b.onclick=()=>{uEditor(L.find(u=>u.id===b.dataset.ued));$("#uEdCard").scrollIntoView({behavior:"smooth",block:"start"})});
   $$("#puAdmBox [data-ucp]").forEach(b=>b.onclick=()=>{const el=$("#ul-"+b.dataset.ucp);copyText(el?el.value:uLink(b.dataset.ucp),el)});
   $$("#puAdmBox [data-uln]").forEach(b=>b.onclick=()=>{const u=L.find(x=>x.id===b.dataset.uln);if(!u)return;
     if(!u.usado&&!uLink(u.id))return puAdmSet(u.id);
     confirmBox(`Se crea un acceso nuevo para ${esc(u.nombre||u.id)} y el equipo actual queda desconectado.`,()=>puAdmSet(u.id),"#puConfirm")});
-  $$("#puAdmBox [data-uac]").forEach(b=>b.onclick=()=>{const u=L.find(x=>x.id===b.dataset.uac);if(u)uGuardar(u,{activo:u.activo===false})});
   $$("#puAdmBox [data-udl]").forEach(b=>b.onclick=()=>{const u=L.find(x=>x.id===b.dataset.udl);if(!u)return;
     confirmBox(`Eliminar a ${esc(u.nombre||u.id)}: pierde el acceso y sus conteos asignados quedan sin asignar. Lo que ya registró se mantiene.`,async()=>{try{await rpc(SB,"cb_u_eliminar",{p_clave:SB.admin,p_id:u.id});if(SB.pu)delete SB.pu[u.id];store.set("inv_sb",SB);await uCargar();uPintar();toast("Usuario eliminado")}catch(e){toast(uMsg(e))}},"#puConfirm")});
   const ed=$("#uEd");if(ed&&!ed.innerHTML)uEditor(null,true);
