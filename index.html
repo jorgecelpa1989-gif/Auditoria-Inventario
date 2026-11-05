@@ -3323,9 +3323,8 @@ function showCreated(c){
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
-    ${c.puesto?`<div class="small">📱 <b>Asignado a ${esc(uNombre(c.puesto))}</b>: le llega a su celular en unos segundos, con aviso.</div>`:""}
-    <div class="small">${c.puesto?"Para cambiar la asignación":"Para mandarlo al contador (WhatsApp o copiar link)"}, liberarlo o bloquearlo: <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
-    <div class="row"><button class="btn primary" data-irperm>Ir a 6 · Permisos</button></div></div>`;irPermisos(box);return}
+    ${c.puesto?`<div>📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su celular, con aviso. No tienes que hacer nada más.</div></div>`:`<div class="small">Para mandarlo al contador (WhatsApp o copiar link): <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
+    <div class="row"><button class="btn primary" data-irperm>Ir a 6 · Permisos</button></div></div>`}`;irPermisos(box);return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
