@@ -7,6 +7,7 @@
 --
 --  Quién hace qué (por ahora; después se podrá dar a otros usuarios desde 6 · Permisos):
 --    · Producción, Picking retail y Distribución CARGAN devoluciones (guía, factura, fecha, SKU, cantidad).
+--      Solo se aceptan códigos que existen en la lista de productos (maestro).
 --    · Bodega RECEPCIONA: ve lo declarado (guía, factura, productos y cantidades) y acepta o corrige lo que llega.
 --    · El supervisor ve el cuadre devuelto vs recibido en 5 · Logística inversa.
 -- =====================================================================
@@ -28,6 +29,18 @@ begin
 end $$;
 
 -- ---------- Devoluciones ----------
+-- En devoluciones solo se aceptan productos del maestro (lista de productos en cb_catalogo).
+create or replace function public.cb_dev_codigos_ok(p_lineas jsonb) returns void
+language plpgsql security definer set search_path = public, extensions stable as $$
+declare v_mal text;
+begin
+  if not exists (select 1 from cb_catalogo where id = 1 and jsonb_typeof(items) = 'array' and jsonb_array_length(items) > 0) then return; end if;
+  select coalesce(e->>'k', e->>'code') into v_mal from jsonb_array_elements(p_lineas) e
+   where not exists (select 1 from cb_catalogo c, jsonb_array_elements(c.items) i where c.id = 1 and i->>0 = coalesce(e->>'k', e->>'code'))
+   limit 1;
+  if v_mal is not null then raise exception 'codigo_no_existe'; end if;
+end $$;
+
 create table if not exists public.cb_dev (
   id           uuid primary key default gen_random_uuid(),
   origen       text not null check (origen in ('produccion','retail','distribucion')),
@@ -58,6 +71,7 @@ begin
   perform cb_puesto_ok(p_puesto, p_ses);
   if p_puesto not in ('produccion','retail','distribucion') then raise exception 'sin_permiso'; end if;
   if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
   begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
   if p_enviar then
     if coalesce(trim(p_doc->>'guia'),'') = '' then raise exception 'falta_guia'; end if;
@@ -108,6 +122,7 @@ begin
   perform cb_puesto_ok(p_puesto, p_ses);
   if p_puesto <> 'bodega' then raise exception 'sin_permiso'; end if;
   if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
   select * into d from cb_dev where id = p_id for update;
   if not found or d.enviado is null then raise exception 'no_existe'; end if;
   if d.finalizado is not null then raise exception 'finalizado'; end if;
@@ -144,6 +159,7 @@ begin
   delete from cb_dev where id = p_id;
 end $$;
 
+revoke execute on function public.cb_dev_codigos_ok(jsonb) from public, anon, authenticated;
 grant execute on function
   public.cb_puesto_link(text, text, text),
   public.cb_dev_guardar(text, text, uuid, jsonb, jsonb, boolean), public.cb_dev_mis(text, text),

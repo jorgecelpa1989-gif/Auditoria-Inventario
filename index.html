@@ -1726,6 +1726,7 @@ grant execute on function public.cb_liberar(text, uuid), public.cb_mov_liberar(t
 --
 --  Quién hace qué (por ahora; después se podrá dar a otros usuarios desde 6 · Permisos):
 --    · Producción, Picking retail y Distribución CARGAN devoluciones (guía, factura, fecha, SKU, cantidad).
+--      Solo se aceptan códigos que existen en la lista de productos (maestro).
 --    · Bodega RECEPCIONA: ve lo declarado (guía, factura, productos y cantidades) y acepta o corrige lo que llega.
 --    · El supervisor ve el cuadre devuelto vs recibido en 5 · Logística inversa.
 -- =====================================================================
@@ -1747,6 +1748,18 @@ begin
 end $$;
 
 -- ---------- Devoluciones ----------
+-- En devoluciones solo se aceptan productos del maestro (lista de productos en cb_catalogo).
+create or replace function public.cb_dev_codigos_ok(p_lineas jsonb) returns void
+language plpgsql security definer set search_path = public, extensions stable as $$
+declare v_mal text;
+begin
+  if not exists (select 1 from cb_catalogo where id = 1 and jsonb_typeof(items) = 'array' and jsonb_array_length(items) > 0) then return; end if;
+  select coalesce(e->>'k', e->>'code') into v_mal from jsonb_array_elements(p_lineas) e
+   where not exists (select 1 from cb_catalogo c, jsonb_array_elements(c.items) i where c.id = 1 and i->>0 = coalesce(e->>'k', e->>'code'))
+   limit 1;
+  if v_mal is not null then raise exception 'codigo_no_existe'; end if;
+end $$;
+
 create table if not exists public.cb_dev (
   id           uuid primary key default gen_random_uuid(),
   origen       text not null check (origen in ('produccion','retail','distribucion')),
@@ -1777,6 +1790,7 @@ begin
   perform cb_puesto_ok(p_puesto, p_ses);
   if p_puesto not in ('produccion','retail','distribucion') then raise exception 'sin_permiso'; end if;
   if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
   begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
   if p_enviar then
     if coalesce(trim(p_doc->>'guia'),'') = '' then raise exception 'falta_guia'; end if;
@@ -1827,6 +1841,7 @@ begin
   perform cb_puesto_ok(p_puesto, p_ses);
   if p_puesto <> 'bodega' then raise exception 'sin_permiso'; end if;
   if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
   select * into d from cb_dev where id = p_id for update;
   if not found or d.enviado is null then raise exception 'no_existe'; end if;
   if d.finalizado is not null then raise exception 'finalizado'; end if;
@@ -1863,6 +1878,7 @@ begin
   delete from cb_dev where id = p_id;
 end $$;
 
+revoke execute on function public.cb_dev_codigos_ok(jsonb) from public, anon, authenticated;
 grant execute on function
   public.cb_puesto_link(text, text, text),
   public.cb_dev_guardar(text, text, uuid, jsonb, jsonb, boolean), public.cb_dev_mis(text, text),
@@ -2251,11 +2267,11 @@ function codeAlert(code,onFix,onKeep,o){o=o||{};
   ov.innerHTML=`<div class="cbox2"><div class="big">⚠️</div><h2 id="caT">Código no encontrado</h2>
     <p>El código <span class="code">${esc(code)}</span> <b>NO existe</b> en la lista de productos.</p>
     <p class="small muted">${o.msg||"Revisa que esté bien digitado antes de seguir."}</p>
-    <div class="col"><button class="btn primary" id="caFix">${o.fix||"Corregir código"}</button><button class="btn" id="caKeep">${o.keep||"Registrar igual"}</button></div></div>`;
+    <div class="col"><button class="btn primary" id="caFix">${o.fix||"Corregir código"}</button>${o.noKeep?"":`<button class="btn" id="caKeep">${o.keep||"Registrar igual"}</button>`}</div></div>`;
   ov.hidden=false;audio.beep(false);
   const close=()=>{ov.hidden=true;ov.innerHTML=""};
   $("#caFix").onclick=()=>{close();if(onFix)onFix()};
-  $("#caKeep").onclick=()=>{close();if(onKeep)onKeep()};
+  if($("#caKeep"))$("#caKeep").onclick=()=>{close();if(onKeep)onKeep()};
   ov.onkeydown=e=>{if(e.key==="Escape"){e.preventDefault();$("#caFix").click()}};
   setTimeout(()=>{try{$("#caFix").focus()}catch(e){}},30);
 }
@@ -4022,7 +4038,8 @@ const dvRec=()=>!!dv&&dv.modo==="rec";
 const hoyISO=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
 const fechaCL=s=>{if(!s)return "—";const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}-${m[2]}-${m[1]}`:String(s)};
 const uuid4=()=>{try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=a[6]&15|64;a[8]=a[8]&63|128;const x=[...a].map(b=>b.toString(16).padStart(2,"0")).join("");return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`};
-const dvMsg=e=>({falta_guia:"Falta el N° de guía.",falta_factura:"Falta el N° de factura.",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
+const DV_BLOQ={noKeep:true,msg:"En las devoluciones solo se pueden registrar productos de la lista. Revisa el código o búscalo por nombre."};
+const dvMsg=e=>({codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Falta el N° de guía.",falta_factura:"Falta el N° de factura.",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
 const dvEstado=d=>d.finalizado?["Cerrada","p-mut"]:d.recibido?["Recibida","p-ok"]:d.rec_inicio?["En recepción","p-info"]:d.enviado?["Enviada a bodega","p-warn"]:["Borrador","p-mut"];
 async function puDevRefresh(){if(!(puDevCarga()||puDevRec()))return;try{const r=await prpc("cb_dev_mis");puDev=Array.isArray(r)?r:[]}catch(e){if(/puesto_invalido/.test(e.message))throw e}}
 async function dvCatalogo(){
@@ -4110,7 +4127,7 @@ function dvRead(raw){
   $("#dvSugg").hidden=true;v=codeStr(v);$("#dvScan").value=v;dvChk=v;
   const it=dvPend(v);
   if(dvCamI){dvHold=true;$("#dvCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
-  if(!it&&ptItems().length&&!unkOk.has(key(v))){codeAlert(v,()=>{if(dvCamI){dvHold=false;$("#dvCamMsg").textContent="Apunta al código del producto."}focusSel($("#dvScan"))},()=>{unkOk.add(key(v));focusSel($("#dvQty"))});return}
+  if(!it&&ptItems().length){codeAlert(v,()=>{if(dvCamI){dvHold=false;$("#dvCamMsg").textContent="Apunta al código del producto."}focusSel($("#dvScan"))},null,DV_BLOQ);return}
   audio.beep(!!it);focusSel($("#dvQty"));
 }
 function dvBlurCheck(){
@@ -4118,14 +4135,14 @@ function dvBlurCheck(){
   const raw=norm($("#dvScan").value);if(!raw)return;const v=codeStr(raw);if(v===dvChk)return;
   if(esTextoBusqueda(raw)&&!ptFind(raw))return;
   dvChk=v;$("#dvScan").value=v;const it=dvPend(v);
-  if(!it&&ptItems().length&&!unkOk.has(key(v)))codeAlert(v,()=>focusSel($("#dvScan")),()=>{unkOk.add(key(v));focusSel($("#dvQty"))});
+  if(!it&&ptItems().length)codeAlert(v,()=>focusSel($("#dvScan")),null,DV_BLOQ);
 }
 function dvAdd(){
   if(!dv)return;
   const code=codeStr($("#dvScan").value);if(!code){toast("Primero escanea o digita un producto");return focusSel($("#dvScan"))}
   const q=num($("#dvQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#dvQty"))}
   const it=ptFind(code);dvChk=code;
-  if(!it&&ptItems().length&&!unkOk.has(key(code))){dvPend(code);codeAlert(code,()=>focusSel($("#dvScan")),()=>{unkOk.add(key(code));dvAdd()});return}
+  if(!it&&ptItems().length){dvPend(code);codeAlert(code,()=>focusSel($("#dvScan")),null,DV_BLOQ);return}
   const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString()};
   if(conv(it)){l.f=+it.f;l.ce=it.ce}
   dv.lect.push(l);dvDirty();audio.beep(!!it);
@@ -4147,7 +4164,7 @@ function dvDeclRender(){
   const box=$("#dvDecl");if(!box||!dvRec())return;
   const rows=dvDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D),pendOk=pend.filter(r=>!r.noM),pendNo=pend.filter(r=>r.noM);
   box.innerHTML=`<div class="row" style="margin-top:10px"><b>Lo declarado (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pendOk.length?`<button class="btn sm primary" id="dvAccAll">✓ Aceptar todo tal como viene</button>`:pend.length?"":'<span class="pill p-ok">Todo aceptado</span>'}</div>
-    ${pendNo.length?`<div class="pending bad" style="margin-top:6px"><div class="d">⚠ ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} NO existe${pendNo.length===1?"":"n"} en la lista de productos</div><div class="small">Revísalo${pendNo.length===1?"":"s"} con quien devuelve. "Aceptar todo" no ${pendNo.length===1?"lo":"los"} incluye: acéptalo${pendNo.length===1?"":"s"} uno a uno solo si corresponde.</div></div>`:""}
+    ${pendNo.length?`<div class="pending bad" style="margin-top:6px"><div class="d">⚠ ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} NO existe${pendNo.length===1?"":"n"} en la lista de productos</div><div class="small">No se puede${pendNo.length===1?"":"n"} aceptar en una devolución. Avisa a quien devuelve para que lo corrija.</div></div>`:""}
     <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR${r.noM?" bad":""}"><div>${r.noM?'<div class="small" style="color:var(--bad);font-weight:700">⚠ Este código NO existe en la lista de productos</div>':""}<div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · declarado: <b>${dvEnU(r,r.D)}</b></div>
       <div class="small">${r.R?`Recibido: <b>${dvEnU(r,r.R)}</b> ${ok?'<span class="pill p-ok">✓</span>':`<span class="pill ${dif<0?"p-bad":"p-warn"}">${dif<0?"faltan":"sobran"} ${dvEnU(r,Math.abs(dif))}</span>`}`:'<span class="muted">Sin aceptar</span>'}</div></div>
       <div class="row" style="gap:6px">${r.R+1e-9<r.D?`<button class="btn sm primary" data-acc="${esc(r.k)}">✓ Aceptar</button>`:""}<button class="btn sm" data-edt="${esc(r.k)}">Otra cantidad</button></div></div>`}).join("")||'<p class="muted" style="margin:0">La devolución no trae productos declarados.</p>'}</div>
@@ -4155,7 +4172,7 @@ function dvDeclRender(){
   const acc=r=>{const falta=r.D-r.R;if(falta<=1e-9)return false;const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc,um:r.um,qty:+(falta/r.f).toFixed(6),user:PST.persona||"",t:new Date().toISOString(),acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}dv.lect.push(l);return true};
   const ok1=r=>{if(acc(r)){dvDirty();audio.beep(true);dvRender();toast("✓ Aceptado: "+(r.desc||r.cod))}};
   $$("#dvDecl [data-acc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.acc);if(!r)return;
-    if(r.noM)return codeAlert(r.cod,()=>{},()=>ok1(r),{msg:"Quien devuelve lo declaró, pero no está en el maestro. Acéptalo solo si el producto llegó y el código está bien.",fix:"No aceptar",keep:"Aceptar igual"});
+    if(r.noM)return codeAlert(r.cod,()=>{},null,{noKeep:true,fix:"Entendido",msg:"No está en el maestro, así que no se puede aceptar en una devolución. Avisa a quien devuelve para que lo corrija."});
     ok1(r)});
   const all=$("#dvAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pendOk.length)} producto${pendOk.length===1?"":"s"} con la cantidad declarada${pendNo.length?` (no incluye ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} fuera del maestro)`:""}.`,()=>{let n=0;for(const r of pendOk)if(acc(r))n++;if(n){dvDirty();audio.beep(true);dvRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#dvConfirm");
   $$("#dvDecl [data-edt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.edt);if(!r)return;
