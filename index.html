@@ -563,17 +563,21 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card">
     <div class="eyebrow">Ver resultados de</div>
     <label class="f">Conteo<select id="rSel"></select></label>
+    <div id="rSelInfo" class="row" style="gap:6px;flex-wrap:wrap"></div>
     <button class="btn primary" id="btnTraerRes" style="justify-content:center">Actualizar lecturas</button>
     <div class="small muted">Con "Todos los conteos" se suman las lecturas de todos los conteos activos.</div>
   </div>
   <div class="card smc" id="edCard" hidden>
     <div class="eyebrow">Modificar conteo</div>
+    <div class="small muted" id="edEmpty" hidden>No hay conteos en curso para modificar. Cuando crees uno, aparece aquí para cambiarle el nombre o agregarle códigos.</div>
+    <div id="edForm" style="display:flex;flex-direction:column;gap:10px">
     <label class="f">Conteo<select id="edSel"></select></label>
     <label class="f">Nombre<input id="edNom" autocomplete="off"></label>
     <label class="f">Agregar códigos<textarea id="edCodes" rows="4" placeholder="Pega los códigos (uno por línea o separados por coma)" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea></label>
     <div class="small" id="edRes"></div>
     <button class="btn primary" id="btnEd" style="justify-content:center">Guardar cambios</button>
     <div class="small muted">El celular que está contando recibe el nombre y los productos nuevos en menos de 1 minuto, sin perder lo contado.</div>
+    </div>
   </div>
   <div class="card smc">
     <div class="eyebrow">Reconteo y validación</div>
@@ -3108,11 +3112,23 @@ function kpis(rows){
     ok:ev.length-dif.length,dif:dif.length,falta:rows.filter(r=>r.st==="falta").length,sobra:rows.filter(r=>r.st==="sobra").length,noerp:rows.filter(r=>r.st==="noerp").length,
     re:rows.filter(r=>r.c2!=null).length,...(()=>{const sk=rows.filter(r=>r.st!=="noerp"),st=sk.reduce((a,r)=>a+(+r.stock||0),0),ct=sk.reduce((a,r)=>a+(+r.fin||0),0);return {stockTot:st,contTot:ct,exact:st>0?ct/st:null}})()};
 }
+/* Conteos: activos / finalizados / archivados (archivar solo lo saca de la lista en este equipo; no borra nada). */
+const cFin=c=>{const x=nubeLive.get(c.id);return !!(c.cerrado||(x&&(x.finalizado||x.terminado))||(c.nube&&c.fin))};
+const cFinAt=c=>{const x=nubeLive.get(c.id);return c.cerrado||(x&&(x.finalizado||x.terminado))||null};
 function renderSel(){
-  const opts=[["*","Todos los conteos"],...conteos.map(c=>[c.id,(esReconteo(c)?"↻ ":"")+c.nombre+" · "+new Date(c.creado).toLocaleDateString("es-CL")])];
-  if(scans.some(s=>!s.nube))opts.push(["local","Lecturas de este equipo"]);
-  if(!opts.some(o=>o[0]===rSel))rSel=conteos[0]?conteos[0].id:"*";
-  $("#rSel").innerHTML=opts.map(([v,l])=>`<option value="${esc(v)}" ${v===rSel?"selected":""}>${esc(l)}</option>`).join("");
+  const lab=c=>(esReconteo(c)?"↻ ":"")+c.nombre+" · "+new Date(c.creado).toLocaleDateString("es-CL");
+  const vis=conteos.filter(c=>cfg.verArch||!c.arch),act=vis.filter(c=>!cFin(c)),fin=vis.filter(c=>cFin(c)&&!c.arch),arc=vis.filter(c=>c.arch);
+  const valid=["*",...vis.map(c=>c.id)];if(scans.some(s=>!s.nube))valid.push("local");
+  if(!valid.includes(rSel))rSel=(act[0]||fin[0]||{}).id||"*";
+  const o=(v,l)=>`<option value="${esc(v)}" ${v===rSel?"selected":""}>${esc(l)}</option>`,g=(t,L)=>L.length?`<optgroup label="${t}">${L.map(c=>o(c.id,lab(c))).join("")}</optgroup>`:"";
+  $("#rSel").innerHTML=o("*","Todos los conteos")+g("En curso",act)+g("Finalizados",fin)+g("Archivados",arc)+(scans.some(s=>!s.nube)?o("local","Lecturas de este equipo"):"");
+  const nArc=conteos.filter(c=>c.arch).length,c=conteos.find(z=>z.id===rSel),box=$("#rSelInfo");if(!box)return;
+  box.innerHTML=(c?(c.arch?`<span class="pill p-mut">Archivado</span> <button class="btn sm" id="rArch">Desarchivar</button>`
+      :cFin(c)?`<span class="pill p-ok">✓ ${(nubeLive.get(c.id)||{}).finalizado||c.cerrado?"Finalizado":"Terminado"}</span>${cFinAt(c)?` <span class="small muted">${fmtDT(cFinAt(c))}</span>`:""} <button class="btn sm" id="rArch" title="Lo saca de esta lista; no borra nada">Archivar</button>`
+      :`<span class="pill p-info">En curso</span>`):"")+
+    (nArc?`<label class="small" style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="rVerArch" ${cfg.verArch?"checked":""}> Ver archivados (${fmt(nArc)})</label>`:"");
+  if($("#rArch"))$("#rArch").onclick=()=>{c.arch=!c.arch;store.set("inv_conteos",conteos);if(c.arch&&!cfg.verArch)rSel=null;toast(c.arch?"Conteo archivado: sus datos se mantienen":"Conteo de vuelta en la lista");renderResult()};
+  if($("#rVerArch"))$("#rVerArch").onchange=e=>{cfg.verArch=e.target.checked;store.set("inv_cfg",cfg);renderResult()};
 }
 function renderResult(){
   renderLive();
@@ -3436,7 +3452,7 @@ const isVenc=v=>!!v&&Date.now()>Date.parse(v);
 let autoClosing=false;
 async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.nube&&!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
 function renderConteos(){renderConteosOnly();autoCloseExpired()}
-function edConteos(){return conteos.filter(c=>c.nube&&!c.fin&&!esReconteo(c)&&!((nubeLive.get(c.id)||{}).finalizado))}
+function edConteos(){return conteos.filter(c=>c.nube&&!c.arch&&!esReconteo(c)&&!cFin(c))}
 function edParse(c){
   const raw=$("#edCodes").value.split(/[\s,;]+/).map(codeStr).filter(Boolean);if(!raw.length)return null;
   const items=enrich(factItems()),byK=new Map(items.map(i=>[key(i.cod),i])),byE=new Map(items.filter(i=>i.ean).map(i=>[key(i.ean),i]));
@@ -3449,7 +3465,7 @@ function edInfo(){const c=conteos.find(z=>z.id===$("#edSel").value),r=edParse(c)
   el.innerHTML=r.sinErp?'<span style="color:var(--bad)">Carga el informe del ERP (1 · Panel) para agregar códigos.</span>':
     `<span style="color:var(--ok)">✓ ${fmt(r.found.length)} nuevo${r.found.length===1?"":"s"}</span>${r.dup.length?` · ${fmt(r.dup.length)} ya estaba${r.dup.length===1?"":"n"} en el conteo`:""}${r.miss.length?` · <span style="color:var(--bad)">${fmt(r.miss.length)} no está${r.miss.length===1?"":"n"} en el ERP: ${esc(r.miss.slice(0,8).join(", "))}${r.miss.length>8?"…":""}</span>`:""}`;
   return r}
-function edRender(){const card=$("#edCard");if(!card)return;const L=nubeOn()?edConteos():[];card.hidden=!L.length;if(!L.length)return;
+function edRender(){const card=$("#edCard");if(!card)return;const L=nubeOn()?edConteos():[];card.hidden=!nubeOn();$("#edEmpty").hidden=!!L.length;$("#edForm").hidden=!L.length;if(!L.length)return;
   const s=$("#edSel"),v=L.some(c=>c.id===s.value)?s.value:L[0].id;
   s.innerHTML=L.map(c=>`<option value="${esc(c.id)}" ${c.id===v?"selected":""}>${esc(c.nombre)} · ${fmt(c.productos)} productos</option>`).join("");
   if(s.dataset.v!==v||!$("#edNom").value){s.dataset.v=v;$("#edNom").value=(L.find(c=>c.id===v)||{}).nombre||""}}
