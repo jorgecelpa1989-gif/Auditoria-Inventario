@@ -744,6 +744,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <label class="f">N° de guía<input id="dpGuia" autocomplete="off" autocapitalize="characters"></label>
       <label class="f">N° de factura<input id="dpFact" autocomplete="off" autocapitalize="characters"></label>
       <label class="f">Fecha de la devolución<input id="dpFecha" type="date"></label></div>
+    <div class="small muted">N° de guía o N° de factura: basta con uno; el que no tengas, déjalo en blanco.</div>
     <datalist id="uAreas2"><option value="Producción"><option value="Picking retail"><option value="Distribución"><option value="Clientes"><option value="Compras"></datalist>
     <label class="f">Observación (opcional)<input id="dpNota" maxlength="300" placeholder="Ej: cliente, motivo o estado del material" autocomplete="off"></label>
     <div class="row" style="align-items:flex-end"><label class="f" style="flex:1 1 260px">Producto (código, código de barras o nombre)<input id="dpScan" autocomplete="off" autocapitalize="characters" placeholder="Escanea o escribe y Enter"></label>
@@ -2477,6 +2478,59 @@ grant execute on function
   public.cb_conteo_editar(text, uuid, text, jsonb), public.cb_conteo_items(uuid, text),
   public.cb_latido(uuid, text), public.cb_mov_extender(text, uuid, timestamptz)
 to anon, authenticated;
+-- =====================================================================
+--  Actualización 10 · Devoluciones: basta con N° de guía O N° de factura (no ambos obligatorios)
+--  Solo cambia esa validación: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create or replace function public.cb_dev_guardar(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_lect jsonb, p_enviar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev; v_id uuid := p_id; v_fecha date;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'dev_cargar') then raise exception 'sin_permiso'; end if;
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if p_enviar then
+    if coalesce(trim(p_doc->>'guia'),'') = '' and coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_documento'; end if;
+    if v_fecha is null then raise exception 'fecha_invalida'; end if;
+    if jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  end if;
+  if v_id is not null then
+    select * into d from cb_dev where id = v_id for update;
+    if not found then v_id := null;
+    elsif d.origen <> p_puesto then raise exception 'sin_permiso';
+    elsif d.rec_inicio is not null or d.finalizado is not null then raise exception 'en_recepcion';
+    end if;
+  end if;
+  if v_id is null then
+    insert into cb_dev(id, origen, area) values (coalesce(p_id, gen_random_uuid()), p_puesto, (select coalesce(nullif(area,''), nombre) from cb_puesto where id = p_puesto)) returning id into v_id;
+  end if;
+  update cb_dev set persona = left(coalesce(p_doc->>'persona', persona), 80), guia = left(trim(p_doc->>'guia'), 40),
+         factura = left(trim(p_doc->>'factura'), 40), fecha = v_fecha, nota = left(p_doc->>'nota', 300),
+         lect = p_lect, actualizado = now(), enviado = case when p_enviar then coalesce(enviado, now()) else enviado end
+   where id = v_id;
+  return jsonb_build_object('id', v_id, 'enviado', (select enviado from cb_dev where id = v_id));
+end $$;
+
+create or replace function public.cb_dev_crear_panel(p_clave text, p_area text, p_doc jsonb, p_lect jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_id uuid; v_fecha date;
+begin
+  perform cb_check(p_clave);
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  if jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  if coalesce(trim(p_doc->>'guia'),'') = '' and coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_documento'; end if;
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if v_fecha is null then raise exception 'fecha_invalida'; end if;
+  insert into cb_dev(origen, area, persona, guia, factura, fecha, nota, lect, enviado)
+  values ('panel', left(coalesce(nullif(trim(p_area),''), 'Panel'), 60), left(p_doc->>'persona', 80), left(trim(p_doc->>'guia'), 40), left(trim(p_doc->>'factura'), 40),
+          v_fecha, left(p_doc->>'nota', 300), p_lect, now())
+  returning id into v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
 </script>
   </div>
 
@@ -4490,7 +4544,7 @@ function renderPuesto(){
   if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
   if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
   if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
-  if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía, N° de factura, fecha y productos"});
+  if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía o de factura, fecha y productos"});
   if(can("dev_recibir"))items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} devolución${devN>1?"es":""} por recibir`:"Sin devoluciones por recibir",dot:devN});
   if(!items.length){$("#puMenu").innerHTML='<div class="card contarCard"><p class="muted" style="margin:0">Tu usuario todavía no tiene permisos. Pídele al supervisor que te los asigne: aparecerán aquí solos.</p></div>';$("#puList").innerHTML="";return}
   $("#puMenu").innerHTML=items.map(x=>`<button class="puBtn" data-pk="${x.k}"><span class="ic">${x.ic}</span><span><b>${x.t}</b><span class="s">${x.s}</span></span>${x.dot?`<span class="dotR">${x.dot}</span>`:""}</button>`).join("");
@@ -4809,7 +4863,7 @@ const hoyISO=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOf
 const fechaCL=s=>{if(!s)return "—";const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}-${m[2]}-${m[1]}`:String(s)};
 const uuid4=()=>{try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=a[6]&15|64;a[8]=a[8]&63|128;const x=[...a].map(b=>b.toString(16).padStart(2,"0")).join("");return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`};
 const DV_BLOQ={noKeep:true,msg:"En las devoluciones solo se pueden registrar productos de la lista. Revisa el código o búscalo por nombre."};
-const dvMsg=e=>({codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Falta el N° de guía.",falta_factura:"Falta el N° de factura.",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
+const dvMsg=e=>({codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Ingresa el N° de guía o el N° de factura (basta con uno).",falta_factura:"Ingresa el N° de guía o el N° de factura (basta con uno).",falta_documento:"Ingresa el N° de guía o el N° de factura (basta con uno).",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
 const dvEstado=d=>d.finalizado?["Cerrada","p-mut"]:d.recibido?["Recibida","p-ok"]:d.rec_inicio?["En recepción","p-info"]:d.enviado?["Enviada a bodega","p-warn"]:["Borrador","p-mut"];
 async function puDevRefresh(m){if(!(puDevCarga()||puDevRec()))return;m=m||(puVista==="dev"?dvModo:(puDevRec()?"rec":"carga"));
   try{let r;try{r=await prpc("cb_dev_mis",{p_modo:m})}catch(e){if(/PGRST202|function/.test(e.message))r=await prpc("cb_dev_mis");else throw e}puDev=Array.isArray(r)?r:[];puDevModo=m}catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e}}
@@ -4841,7 +4895,7 @@ function dvHomeRender(){
       ${hechas.length?`<h3 style="margin:10px 0 0;font-size:15px">Recibidas hoy</h3>`+hechas.map(d=>dvRowHtml(d,true)).join(""):""}</div>`;
   }else{
     $("#dvHome").innerHTML=`<div class="card contarCard"><button class="btn primary" id="dvNew" style="justify-content:center;font-size:17px;padding:14px">＋ Nueva devolución</button>
-      <p class="small muted" style="margin:0">Llena N° de guía, N° de factura y fecha, registra los productos y toca <b>Enviar a bodega</b>.</p></div>
+      <p class="small muted" style="margin:0">Llena el N° de guía <b>o</b> el N° de factura (basta con uno), la fecha, registra los productos y toca <b>Enviar a bodega</b>.</p></div>
       <div class="card contarCard"><h2 style="margin:0">Mis devoluciones (30 días)</h2>${L.length?L.map(d=>dvRowHtml(d)).join(""):'<p class="muted" style="margin:0">Todavía no cargas devoluciones.</p>'}</div>`;
     $("#dvNew").onclick=()=>dvNueva();
   }
@@ -4873,6 +4927,7 @@ function dvWork(){
     $("#dvDoc").innerHTML=`<div class="dvGrid"><label class="f">N° de guía<input id="dvGuia" autocomplete="off" autocapitalize="characters" value="${esc(dv.doc.guia)}"></label>
       <label class="f">N° de factura<input id="dvFact" autocomplete="off" autocapitalize="characters" value="${esc(dv.doc.factura)}"></label>
       <label class="f">Fecha de la devolución<input id="dvFecha" type="date" value="${esc(dv.doc.fecha||hoyISO())}"></label></div>
+      <div class="small muted" style="margin-top:4px">N° de guía o N° de factura: basta con uno; el que no tengas, déjalo en blanco.</div>
       <label class="f" style="margin-top:8px">Observación (opcional)<input id="dvNota" autocomplete="off" maxlength="300" value="${esc(dv.doc.nota||"")}" placeholder="Ej: cliente, motivo o estado del material"></label>${dv.enviado?`<p class="small" style="margin:6px 0 0;color:var(--warn)">Ya la enviaste a bodega. Puedes corregirla mientras bodega no empiece a recibirla.</p>`:""}`;
     const bind=(id,k)=>$("#"+id).addEventListener("change",e=>{dv.doc[k]=k==="fecha"?e.target.value:norm(e.target.value).toUpperCase();if(k!=="fecha")e.target.value=dv.doc[k];dvDirty()});
     bind("dvGuia","guia");bind("dvFact","factura");bind("dvFecha","fecha");
@@ -4981,13 +5036,12 @@ function dvFinalizar(){
   if(!dv)return;
   if(!dvRec()){
     const g=$("#dvGuia"),f=$("#dvFact"),fe=$("#dvFecha");if(g)dv.doc.guia=norm(g.value).toUpperCase();if(f)dv.doc.factura=norm(f.value).toUpperCase();if(fe)dv.doc.fecha=fe.value;
-    if(!dv.doc.guia){toast("Falta el N° de guía");return $("#dvGuia").focus()}
-    if(!dv.doc.factura){toast("Falta el N° de factura");return $("#dvFact").focus()}
+    if(!dv.doc.guia&&!dv.doc.factura){toast("Ingresa el N° de guía o el N° de factura (basta con uno)");return $("#dvGuia").focus()}
     if(!dv.doc.fecha){toast("Falta la fecha");return $("#dvFecha").focus()}
   }
   if(!dv.lect.length){toast("Agrega al menos un producto");return focusSel($("#dvScan"))}
   const n=dv.lect.length;
-  confirmBox(dvRec()?`Terminar la recepción con ${fmt(n)} líneas. Después ya no se puede modificar.`:`Enviar a bodega la devolución guía ${esc(dv.doc.guia)} · factura ${esc(dv.doc.factura)} con ${fmt(n)} líneas.`,async()=>{
+  confirmBox(dvRec()?`Terminar la recepción con ${fmt(n)} líneas. Después ya no se puede modificar.`:`Enviar a bodega la devolución guía ${esc(dv.doc.guia||"—")} · factura ${esc(dv.doc.factura||"—")} con ${fmt(n)} líneas.`,async()=>{
     if(navigator.onLine===false)return toast("Sin señal: busca conexión y vuelve a intentar.");
     const rec=dvRec();const ok=await dvSync(true);if(!ok)return;
     toast(rec?"✓ Recepción terminada. El supervisor ya ve el cuadre.":"✓ Devolución enviada a bodega");
@@ -5110,12 +5164,11 @@ function dpRender(){
 }
 async function dpEnviar(){
   const doc={guia:norm($("#dpGuia").value).toUpperCase(),factura:norm($("#dpFact").value).toUpperCase(),fecha:$("#dpFecha").value,nota:norm($("#dpNota").value),persona:norm($("#dpPers").value).toUpperCase()};
-  if(!doc.guia){toast("Falta el N° de guía");return $("#dpGuia").focus()}
-  if(!doc.factura){toast("Falta el N° de factura");return $("#dpFact").focus()}
+  if(!doc.guia&&!doc.factura){toast("Ingresa el N° de guía o el N° de factura (basta con uno)");return $("#dpGuia").focus()}
   if(!doc.fecha){toast("Falta la fecha");return $("#dpFecha").focus()}
   if(!dpLect.length){toast("Agrega al menos un producto");return focusSel($("#dpScan"))}
   const area=norm($("#dpArea").value)||"Panel";
-  confirmBox(`Enviar a bodega la devolución guía ${esc(doc.guia)} · factura ${esc(doc.factura)} (${esc(area)}) con ${fmt(dpLect.length)} líneas.`,async()=>{
+  confirmBox(`Enviar a bodega la devolución guía ${esc(doc.guia||"—")} · factura ${esc(doc.factura||"—")} (${esc(area)}) con ${fmt(dpLect.length)} líneas.`,async()=>{
     try{await rpc(SB,"cb_dev_crear_panel",{p_clave:SB.admin,p_area:area,p_doc:doc,p_lect:dpLect});
       dpLect=[];["#dpGuia","#dpFact","#dpNota"].forEach(s=>$(s).value="");dpRender();toast("✓ Devolución enviada a bodega");devF="pend";await devRefresh(false)}
     catch(e){toast(dvMsg(e))}},"#dpConfirm");
