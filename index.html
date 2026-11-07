@@ -435,7 +435,11 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="small" id="solHint"></div>
     <div class="sugg" id="solSugg" hidden></div>
     <details><summary class="small" style="cursor:pointer;font-weight:600">Pegar varios desde Excel</summary>
-      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad[tab]Unidad (opcional: ROLLO, CAJA… o kg, m), una línea por producto" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
+      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad, una línea por producto (copiado desde Excel)" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
+      <div class="row small" style="gap:10px;margin-top:4px;flex-wrap:wrap"><span class="muted">Las cantidades vienen en:</span>
+        <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="solPU" value="ce" checked> bultos (rollos, cajas, sacos…)</label>
+        <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="solPU" value="base"> unidad del ERP (m, kg, un…)</label></div>
+      <div id="solPrev" class="small" style="margin-top:6px"></div>
       <button class="btn sm" id="solPasteBtn" style="margin-top:6px">Agregar lista</button>
     </details>
     <div class="solList" id="solList"></div>
@@ -4052,10 +4056,26 @@ $("#solCod").addEventListener("input",solHint);
 $("#solCod").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#solQty").focus()}});
 $("#solQty").addEventListener("input",solQtyHint);
 $("#solQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#solAddBtn").click()}});
-$("#solPasteBtn").onclick=()=>{let n=0,bad=0;
-  for(const ln of $("#solPaste").value.split(/\r?\n/)){const t=ln.trim();if(!t)continue;const m=t.match(/^(\S+)[\s;,\t]+([\d.,]+)(?:[\s;,\t]+([A-Za-zÁÉÍÓÚÑáéíóúñ.]+))?\s*$/);
-    if(!m){bad++;continue}if(solAdd(m[1],m[2],true,m[3]||""))n++;else bad++}
-  $("#solPaste").value="";renderSol();toast(`${fmt(n)} productos agregados${bad?` · ${fmt(bad)} líneas sin cantidad`:""}`)};
+/* Pegar desde Excel: cada línea "código cantidad [unidad]". Sin unidad escrita, se usa la opción elegida (por defecto bultos,
+   igual que al agregar uno a uno). Antes de agregar se muestra cómo se interpretó cada línea. */
+function solPasteParse(){const pu=(document.querySelector('input[name="solPU"]:checked')||{}).value||"ce",L=[];
+  for(const ln of $("#solPaste").value.split(/\r?\n/)){const t=ln.replace(/\u00a0/g," ").trim();if(!t)continue;const m=t.match(/^(\S+)[\s;,\t]+([\d.,]+)(?:[\s;,\t]+([A-Za-zÁÉÍÓÚÑáéíóúñ.]+))?\s*$/);
+    if(!m){L.push({raw:t,bad:"sin cantidad"});continue}const q=num(m[2]);if(q==null||q<=0){L.push({raw:t,bad:"cantidad inválida"});continue}
+    const it=solFind(codeStr(m[1])),u=m[3]?(it&&conv(it)&&esUnidadCe(it,m[3])?"ce":"base"):pu,enCe=!!(it&&conv(it)&&u==="ce");
+    L.push({cod:m[1],q,unidad:m[3]||(enCe?it.ce:""),it,enCe,base:enCe?q*(+it.f):q})}
+  return L}
+function solPasteRender(){const L=solPasteParse(),box=$("#solPrev");if(!L.length){box.innerHTML="";$("#solPasteBtn").textContent="Agregar lista";return}
+  const ok=L.filter(x=>!x.bad);
+  box.innerHTML=`<div class="muted" style="margin-bottom:2px">Así se va a agregar:</div>`+L.map(x=>x.bad?`<div style="color:var(--bad)">✕ ${esc(x.raw)} · ${x.bad}</div>`
+    :!x.it?`<div style="color:var(--warn)">⚠ <b>${esc(x.cod)}</b> · ${fmt2(x.q)} · no está en la lista de productos</div>`
+    :`<div>✓ <b>${esc(x.it.cod)}</b> · ${esc(x.it.desc)} · <b>${x.enCe?`${fmt2(x.q)} ${esc(x.q===1?x.it.ce:plural(x.it.ce))}`:`${fmt2(x.q)} ${esc(umTxt(x.it.um))}`}</b>${conv(x.it)?` <span class="muted">= ${x.enCe?`${fmt2(x.base)} ${esc(umTxt(x.it.um))}`:`${fmt2(x.base/x.it.f)} ${esc(plural(x.it.ce))}`}</span>`:""}</div>`).join("");
+  $("#solPasteBtn").textContent=`Agregar lista (${fmt(ok.length)})`}
+$("#solPaste").addEventListener("input",solPasteRender);
+$$('input[name="solPU"]').forEach(r=>r.onchange=solPasteRender);
+$("#solPasteBtn").onclick=()=>{let n=0,bad=0;const pu=(document.querySelector('input[name="solPU"]:checked')||{}).value||"ce";
+  for(const x of solPasteParse()){if(x.bad){bad++;continue}
+    if(solAdd(x.cod,String(x.q),true,x.enCe?x.it.ce:(x.it&&conv(x.it)?umTxt(x.it.um):"")))n++;else bad++}
+  $("#solPaste").value="";solPasteRender();renderSol();toast(`${fmt(n)} productos agregados${bad?` · ${fmt(bad)} líneas sin cantidad`:""}`)};
 $("#solClear").onclick=()=>{mpSol=[];solSave();renderSol()};
 renderSol();
 function mpShowCreated(m){
