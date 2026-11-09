@@ -2635,7 +2635,7 @@ language plpgsql security definer set search_path = public, extensions as $$
 declare r cb_pt;
 begin
   perform cb_puesto_ok(p_puesto, p_ses);
-  if p_qty is null or p_qty <= 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
   select * into r from cb_pt where lid = p_lid and puesto = p_puesto for update;
   if not found then raise exception 'no_existe'; end if;
   if r.t < now() - interval '15 days' then raise exception 'muy_antiguo'; end if;
@@ -2649,7 +2649,7 @@ create or replace function public.cb_pt_editar_panel(p_clave text, p_lid text, p
 language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform cb_check(p_clave);
-  if p_qty is null or p_qty <= 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
   update cb_pt set data = data || jsonb_build_object('qty', p_qty, 'ed', coalesce(data->'ed', '[]'::jsonb) ||
          jsonb_build_array(jsonb_build_object('de', data->'qty', 'a', p_qty, 'por', left(coalesce(p_persona, 'Supervisor'), 80), 't', now(), 'via', 'panel')))
    where lid = p_lid;
@@ -5115,8 +5115,9 @@ async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");
         <td style="white-space:nowrap"><input data-pq="${esc(l.lid)}" value="${fmt2(l.qty)}" inputmode="decimal" style="width:72px;text-align:right"> <span class="small muted">${esc(u)}</span></td>
         <td><button class="btn sm primary" data-ps="${esc(l.lid)}">Guardar</button></td></tr>`}).join(""):'<tr><td class="muted">No registraste pallets ese día.</td></tr>';
     $$("#ptPrevList [data-ps]").forEach(b=>b.onclick=async()=>{const lid=b.dataset.ps,q=num($(`#ptPrevList [data-pq="${CSS.escape(lid)}"]`).value);
-      if(q==null||q<=0)return toast("Escribe una cantidad mayor que 0");
-      b.disabled=true;try{await prpc("cb_pt_editar",{p_lid:lid,p_qty:q,p_persona:PST.persona||null});const lc=ptCel.lect.find(z=>z.lid===lid);if(lc){lc.qty=q;ptSave();ptRender()}toast("Cantidad corregida");await ptPrevLoad()}
+      if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
+      if(q===0&&!confirm("¿Dejar este pallet en 0? Queda anulado (no cuenta), pero se puede volver a corregir."))return;
+      b.disabled=true;try{await prpc("cb_pt_editar",{p_lid:lid,p_qty:q,p_persona:PST.persona||null});const lc=ptCel.lect.find(z=>z.lid===lid);if(lc){lc.qty=q;ptSave();ptRender()}toast(q===0?"Pallet anulado (en 0)":"Cantidad corregida");await ptPrevLoad()}
       catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":/muy_antiguo/.test(e.message)?"Ese registro tiene más de 15 días: pídele al supervisor que lo corrija.":puMsg(e))}finally{b.disabled=false}})}
   catch(e){tb.innerHTML=`<tr><td class="muted">${esc(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":puMsg(e))}</td></tr>`}
 }
@@ -5194,7 +5195,7 @@ addEventListener("online",()=>{if(puestoMode())ptSyncAll()});
 function ptRender(){
   if(!PST)return;
   const ls=[...ptCel.lect].reverse(), pend=ptCel.lect.filter(l=>!l.sync).length;
-  $("#ptInfo").textContent=`${fmt(ptCel.lect.length)} pallets`;
+  $("#ptInfo").textContent=`${fmt(ptCel.lect.filter(l=>+l.qty>0).length)} pallets`;
   $("#ptList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}${l.sync?"":" · ⏳ por enviar"}</div></td>
      <td class="num" style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td>
      <td><button class="btn sm" data-pd="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no hay pallets en este turno.</td></tr>`;
@@ -5210,7 +5211,7 @@ $("#ptQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault(
 $("#ptOk").onclick=ptAdd;
 $("#ptFin").onclick=async()=>{
   if(ptCel.lect.some(l=>!l.sync)){await ptSyncAll();if(ptCel.lect.some(l=>!l.sync))return toast("Hay pallets sin enviar. Busca señal y toca Enviar ahora.")}
-  confirmBox(`Se cierra tu turno con ${fmt(ptCel.lect.length)} pallets y se avisa al supervisor. El celular sigue conectado para el próximo turno.`,async()=>{
+  confirmBox(`Se cierra tu turno con ${fmt(ptCel.lect.filter(l=>+l.qty>0).length)} pallets y se avisa al supervisor. El celular sigue conectado para el próximo turno.`,async()=>{
     try{await prpc("cb_pt_cerrar",{p_persona:PST.persona||""});ptCel={lect:[]};ptSave();toast("Turno cerrado. ¡Gracias!");puestoMenu()}catch(e){toast(puMsg(e))}},"#ptConfirm");
 };
 /* cámara del PT: primero la etiqueta del pallet, luego el producto */
@@ -5630,25 +5631,27 @@ function ptRows(){
   const SN=new Map();
   for(const d of ptData.pallets){convFix(d);
     if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
-      if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
+      if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);SN.set(k,o);if(!(+d.qty>0))continue;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
   const rows=[];
   for(const k of new Set([...E.keys(),...R.keys()])){const e=E.get(k),r=R.get(k),ref=e||r,t=Date.parse((e||r).t||(e||r).rt);
     if(t<ini.getTime()||t>=fin)continue;
-    const pe=e?ptBase(e):null, pr=r?ptBase(r):null, otro=e&&r&&key(e.k||e.code)!==key(r.k||r.code);
-    const st=!r?"transito":!e?"sinprod":otro?"otro":Math.abs(pr-pe)<1e-9?"ok":"dif";
+    /* Un registro corregido a 0 queda anulado: no cuenta, pero sigue visible para poder revertirlo. */
+    const ea=e&&+e.qty>0?e:null, ra=r&&+r.qty>0?r:null;
+    const pe=ea?ptBase(ea):null, pr=ra?ptBase(ra):null, otro=ea&&ra&&key(ea.k||ea.code)!==key(ra.k||ra.code);
+    const st=!ea&&!ra?"anulado":!ra?"transito":!ea?"sinprod":otro?"otro":Math.abs(pr-pe)<1e-9?"ok":"dif";
     rows.push({pallet:k,cod:ref.k||ref.code,desc:ref.desc||(r&&r.desc)||"",um:ref.um||"",ce:ref.ce||"",f:+ref.f||1,e,r,pe,pr,dif:pe!=null&&pr!=null&&!otro?pr-pe:null,st,t})}
-  const snRows=[...SN.values()].map(o=>{o.dif=o.rc-o.p;o.st=!o.nr?"transito":!o.np?"sinprod":Math.abs(o.dif)<1e-9?"ok":o.dif<0?"faltan":"sobran";return o});
+  const snRows=[...SN.values()].map(o=>{o.dif=o.rc-o.p;o.st=!o.nr&&!o.np?"anulado":!o.nr?"transito":!o.np?"sinprod":Math.abs(o.dif)<1e-9?"ok":o.dif<0?"faltan":"sobran";return o});
   return {rows,ini,fin,snRows};
 }
-const PTST={ok:["Recibido OK","p-ok"],dif:["Diferencia de cantidad","p-bad"],otro:["Producto distinto","p-bad"],transito:["En tránsito","p-info"],sinprod:["Sin registro de producción","p-warn"]};
+const PTST={anulado:["Anulado (en 0)","p-info"],ok:["Recibido OK","p-ok"],dif:["Diferencia de cantidad","p-bad"],otro:["Producto distinto","p-bad"],transito:["En tránsito","p-info"],sinprod:["Sin registro de producción","p-warn"]};
 function ptQ(t,r,n){if(t==null)return "";return qBC(t,r.ce,r.f,r.um)}
 /* Una sola tabla: pallets con número (uno a uno) + pallets sin número (una fila por producto). */
-const PTSN2ST={ok:"ok",faltan:"dif",sobran:"dif",transito:"transito",sinprod:"sinprod"};
+const PTSN2ST={anulado:"anulado",ok:"ok",faltan:"dif",sobran:"dif",transito:"transito",sinprod:"sinprod"};
 function ptTabla(){
   const {rows,ini,fin,snRows}=ptRows(),T=[];
   for(const r of rows)T.push({pallet:r.pallet,cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,pe:r.pe,pr:r.pr,dif:r.dif,st:r.st,
-    rec:r.r?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
+    rec:r.r&&r.pr!=null?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
   for(const o of snRows)T.push({sn:true,pallet:`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`,cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
     recs:o.recs||[],rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
   return {T,ini,fin};
@@ -5662,14 +5665,15 @@ function ptSnDet(r){const L=[...(r.recs||[])].sort((a,b)=>String(a.t||a.rt).loca
   const who=d=>d.puesto==="produccion"?"🏭 Producción entrega":d.puesto==="retail"?"🛒 Retail retira":"🏷️ Bodega recibe";
   return `<tr class="ptSnDet"><td colspan="10" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
     L.map(d=>{const f=+d.f||+r.f||1,ce=d.ce||r.ce,um=umTxt(d.um||r.um),cv=ce&&f!==1;
-      return `<span>${who(d)}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap"><b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div></td></tr>`}
+      return `<span>${who(d)}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap">${+d.qty>0?"":'<s class="muted">'}<b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}${+d.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div></td></tr>`}
 /* Supervisor: corregir la cantidad de un registro de PT (de cualquier día). Queda anotado de → a. */
 function ptEdBtn(d){if(!d||!d.lid||prodMode())return "";const ed=Array.isArray(d.ed)&&d.ed.length;
   return `<span class="sub">${ed?`<span title="${esc(d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}${x.via==="panel"?" (panel)":""}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pted="${esc(d.lid)}">✎ corregir</button></span>`}
 function ptEdBind(){$$("#ptRes [data-ptsn]").forEach(b=>b.onclick=()=>{const k=b.dataset.ptsn;ptSnOpen.has(k)?ptSnOpen.delete(k):ptSnOpen.add(k);renderPtPanel()});$$("#ptRes [data-pted]").forEach(b=>b.onclick=async()=>{const d=ptData.pallets.find(x=>x.lid===b.dataset.pted);if(!d)return;
-  const u=d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um),v=prompt(`Pallet ${d.pallet||"sin número"} · ${d.desc||d.k||d.code}\nNueva cantidad (en ${u}):`,fmt2(d.qty));if(v==null)return;
-  const q=num(v);if(q==null||q<=0)return toast("Escribe una cantidad mayor que 0");
-  try{await rpc(SB,"cb_pt_editar_panel",{p_clave:SB.admin,p_lid:d.lid,p_qty:q,p_persona:"Supervisor"});toast("Cantidad corregida");await ptRefresh(true)}
+  const u=d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um),v=prompt(`Pallet ${d.pallet||"sin número"} · ${d.desc||d.k||d.code}\nNueva cantidad (en ${u}). Escribe 0 para anular un registro equivocado:`,fmt2(d.qty));if(v==null)return;
+  const q=num(v);if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
+  if(q===0&&!confirm("¿Dejar este registro en 0?\nQueda anulado: no cuenta como pallet ni suma unidades. Queda en el historial y se puede volver a corregir."))return;
+  try{await rpc(SB,"cb_pt_editar_panel",{p_clave:SB.admin,p_lid:d.lid,p_qty:q,p_persona:"Supervisor"});toast(q===0?"Registro anulado (en 0)":"Cantidad corregida");await ptRefresh(true)}
   catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":movMsg(e))}})}
 function renderPtPanel(){
   if($("#v-pt").hidden)return;
@@ -5691,7 +5695,7 @@ function renderPtPanel(){
   const F=[["todos","Todos",T.length],["dif","Con diferencia",cnt(["dif","otro"])],["transito","En tránsito",cnt(["transito"])],["sinprod","Sin registro de producción",cnt(["sinprod"])],["ok","Recibidos OK",cnt(["ok"])]];
   $("#ptChips").innerHTML=F.map(([f,l,n])=>`<button class="chip" data-f="${f}" aria-pressed="${ptFilter===f}">${l} · ${fmt(n)}</button>`).join("");
   $$("#ptChips .chip").forEach(b=>b.onclick=()=>{ptFilter=b.dataset.f;renderPtPanel()});
-  const q=deacc($("#ptQ").value), ord={dif:0,otro:1,sinprod:2,transito:3,ok:4};
+  const q=deacc($("#ptQ").value), ord={dif:0,otro:1,sinprod:2,transito:3,ok:4,anulado:5};
   let f=T.filter(r=>ptFilter==="todos"||(ptFilter==="dif"?["dif","otro"].includes(r.st):r.st===ptFilter));
   if(q)f=f.filter(r=>deacc(r.pallet+" "+r.cod+" "+r.desc).includes(q));
   f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
