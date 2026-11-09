@@ -226,6 +226,7 @@ nav.tabs .soon{font:600 10px var(--font);text-transform:uppercase;letter-spacing
 .ptSidesCol{display:flex;flex-direction:column;gap:8px}
 #ptRes th,#ptRes td,#mpRes th,#mpRes td{padding:5px 6px;font-size:13px}#mpRes .sub{white-space:normal;max-width:120px;margin-left:auto}#mpRes td.desc{min-width:120px}#mpRes .pill{white-space:normal;display:inline-block;max-width:110px;line-height:1.25;text-align:center}#ptRes th{white-space:normal;vertical-align:bottom}#ptRes td.desc{min-width:140px}#ptRes .pill{white-space:normal;display:inline-block;max-width:118px;line-height:1.25;text-align:center}#ptRes td:last-child{min-width:84px}
 @media (max-width:900px){.ptGrid{grid-template-columns:1fr}}
+.ptGrid>*,.ptMain{min-width:0}
 .dvRow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
 .dvRow+.dvRow{margin-top:8px}.dvRow .dd{flex:1;min-width:0}.dvRow .dd b{display:block}.dvRow .dd span{font-size:13px;color:var(--muted)}
 .dvGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -2753,6 +2754,22 @@ end $$;
 
 revoke all on function public.cb_puesto_mov_tomar(text, text, uuid, text), public.cb_puesto_conteo_tomar(text, text, uuid, text) from public;
 grant execute on function public.cb_puesto_mov_tomar(text, text, uuid, text), public.cb_puesto_conteo_tomar(text, text, uuid, text) to anon, authenticated;
+-- =====================================================================
+--  Actualización 16 · Panel del supervisor en cualquier equipo (iPhone, otro PC)
+--  Entrega al supervisor el último informe del ERP subido (productos + stock), para que el
+--  panel muestre resultados con stock aunque en ese equipo no se haya cargado el archivo.
+--  Solo agrega una función: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create or replace function public.cb_catalogo_stock(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return (select jsonb_build_object('items', items, 'stock', stock, 'origen', origen, 'actualizado', actualizado) from cb_catalogo where id = 1);
+end $$;
+
+revoke all on function public.cb_catalogo_stock(text) from public;
+grant execute on function public.cb_catalogo_stock(text) to anon, authenticated;
 </script>
   </div>
 
@@ -3875,7 +3892,7 @@ async function conteosRecuperar(arr){
         reconteoDe:d.meta&&d.meta.reconteo_de||undefined,rot:!!(d.meta&&d.meta.rotativo),fin:!!(x.finalizado||x.terminado),link:x.token?appUrl()+"?nube="+x.id+"."+x.token+sbLinkParams():""})}
     for(const id of sinCod){const c=conteos.find(z=>z.id===id),d=det[id];if(c&&d&&Array.isArray(d.codes))c.codes=d.codes}
     conteos.sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));store.set("inv_conteos",conteos);
-    if(nuevos.length&&typeof renderResult==="function"&&!$("#v-resultado").hidden)renderResult()}
+    if(nuevos.length&&typeof renderResult==="function"&&!$("#v-resultado").hidden){renderResult();if(typeof traerSel==="function")traerSel(true).then(renderResult).catch(()=>{})}}
   finally{recBusy=false}
 }
 async function refreshNube(silent){
@@ -4190,17 +4207,34 @@ var catBusy=false;
 var factRecOk=false;
 async function factRecuperar(){
   if(factRecOk||prodMode()||!nubeOn())return;factRecOk=true;
+  await erpDesdeNube();
   if(Object.keys(FACT).length)return;
   try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(!r||!Array.isArray(r.items))return;let n=0,nm=0;
     for(const [cod,ean,desc,um,ce,f] of r.items){if(!cod)continue;const k=key(cod);
       if(um&&!MASTER[k]){MASTER[k]={um,sg:"",desc:desc||""};nm++}
       if(ce&&+f>0){FACT[k]={ce:String(ce).toUpperCase(),f:+f};n++}}
-    if(n||nm){store.set("inv_master",MASTER);saveFact();toast(`Equivalencias recuperadas desde Supabase: ${fmt(n)} con bultos`)}}
+    if(n||nm){store.set("inv_master",MASTER);saveFact();if(n)toast(`Equivalencias recuperadas desde Supabase: ${fmt(n)} con bultos`)}}
+  catch(e){}
+}
+/* Equipo sin el archivo del ERP (iPhone, otro PC): usa el último informe subido a Supabase (productos + stock),
+   para ver resultados con stock. Si en este equipo se carga un archivo del ERP, ese manda. */
+async function erpDesdeNube(){
+  if(erp&&!erp.maestro&&!erp.fromServer)return;
+  try{const r=await rpc(SB,"cb_catalogo_stock",{p_clave:SB.admin});if(!r||!Array.isArray(r.items)||!r.items.length)return;
+    if(erp&&erp.fromServer&&erp.at===r.actualizado)return;
+    const st=r.stock||{};
+    erp={file:"ERP en Supabase · "+(r.origen||""),at:r.actualizado,fromServer:true,merged:0,
+      items:r.items.map(([cod,ean,desc,um,ce,f])=>{const x=st[cod];const tot=Array.isArray(x)?x[1]:null,disp=Array.isArray(x)?x[0]:null;
+        return {cod,ean:ean||"",desc:desc||"",um:um||"",stock:tot!=null?+tot:(disp!=null?+disp:null),costo:null,ubic:""}})};
+    store.set("inv_erp",erp);buildIndex();updStatus();if(typeof maestroSync==="function")maestroSync();
+    if(!$("#v-resultado").hidden&&typeof renderResult==="function")renderResult()}
   catch(e){}
 }
 async function catSync(force){        // supervisor: sube catálogo + stock si cambió
   if(prodMode()||!nubeOn()||catBusy)return;
+  if(erp&&erp.fromServer)return;        // ese ERP vino de Supabase: no se vuelve a subir
   await factRecuperar();
+  if(erp&&erp.fromServer)return;
   if(!force&&!Object.keys(FACT).length)return;      // sin equivalencias no se pisa el catálogo de la nube
   const its=movCatalog();if(!its)return;
   const items=its.map(catRow), stock={};
@@ -4310,7 +4344,7 @@ function renderSol(){
   $("#solClear").hidden=!mpSol.length;
   const pm=prodMode();
   $("#btnSolGen").textContent=(pm?"Enviar solicitud a bodega":"Generar solicitud")+(mpSol.length?` (${fmt(mpSol.length)} productos)`:"");
-  $("#solTxt").innerHTML=pm?"Agrega los códigos y cantidades que necesitas y toca <b>Enviar solicitud a bodega</b>. Bodega la recibe al instante y prepara la entrega.":"Agrega códigos y cantidades y toca <b>Generar solicitud</b>: se crea la entrega con su link. Las solicitudes de producción llegan como aviso arriba.";
+  $("#solTxt").innerHTML=pm?"Agrega los códigos y cantidades que necesitas y toca <b>Enviar solicitud a bodega</b>. Bodega la recibe al instante y prepara la entrega.":"Agrega códigos y cantidades y toca <b>Generar solicitud</b>: le llega directo a la app de bodega (entrega) y de producción (recibe). Las solicitudes de producción llegan como aviso arriba.";
   $$("#solList [data-sr]").forEach(b=>b.onclick=()=>{mpSol.splice(+b.dataset.sr,1);solSave();renderSol()});
   $$("#solList [data-sq]").forEach(inp=>inp.onchange=()=>{const v=num(inp.value),x=mpSol[+inp.dataset.sq];if(v!=null&&v>0){if(x.u==="ce"){x.qu=v;x.q=v*x.f}else{x.q=v;x.qu=v}solSave()}renderSol()});
 }
