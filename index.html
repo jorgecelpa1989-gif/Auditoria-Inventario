@@ -657,6 +657,13 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Días anteriores</h2><span class="sep"></span><select id="ptPrevDia" style="flex:1 1 180px"></select></div>
     <p class="small muted" style="margin:6px 0 0">Elige el día para ver tus pallets recibidos y corregir una cantidad. Cada corrección queda anotada para el supervisor.</p>
     <div class="tbl"><table id="ptPrevList"></table></div>
+    <details id="ptAddBox" hidden style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">＋ Agregar un pallet que faltó ese día</summary>
+      <label class="f">N° de pallet (opcional)<input id="ptAddPal" autocomplete="off" autocapitalize="characters" placeholder="Vacío = sin número"></label>
+      <label class="f">Producto (código)<input id="ptAddCod" autocomplete="off" autocapitalize="characters" placeholder="Código o código de barras"></label>
+      <div class="small" id="ptAddInfo"></div>
+      <div class="row" style="gap:8px"><label class="f" style="flex:1">Cantidad<input id="ptAddQty" inputmode="decimal" placeholder="0" autocomplete="off"></label><label class="f" style="flex:0 1 110px">Hora<input id="ptAddHora" type="time" value="12:00"></label></div>
+      <button class="btn primary" id="ptAddOk" style="justify-content:center;width:100%">Agregar a ese día</button>
+    </details>
   </div>
   <div class="card contarCard">
     <div class="eyebrow">Al terminar el turno</div>
@@ -723,7 +730,18 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="eyebrow">4 · Recepción PT</div>
     <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción (bodega y retail)</h2><span class="sep"></span>
       <select id="ptDesde" style="flex:0 1 190px"><option value="d0" selected>Hoy</option></select>
-      <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button></div>
+      <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button><button class="btn" id="ptAddTog">＋ Agregar registro</button></div>
+    <div class="cbox" id="ptAddPanel" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b id="ptAddTit">Agregar un registro que faltó</b>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:0 1 190px">Quién<select id="ptAdL"><option value="R">🏷️ Bodega recibe</option><option value="E">🏭 Producción entrega</option><option value="D">🛒 Retail retira</option></select></label>
+        <label class="f" style="flex:0 1 150px">N° de pallet<input id="ptAdPal" autocomplete="off" placeholder="Vacío = sin número"></label>
+        <label class="f" style="flex:1 1 200px">Código<input id="ptAdCod" autocomplete="off" placeholder="Código del producto"></label>
+        <label class="f" style="flex:0 1 110px"><span id="ptAdQL">Cantidad</span><input id="ptAdQty" inputmode="decimal" placeholder="0" autocomplete="off"></label>
+        <label class="f" style="flex:0 1 110px">Hora<input id="ptAdHora" type="time" value="12:00"></label>
+        <button class="btn primary" id="ptAdOk">Agregar</button></div>
+      <div class="small" id="ptAdInfo"></div>
+    </div>
     <div class="kpis" id="ptKpis"></div>
     <div class="row"><div class="chips" id="ptChips"></div><span class="sep"></span><input id="ptQ" placeholder="Buscar pallet, código o descripción" style="flex:0 1 280px"></div>
     <div class="tbl" style="max-height:none"><table id="ptRes"></table></div>
@@ -2641,6 +2659,52 @@ revoke all on function public.cb_pt_dia(text, text, date), public.cb_pt_editar(t
   public.cb_pt_editar_panel(text, text, numeric, text) from public;
 grant execute on function public.cb_pt_dia(text, text, date), public.cb_pt_editar(text, text, text, numeric, text),
   public.cb_pt_editar_panel(text, text, numeric, text) to anon, authenticated;
+-- =====================================================================
+--  Actualización 14 · PT: agregar un pallet olvidado en un día anterior
+--  · Celular (quien entrega o recibe PT): agrega un registro propio en un día de los últimos 14.
+--  · Panel del supervisor: agrega un registro de producción, bodega o retail en cualquier día.
+--  El registro queda con la fecha/hora de ese día y marcado como "agregado a mano" (quién y cuándo).
+--  Solo agrega funciones: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create or replace function public.cb_pt_agregar_dia(p_puesto text, p_ses text, p_dia date, p_hora text, p_data jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_lado text; v_hoy date := (now() at time zone 'America/Santiago')::date; v_t timestamptz; v_lid text;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  v_lado := cb_u_lado_pt(p_puesto);
+  if v_lado is null then raise exception 'sin_permiso'; end if;
+  if p_dia is null or p_dia > v_hoy or p_dia < v_hoy - 14 then raise exception 'fecha_invalida'; end if;
+  if coalesce(p_data->>'code','') = '' or coalesce((p_data->>'qty')::numeric, 0) <= 0 then raise exception 'datos_invalidos'; end if;
+  v_t := (p_dia + coalesce(nullif(p_hora,'')::time, time '12:00')) at time zone 'America/Santiago';
+  if v_t > now() then v_t := now(); end if;
+  v_lid := 'man-' || encode(extensions.gen_random_bytes(8), 'hex');
+  insert into cb_pt(lid, puesto, pallet, data, t, lado)
+  values (v_lid, p_puesto, upper(left(coalesce(nullif(p_data->>'pallet',''), 'SN-' || v_lid), 60)),
+          p_data || jsonb_build_object('lid', v_lid, 't', v_t, 'manual', jsonb_build_object('por', p_data->>'user', 'at', now(), 'via', 'celular')), v_t, v_lado);
+  return jsonb_build_object('lid', v_lid, 't', v_t);
+end $$;
+
+create or replace function public.cb_pt_agregar_panel(p_clave text, p_dia date, p_hora text, p_lado text, p_data jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_t timestamptz; v_lid text; v_puesto text;
+begin
+  perform cb_check(p_clave);
+  if p_lado not in ('E','R','D') then raise exception 'datos_invalidos'; end if;
+  if p_dia is null or p_dia > (now() at time zone 'America/Santiago')::date then raise exception 'fecha_invalida'; end if;
+  if coalesce(p_data->>'code','') = '' or coalesce((p_data->>'qty')::numeric, 0) <= 0 then raise exception 'datos_invalidos'; end if;
+  v_t := (p_dia + coalesce(nullif(p_hora,'')::time, time '12:00')) at time zone 'America/Santiago';
+  if v_t > now() then v_t := now(); end if;
+  v_lid := 'man-' || encode(extensions.gen_random_bytes(8), 'hex');
+  v_puesto := case p_lado when 'E' then 'panel_prod' when 'D' then 'panel_retail' else 'panel_bodega' end;
+  insert into cb_pt(lid, puesto, pallet, data, t, lado)
+  values (v_lid, v_puesto, upper(left(coalesce(nullif(p_data->>'pallet',''), 'SN-' || v_lid), 60)),
+          p_data || jsonb_build_object('lid', v_lid, 't', v_t, 'manual', jsonb_build_object('por', coalesce(p_data->>'user','Supervisor'), 'at', now(), 'via', 'panel')), v_t, p_lado);
+  return jsonb_build_object('lid', v_lid, 't', v_t);
+end $$;
+
+revoke all on function public.cb_pt_agregar_dia(text, text, date, text, jsonb), public.cb_pt_agregar_panel(text, date, text, text, jsonb) from public;
+grant execute on function public.cb_pt_agregar_dia(text, text, date, text, jsonb), public.cb_pt_agregar_panel(text, date, text, text, jsonb) to anon, authenticated;
 </script>
   </div>
 
@@ -2822,7 +2886,7 @@ function show(v){
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
-  if(v==="resultado"){renderResult();if(nubeOn())traerSel(true).then(renderResult);if(nubeOn()&&typeof uCargar==="function")uCargar().then(()=>{cPuSync();edRender()}).catch(()=>{})}
+  if(v==="resultado"){maestroSync();renderResult();if(nubeOn())traerSel(true).then(renderResult);if(nubeOn()&&typeof uCargar==="function")uCargar().then(()=>{cPuSync();edRender()}).catch(()=>{})}
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
   if(v==="erp"&&typeof uCargar==="function"&&nubeOn())uCargar().then(()=>{if(typeof renderConteosOnly==="function")renderConteosOnly()});
   if(v!=="contar")stopCam();
@@ -3421,6 +3485,10 @@ async function saveData(name,blob,fallback){
 }
 
 /* ================= EQUIVALENCIAS (unidad de conteo → unidad ERP) ================= */
+/* ERP para crear conteos: el recién cargado o, si se recargó la página, el último guardado en este PC. */
+function erpBase(){if(erpDraft&&erpDraft.items&&erpDraft.items.length)return erpDraft;
+  if(erp&&!erp.maestro&&erp.items&&erp.items.length)return {file:erp.file,items:erp.items,merged:erp.merged||0,map:{cod:0}};return null}
+function maestroSync(){const c=$("#maestroCard");if(!c)return;c.hidden=!erpBase();if(!c.hidden&&typeof renderSg==="function")renderSg()}
 function factItems(){return erpDraft&&erpDraft.items&&erpDraft.items.length?erpDraft.items:(erp&&!erp.maestro?erp.items:[])}
 let factFilter="pend";
 function saveFact(){store.set("inv_fact",FACT);for(const arr of [erpDraft&&erpDraft.items,erp&&!erp.maestro&&erp.items])if(arr)enrich(arr);if(erp&&!erp.maestro)store.set("inv_erp",erp);renderFactSum()}
@@ -3551,7 +3619,7 @@ const waHref=c=>waLink(conteoMsg(c));
 async function copyText(t,inp){try{await navigator.clipboard.writeText(t);toast("Link copiado")}catch(e){if(inp){inp.focus();inp.select()}toast("Selecciona el link y cópialo")}}
 
 $("#btnCrear").onclick=async()=>{
-  const d=erpDraft;
+  const d=erpBase();
   if(!d||!d.items.length)return toast("Primero carga el inventario del ERP");
   if(d.map.cod==null)return toast("Falta elegir la columna de código");
   if(!nubeOn()&&!gh.token){show("permisos");$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático o GitHub (una sola vez, más abajo)")}
@@ -4927,7 +4995,16 @@ function ptPrevInit(){const card=$("#ptPrevCard");card.hidden=!can("pt_recibir")
   for(let i=1;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="${ymd(d)}">${i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
   sel.innerHTML=o.join("");sel.value=v;if(!sel.value)$("#ptPrevList").innerHTML="";}
 $("#ptPrevDia").onchange=()=>ptPrevLoad();
-async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");if(!dia){tb.innerHTML="";return}
+function ptAddInfo(){const it=ptFind($("#ptAddCod").value),el=$("#ptAddInfo");
+  el.innerHTML=!$("#ptAddCod").value.trim()?"":it?`<b>${esc(it.desc)}</b> <span class="muted">· cantidad en ${esc(it.ce&&+it.f!==1?plural(it.ce).toLowerCase():umTxt(it.um))}${it.ce&&+it.f!==1?` (1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))})`:""}</span>`:'<span style="color:var(--bad)">Ese código no está en la lista de productos</span>';return it}
+$("#ptAddCod").addEventListener("input",ptAddInfo);
+$("#ptAddOk").onclick=async()=>{const dia=$("#ptPrevDia").value,it=ptAddInfo(),q=num($("#ptAddQty").value);
+  if(!dia)return toast("Elige el día");if(!it)return toast("Escribe un código de la lista de productos");if(q==null||q<=0)return toast("Escribe la cantidad");
+  const pal=codeStr($("#ptAddPal").value),b=$("#ptAddOk");b.disabled=true;
+  try{await prpc("cb_pt_agregar_dia",{p_dia:dia,p_hora:$("#ptAddHora").value||"12:00",p_data:{pallet:pal||"",sn:!pal,code:it.cod,k:it.cod,desc:it.desc,um:it.um,ce:it.ce||"",f:+it.f||1,qty:q,user:PST.persona||""}});
+    $("#ptAddPal").value="";$("#ptAddCod").value="";$("#ptAddQty").value="";ptAddInfo();toast("Pallet agregado a ese día");await ptPrevLoad()}
+  catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 14 en Supabase.":puMsg(e))}finally{b.disabled=false}};
+async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");$("#ptAddBox").hidden=!dia;if(!dia){tb.innerHTML="";return}
   tb.innerHTML='<tr><td class="muted">Cargando…</td></tr>';
   try{const L=await prpc("cb_pt_dia",{p_dia:dia})||[];
     tb.innerHTML=L.length?L.slice().reverse().map(l=>{const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),ed=Array.isArray(l.ed)&&l.ed.length;
@@ -5418,11 +5495,26 @@ async function ptRefresh(force){
   }catch(e){if(force){$("#ptNote").hidden=false;$("#ptNote").textContent=/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script actualizacion_04_puestos.sql.":movMsg(e)}}
   finally{ptBusy=false}
 }
-function ptEnter(){ptDias();if(!movOk()){$("#ptNote").hidden=false;$("#ptNote").innerHTML="Para ver el producto terminado, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.";return}renderPtPanel();ptRefresh(true)}
+function ptEnter(){ptDias();$("#ptAddTog").hidden=prodMode();if(prodMode())$("#ptAddPanel").hidden=true;if(!movOk()){$("#ptNote").hidden=false;$("#ptNote").innerHTML="Para ver el producto terminado, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.";return}renderPtPanel();ptRefresh(true)}
 setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-pt").hidden)ptRefresh(false)},20000);
 $("#ptTraer").onclick=()=>ptRefresh(true);
-$("#ptDesde").onchange=()=>ptRefresh(true);
+$("#ptDesde").onchange=()=>{ptRefresh(true);if(!$("#ptAddPanel").hidden)ptAdInfo()};
 $("#ptQ").addEventListener("input",()=>renderPtPanel());
+/* Supervisor: agregar un registro de PT que faltó (producción, bodega o retail) en el día elegido. */
+const ptDiaSel=()=>{const d=ptRango()||new Date();return ymd(d)};
+function ptAdItem(){const c=codeStr($("#ptAdCod").value);if(!c)return null;const its=(typeof movCatalog==="function"&&movCatalog())||[];const k=key(c);return its.find(i=>key(i.cod)===k||(i.ean&&String(i.ean).split(/[;,/ ]+/).some(e=>key(e)===k)))||null}
+function ptAdInfo(){const it=ptAdItem(),el=$("#ptAdInfo"),c=$("#ptAdCod").value.trim();const cv=it&&conv(it);
+  $("#ptAdQL").textContent=it?`Cantidad (${cv?plural(it.ce).toLowerCase():umTxt(it.um)})`:"Cantidad";
+  $("#ptAddTit").textContent=`Agregar un registro que faltó · día ${ptDiaSel().split("-").reverse().join("-")}`;
+  el.innerHTML=!c?"El registro queda en el día elegido arriba, marcado como agregado a mano.":it?`<b>${esc(it.desc)}</b>${cv?` <span class="muted">· 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</span>`:""}`:'<span style="color:var(--bad)">Ese código no está en el ERP cargado</span>';return it}
+$("#ptAddTog").onclick=()=>{const p=$("#ptAddPanel");p.hidden=!p.hidden;if(!p.hidden){ptAdInfo();$("#ptAdCod").focus()}};
+$("#ptAdCod").addEventListener("input",ptAdInfo);
+$("#ptAdOk").onclick=async()=>{const it=ptAdInfo(),q=num($("#ptAdQty").value);if(!it)return toast("Escribe un código del ERP");if(q==null||q<=0)return toast("Escribe la cantidad");
+  const pal=codeStr($("#ptAdPal").value),b=$("#ptAdOk");b.disabled=true;
+  try{await rpc(SB,"cb_pt_agregar_panel",{p_clave:SB.admin,p_dia:ptDiaSel(),p_hora:$("#ptAdHora").value||"12:00",p_lado:$("#ptAdL").value,
+      p_data:{pallet:pal||"",sn:!pal,code:it.cod,k:it.cod,desc:it.desc,um:it.um||"",ce:conv(it)?it.ce:"",f:conv(it)?+it.f:1,qty:q,user:"Supervisor"}});
+    $("#ptAdPal").value="";$("#ptAdCod").value="";$("#ptAdQty").value="";ptAdInfo();toast("Registro agregado");await ptRefresh(true)}
+  catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 14 en Supabase.":movMsg(e))}finally{b.disabled=false}};
 
 const ptBase=d=>(+d.qty||0)*(+d.f||1);
 const ptSNd=d=>!!(d&&(d.sn||/^SN-/i.test(String(d.pallet||""))));
