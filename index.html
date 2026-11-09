@@ -656,8 +656,8 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div id="ptSync"></div>
   </div>
   <div class="card contarCard" id="ptPrevCard" hidden>
-    <div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Días anteriores</h2><span class="sep"></span><select id="ptPrevDia" style="flex:1 1 180px"></select></div>
-    <p class="small muted" style="margin:6px 0 0">Elige el día para ver tus pallets recibidos y corregir una cantidad. Cada corrección queda anotada para el supervisor.</p>
+    <div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Mis pallets por día</h2><span class="sep"></span><select id="ptPrevDia" style="flex:1 1 180px"></select></div>
+    <p class="small muted" style="margin:6px 0 0">Aquí están todos tus pallets guardados, también los de turnos ya cerrados. Elige el día para verlos o corregir una cantidad (0 = anular). Cada corrección queda anotada para el supervisor.</p>
     <div class="tbl"><table id="ptPrevList"></table></div>
     <details id="ptAddBox" hidden style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">＋ Agregar un pallet que faltó ese día</summary>
       <label class="f">N° de pallet (opcional)<input id="ptAddPal" autocomplete="off" autocapitalize="characters" placeholder="Vacío = sin número"></label>
@@ -669,7 +669,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
   <div class="card contarCard">
     <div class="eyebrow">Al terminar el turno</div>
-    <p class="small">Avisa al supervisor que terminaste. El celular sigue conectado: el próximo pallet empieza un turno nuevo.</p>
+    <p class="small">Avisa al supervisor que terminaste. La lista del turno se vacía, pero tus pallets quedan guardados: los ves en «Mis pallets por día». El celular sigue conectado y el próximo pallet empieza un turno nuevo.</p>
     <button class="btn danger" id="ptFin" style="justify-content:center">Terminar proceso (cierre de turno)…</button>
     <div id="ptConfirm"></div>
   </div>
@@ -5093,10 +5093,10 @@ async function ptAbrir(){
 }
 /* Días anteriores (solo quien recibe PT en bodega): ver los pallets de un día y corregir la cantidad. */
 const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-function ptPrevInit(){const card=$("#ptPrevCard");card.hidden=!can("pt_recibir");if(card.hidden)return;
+function ptPrevInit(){const card=$("#ptPrevCard");card.hidden=!(can("pt_recibir")||can("pt_entregar")||can("pt_retirar"));if(card.hidden)return;
   const sel=$("#ptPrevDia"),v=sel.value,h=new Date();h.setHours(0,0,0,0);const o=['<option value="">— Elige un día —</option>'];
-  for(let i=1;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="${ymd(d)}">${i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
-  sel.innerHTML=o.join("");sel.value=v;if(!sel.value)$("#ptPrevList").innerHTML="";}
+  for(let i=0;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="${ymd(d)}">${i===0?"Hoy · ":i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
+  sel.innerHTML=o.join("");sel.value=v||ymd(h);ptPrevLoad();}
 $("#ptPrevDia").onchange=()=>ptPrevLoad();
 function ptAddInfo(){const it=ptFind($("#ptAddCod").value),el=$("#ptAddInfo");
   el.innerHTML=!$("#ptAddCod").value.trim()?"":it?`<b>${esc(it.desc)}</b> <span class="muted">· cantidad en ${esc(it.ce&&+it.f!==1?plural(it.ce).toLowerCase():umTxt(it.um))}${it.ce&&+it.f!==1?` (1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))})`:""}</span>`:'<span style="color:var(--bad)">Ese código no está en la lista de productos</span>';return it}
@@ -5185,10 +5185,10 @@ function ptAdd(){
 }
 var ptSyncing=false;
 async function ptSyncAll(){
-  if(ptSyncing||!puestoMode())return;ptSyncing=true;
+  if(ptSyncing||!puestoMode())return;ptSyncing=true;let n=0;
   try{for(const l of ptCel.lect.filter(x=>!x.sync)){const d=Object.assign({},l);delete d.sync;
-      try{await prpc("cb_pt_registrar",{p_data:d});l.sync=true;ptSave()}catch(e){if(!e.net)toast(puMsg(e));break}}}
-  finally{ptSyncing=false;ptRender()}
+      try{await prpc("cb_pt_registrar",{p_data:d});l.sync=true;ptSave();n++}catch(e){if(!e.net)toast(puMsg(e));break}}}
+  finally{ptSyncing=false;ptRender();if(n&&$("#ptPrevDia").value===ymd(new Date()))ptPrevLoad()}
 }
 setInterval(()=>{if(puestoMode()&&ptCel.lect.some(l=>!l.sync))ptSyncAll()},20000);
 addEventListener("online",()=>{if(puestoMode())ptSyncAll()});
@@ -5211,8 +5211,8 @@ $("#ptQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault(
 $("#ptOk").onclick=ptAdd;
 $("#ptFin").onclick=async()=>{
   if(ptCel.lect.some(l=>!l.sync)){await ptSyncAll();if(ptCel.lect.some(l=>!l.sync))return toast("Hay pallets sin enviar. Busca señal y toca Enviar ahora.")}
-  confirmBox(`Se cierra tu turno con ${fmt(ptCel.lect.filter(l=>+l.qty>0).length)} pallets y se avisa al supervisor. El celular sigue conectado para el próximo turno.`,async()=>{
-    try{await prpc("cb_pt_cerrar",{p_persona:PST.persona||""});ptCel={lect:[]};ptSave();toast("Turno cerrado. ¡Gracias!");puestoMenu()}catch(e){toast(puMsg(e))}},"#ptConfirm");
+  confirmBox(`Se cierra tu turno con ${fmt(ptCel.lect.filter(l=>+l.qty>0).length)} pallets y se avisa al supervisor. Tus pallets quedan guardados: los sigues viendo en «Mis pallets por día». El celular sigue conectado para el próximo turno.`,async()=>{
+    try{await prpc("cb_pt_cerrar",{p_persona:PST.persona||""});ptCel={lect:[]};ptSave();toast("Turno cerrado. ¡Gracias!");if($("#ptPrevDia").value)ptPrevLoad();puestoMenu()}catch(e){toast(puMsg(e))}},"#ptConfirm");
 };
 /* cámara del PT: primero la etiqueta del pallet, luego el producto */
 function ptSetCam(t){ptCamT=t;ptHold=false;ptLast.miss=99;$("#ptCamTarget").textContent=t==="pallet"?"Leyendo pallet":"Leyendo producto";$("#ptCamMsg").textContent=t==="pallet"?"Apunta a la etiqueta del pallet.":"Apunta al código del producto."}
