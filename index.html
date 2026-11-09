@@ -4059,8 +4059,23 @@ function movCatalog(){
 }
 const catRow=i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um];
 var catBusy=false;
+/* Equivalencias (bultos, unidad y descripción del maestro) guardadas solo en el navegador: si este PC no las tiene
+   (PC nuevo u otra dirección de la app), se recuperan del catálogo en Supabase antes de volver a subirlo. */
+var factRecOk=false;
+async function factRecuperar(){
+  if(factRecOk||prodMode()||!nubeOn())return;factRecOk=true;
+  if(Object.keys(FACT).length)return;
+  try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(!r||!Array.isArray(r.items))return;let n=0,nm=0;
+    for(const [cod,ean,desc,um,ce,f] of r.items){if(!cod)continue;const k=key(cod);
+      if(um&&!MASTER[k]){MASTER[k]={um,sg:"",desc:desc||""};nm++}
+      if(ce&&+f>0){FACT[k]={ce:String(ce).toUpperCase(),f:+f};n++}}
+    if(n||nm){store.set("inv_master",MASTER);saveFact();toast(`Equivalencias recuperadas desde Supabase: ${fmt(n)} con bultos`)}}
+  catch(e){}
+}
 async function catSync(force){        // supervisor: sube catálogo + stock si cambió
   if(prodMode()||!nubeOn()||catBusy)return;
+  await factRecuperar();
+  if(!force&&!Object.keys(FACT).length)return;      // sin equivalencias no se pisa el catálogo de la nube
   const its=movCatalog();if(!its)return;
   const items=its.map(catRow), stock={};
   for(const i of its)stock[i.cod]=[i.disp!=null?+i.disp:(i.stock!=null?+i.stock:null),i.stock!=null?+i.stock:null];
@@ -4310,12 +4325,14 @@ function renderMp(){
       const side=r=>{const [d,t]=ladoEstado(L[r],x);return `<div class="ms"><span class="dot ${d}"></span><span>${r==="E"?"Entrega":"Recibe"}: <b style="color:var(--ink)">${t}</b>${L[r]&&L[r].persona?" · "+esc(L[r].persona):""}${L[r]?" · "+fmt(L[r].n_lecturas):""}</span></div>`};
       return `<div class="mpItem${m.id===movSel?" sel":""}" data-mv="${i}"><div class="mh"><b>${esc(m.nombre)}${m.ref?`<span class="small muted" style="font-weight:500"> · ${esc(m.ref)}</span>`:""}</b>${movEstado(x)}</div>
       <div class="ms">${m.por?"Solicita "+esc(m.por)+" · ":""}${m.sol?fmt(m.sol.length)+" productos · ":""}creada ${fmtDT(m.creado)}</div>${esSolicitada(x)?`<div class="ms" style="color:var(--warn)">${prodMode()?"Esperando que bodega genere el link":"Falta generar el link para bodega"}</div>`:x?side("E")+side("R"):""}
-      <div class="acts">${open&&m.link?`<a class="btn sm" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-mc="${i}">Copiar link</button>`:""}${open?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}">Quitar</button></div></div>`}).join("")
+      <div class="acts">${open&&m.link?`<a class="btn sm" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-mc="${i}">Copiar link</button>`:""}${open?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${prodMode()?"":`<button class="btn sm danger" data-mx="${i}" title="La borra de Supabase con sus lecturas">Eliminar…</button>`}</div></div>`}).join("")
     :`<div class="muted small">Todavía no hay entregas.</div>`;
   $$("#mpTbl .acts").forEach(a=>a.onclick=e=>e.stopPropagation());
   $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=L0[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();if(innerWidth<=980)setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
   $$("#mpTbl [data-mc]").forEach(b=>b.onclick=()=>copyText(L0[+b.dataset.mc].link));
   $$("#mpTbl [data-mf]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mf];confirmBox(`Cerrar "${esc(m.nombre)}": los celulares ya no podrán enviar más lecturas.`,async()=>{try{await mrpc("cb_mov_finalizar",{p_id:m.id});await refreshMov(true);toast("Entrega cerrada")}catch(e){toast(movMsg(e))}},"#mpConfirm")});
+  $$("#mpTbl [data-mx]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mx],x=movLive.get(m.id)||{},n=Object.values(x.lados||{}).reduce((a,l)=>a+(+l.n_lecturas||0),0);
+    confirmBox(`Eliminar "${esc(m.nombre)}" de Supabase${n?` con sus ${fmt(n)} lecturas`:""}. Desaparece para todos (celulares y panel) y no se puede deshacer.`,async()=>{try{await mrpc("cb_mov_eliminar",{p_id:m.id});movHide.push(m.id);store.set("inv_movhide",movHide.slice(-300));if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}await refreshMov(true);toast("Entrega eliminada")}catch(e){toast(movMsg(e))}},"#mpConfirm");$("#mpConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
   $$("#mpTbl [data-mr]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mr];confirmBox(`Quitar "${esc(m.nombre)}" de esta lista en este equipo (en Supabase queda guardada).`,()=>{movHide.push(m.id);store.set("inv_movhide",movHide.slice(-300));if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}renderMp()},"#mpConfirm")});
   renderMpCmp();
 }
@@ -4349,6 +4366,8 @@ function avisoSolicitudes(){
   if(prodMode()||!nubeOn())return;
   const pend=[...movLive.values()].filter(x=>esSolicitada(x)&&!movHide.includes(x.id)).sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));
   const n=$("#nSol");n.hidden=!pend.length;n.textContent=pend.length;
+  const dirN=[...movLive.values()].filter(x=>x.meta&&x.meta.directa&&!x.finalizado&&!solVistas.includes(x.id));
+  if(dirN.length){solVistas=solVistas.concat(dirN.map(x=>x.id)).slice(-200);store.set("inv_solvistas",solVistas);audio.beep(true);setTimeout(()=>audio.beep(true),220);toast(`📦 ${dirN[0].meta.por||"Bodega"} creó una entrega directa${dirN[0].meta.ref?" · "+dirN[0].meta.ref:""}`)}
   const nuevas=pend.filter(x=>!solVistas.includes(x.id));
   if(nuevas.length){solVistas=solVistas.concat(nuevas.map(x=>x.id)).slice(-200);store.set("inv_solvistas",solVistas);
     audio.beep(true);setTimeout(()=>audio.beep(true),220);toast(`🔔 Nueva solicitud de materiales${nuevas[0].meta.por?" de "+nuevas[0].meta.por:""}`)}
@@ -4663,7 +4682,7 @@ async function puRefresh(){
     await puDevRefresh();
     const ids=[...puTareas.mp.filter(t=>!t.terminado),...puTareas.conteos.filter(t=>!t.terminado)].map(t=>t.id).concat(puDevRec()?(puDev||[]).filter(d=>!d.recibido).map(d=>"dev:"+d.id):[]), nuevas=ids.filter(id=>!puVistos.includes(id));
     if(nuevas.length){puVistos=puVistos.concat(nuevas).slice(-200);store.set("inv_puvistos",puVistos);audio.beep(true);setTimeout(()=>audio.beep(true),220);toast("🔴 Tienes una tarea nueva")}
-    if(puVista==="menu")renderPuesto();
+    if(puVista==="menu"){const mpOn=puMpOn&&$("#puMpNew"),ref=mpOn?$("#puMpRef").value:"";renderPuesto();if(mpOn)puMpLista(puTareas.mp,ref)}
     if(puVista==="dev"&&dv==null&&!$("#dvHome").hidden){await puDevRefresh(dvModo).catch(()=>{});dvHomeRender()}
   }catch(e){if(/puesto_invalido/.test(e.message))lockScreen(puMsg(e),"Celular desconectado","🔒",true);else if(/usuario_inactivo/.test(e.message))lockScreen(puMsg(e),"Usuario desactivado","🔒",true)}
   finally{puBusy=false}
@@ -4706,12 +4725,15 @@ function puAbrir(k){
   $$("#puList [data-pi]").forEach(b=>b.onclick=()=>{const t=lista[+b.dataset.pi];k==="mp"?puAbrirMov(t):puAbrirConteo(t)});
 }
 /* Bodega: lista de entregas + "Nueva entrega directa" (cuando producción pide algo en el momento). */
-function puMpLista(lista){
+var puMpOn=false;
+function puMpLista(lista,keep){const ref=keep!=null?keep:($("#puMpRef")?$("#puMpRef").value:"");puMpOn=true;
+  lista=[...lista].sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));
   $("#puList").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Entrega de materia prima</h2>
     <div class="cbox" style="max-width:none;gap:8px"><b>＋ Nueva entrega directa</b><span class="small muted">Para cuando producción te pide algo en el momento. Le llega a quien recibe en producción y al panel, como cualquier entrega.</span>
       <label class="f">¿Quién la pide? / OT (opcional)<input id="puMpRef" maxlength="60" autocomplete="off" autocapitalize="characters" placeholder="Ej: OT 4512 o nombre"></label>
       <button class="btn primary" id="puMpNew" style="justify-content:center">Crear y empezar a entregar</button></div>`+
     (lista.length?`<div class="small muted" style="margin-top:6px">Entregas abiertas</div>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":t.productos?fmt(t.productos)+" productos":"directa"}</span></button>`).join(""):"")+`</div>`;
+  if(ref)$("#puMpRef").value=ref;
   $$("#puList [data-pi]").forEach(b=>b.onclick=()=>puAbrirMov(lista[+b.dataset.pi]));
   $("#puMpNew").onclick=async()=>{const b=$("#puMpNew");b.disabled=true;
     try{const r=await prpc("cb_puesto_mov_crear",{p_ref:norm($("#puMpRef").value).toUpperCase()||null,p_persona:PST.persona||null});
