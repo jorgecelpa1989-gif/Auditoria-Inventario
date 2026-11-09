@@ -5413,7 +5413,7 @@ function ptRows(){
   const SN=new Map();
   for(const d of ptData.pallets){
     if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
-      if(!o.desc&&d.desc)o.desc=d.desc;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
+      if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
   const rows=[];
   for(const k of new Set([...E.keys(),...R.keys()])){const e=E.get(k),r=R.get(k),ref=e||r,t=Date.parse((e||r).t||(e||r).rt);
@@ -5433,16 +5433,23 @@ function ptTabla(){
   for(const r of rows)T.push({pallet:r.pallet,cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,pe:r.pe,pr:r.pr,dif:r.dif,st:r.st,
     rec:r.r?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
   for(const o of snRows)T.push({sn:true,pallet:`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`,cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
-    rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
+    recs:o.recs||[],rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
   return {T,ini,fin};
 }
 const hm24=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hour12:false});
 const ptBul=(base,r)=>base==null?"":(r.ce&&r.f!==1?`<b>${fmt2(base/r.f)}</b> <span class="small muted">${esc(plural(r.ce))}</span>`:`<b>${fmt2(base)}</b> <span class="small muted">${esc(umTxt(r.um))}</span>`);
 const ptConv=(base,r)=>base==null?"":(r.ce&&r.f!==1?`${fmt2(base)} <span class="small muted">${esc(umTxt(r.um))}</span><span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:'<span class="muted">—</span>');
+/* Filas "Sin N°": se abren para ver cada pallet registrado (producción y recepción) y corregir su cantidad. */
+var ptSnOpen=new Set();
+function ptSnDet(r){const L=[...(r.recs||[])].sort((a,b)=>String(a.t||a.rt).localeCompare(String(b.t||b.rt)));
+  const who=d=>d.puesto==="produccion"?"🏭 Producción entrega":d.puesto==="retail"?"🛒 Retail retira":"🏷️ Bodega recibe";
+  return `<tr class="ptSnDet"><td colspan="10" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
+    L.map(d=>{const f=+d.f||+r.f||1,ce=d.ce||r.ce,um=umTxt(d.um||r.um),cv=ce&&f!==1;
+      return `<span>${who(d)}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap"><b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div></td></tr>`}
 /* Supervisor: corregir la cantidad de un registro de PT (de cualquier día). Queda anotado de → a. */
 function ptEdBtn(d){if(!d||!d.lid||prodMode())return "";const ed=Array.isArray(d.ed)&&d.ed.length;
   return `<span class="sub">${ed?`<span title="${esc(d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}${x.via==="panel"?" (panel)":""}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pted="${esc(d.lid)}">✎ corregir</button></span>`}
-function ptEdBind(){$$("#ptRes [data-pted]").forEach(b=>b.onclick=async()=>{const d=ptData.pallets.find(x=>x.lid===b.dataset.pted);if(!d)return;
+function ptEdBind(){$$("#ptRes [data-ptsn]").forEach(b=>b.onclick=()=>{const k=b.dataset.ptsn;ptSnOpen.has(k)?ptSnOpen.delete(k):ptSnOpen.add(k);renderPtPanel()});$$("#ptRes [data-pted]").forEach(b=>b.onclick=async()=>{const d=ptData.pallets.find(x=>x.lid===b.dataset.pted);if(!d)return;
   const u=d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um),v=prompt(`Pallet ${d.pallet||"sin número"} · ${d.desc||d.k||d.code}\nNueva cantidad (en ${u}):`,fmt2(d.qty));if(v==null)return;
   const q=num(v);if(q==null||q<=0)return toast("Escribe una cantidad mayor que 0");
   try{await rpc(SB,"cb_pt_editar_panel",{p_clave:SB.admin,p_lid:d.lid,p_qty:q,p_persona:"Supervisor"});toast("Cantidad corregida");await ptRefresh(true)}
@@ -5473,10 +5480,10 @@ function renderPtPanel(){
   f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
   $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th><th>Pallet recibido</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th><th>Hora de captura</th></tr></thead><tbody>`+
     (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.otro?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.otro)}</span>`:""}</td>
-      <td class="num">${ptBul(r.pe,r)}${ptEdBtn(r.dE)}</td><td class="num">${ptConv(r.pe,r)}</td><td class="small">${r.rec?esc(r.rec):'<span class="muted">—</span>'}</td>
+      <td class="num">${ptBul(r.pe,r)}${ptEdBtn(r.dE)}${r.sn&&!prodMode()?`<span class="sub"><button class="linkBtn" data-ptsn="${esc(key(r.cod))}">${ptSnOpen.has(key(r.cod))?"▲ ocultar pallets":"✎ ver y corregir pallets"}</button></span>`:""}</td><td class="num">${ptConv(r.pe,r)}</td><td class="small">${r.rec?esc(r.rec):'<span class="muted">—</span>'}</td>
       <td class="num">${r.pr==null?"":qBC(r.pr,r.ce,r.f,r.um)}${ptEdBtn(r.dR)}</td>
       <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td>
-      <td class="small" style="white-space:nowrap" title="${r.uE?"Producción: "+esc(r.uE):""}">${r.tE?"Prod. "+hm24(r.tE):""}${r.tE&&r.tR?"<br>":""}${r.tR?"Recep. "+hm24(r.tR):""}${!r.tE&&!r.tR?'<span class="muted">—</span>':""}</td></tr>`).join("")
+      <td class="small" style="white-space:nowrap" title="${r.uE?"Producción: "+esc(r.uE):""}">${r.tE?"Prod. "+hm24(r.tE):""}${r.tE&&r.tR?"<br>":""}${r.tR?"Recep. "+hm24(r.tR):""}${!r.tE&&!r.tR?'<span class="muted">—</span>':""}</td></tr>${r.sn&&ptSnOpen.has(key(r.cod))?ptSnDet(r):""}`).join("")
     :`<tr><td colspan="10" class="muted">${T.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
   ptEdBind();
   const dd=x=>`${String(x.getDate()).padStart(2,"0")}-${String(x.getMonth()+1).padStart(2,"0")}-${x.getFullYear()}`;
