@@ -446,7 +446,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="row" style="gap:6px"><span class="small muted" id="solInfo"></span><span class="sep"></span><button class="btn sm" id="solClear">Vaciar</button></div>
     <div class="solMeta">
       <label class="f">OT / referencia (opcional)<input id="mpRef" placeholder="Ej: OT 4512"></label>
-      <label class="f supOnly">Vigencia del link<select id="mpVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label>
+      <label class="f supOnly">Vigencia<select id="mpVence"><option value="2">2 horas</option><option value="4">4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy" selected>Hasta hoy 23:59</option></select></label>
     </div>
     <label class="small supOnly" id="mpPuWrap" style="display:flex;gap:6px;align-items:center" hidden><input type="checkbox" id="mpPuestos" checked> Enviar a los usuarios con permiso de MP (bodega entrega, producción recibe)</label>
     <button class="btn accent" id="btnSolGen" style="font-size:15px;padding:11px 16px;justify-content:center">Generar solicitud</button>
@@ -534,7 +534,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <p class="small" style="margin:8px 0">Pega los códigos (desde Excel, uno por línea o separados por coma). Si hay códigos aquí, el conteo lleva <b>solo esos productos</b> y no se usan los subgrupos.</p>
       <textarea id="rotCodes" rows="5" placeholder="110107&#10;120206&#10;140101" style="width:100%;font:13px var(--mono);border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--ink)"></textarea>
       <div class="small" id="rotRes"></div></details>
-    <label class="f" id="cPuWrap" style="max-width:420px" hidden>Asignar conteo a<select id="cPuesto"><option value="">— A nadie (lo mando por link) —</option></select><span class="small muted">Le llega a su celular en unos segundos, con aviso.</span></label>
+    <label class="f" id="cPuWrap" style="max-width:420px" hidden>Asignar conteo a<select id="cPuesto"><option value="">— Elige a quién —</option></select><span class="small muted" id="cPuHint">Le llega a su app en unos segundos, con aviso.</span></label>
     <div class="row"><button class="btn accent" id="btnCrear" style="font-size:16px;padding:12px 18px">OK · Crear conteo</button><span class="small muted" id="crearMsg"></span></div>
     <div id="crearRes"></div>
   </div>
@@ -588,6 +588,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <h2>Recontar las diferencias</h2>
     <p class="small">Crea un link nuevo solo con los productos que no cuadraron. La tabla muestra el 1er conteo y el reconteo lado a lado (<b>Confirmado</b> o <b>Corregido</b>).</p>
     <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="reNoCont"> Incluir también los pendientes</label>
+    <label class="f">Asignar reconteo a<select id="rePuesto"><option value="">— Elige a quién —</option></select></label>
     <label class="f">Vigencia<select id="reVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas</option><option value="hoy">Hasta hoy 23:59</option></select></label>
     <button class="btn accent" id="btnReconteo" style="justify-content:center">Crear reconteo</button><span class="small muted" id="reInfo"></span>
     <div id="reRes"></div>
@@ -2705,6 +2706,53 @@ end $$;
 
 revoke all on function public.cb_pt_agregar_dia(text, text, date, text, jsonb), public.cb_pt_agregar_panel(text, date, text, text, jsonb) from public;
 grant execute on function public.cb_pt_agregar_dia(text, text, date, text, jsonb), public.cb_pt_agregar_panel(text, date, text, text, jsonb) to anon, authenticated;
+-- =====================================================================
+--  Actualización 15 · Las tareas llegan directo a la app del usuario asignado (sin links)
+--  El usuario abre su entrega de MP o su conteo desde su app; el servidor lo valida por su
+--  sesión y sus permisos. Si ese lado/conteo quedó tomado por otro equipo (un link abierto
+--  antes en otro navegador, un celular anterior), la app del usuario lo toma y conserva las
+--  lecturas. Solo agrega funciones: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+-- Entrega de MP: toma el lado del usuario (E si tiene "Entrega MP", R si tiene "Recibe MP").
+create or replace function public.cb_puesto_mov_tomar(p_puesto text, p_ses text, p_id uuid, p_device text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; v_rol text;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  v_rol := case when cb_u_tiene(p_puesto, 'mp_entregar') then 'E' when cb_u_tiene(p_puesto, 'mp_recibir') then 'R' end;
+  if v_rol is null then raise exception 'sin_permiso'; end if;
+  if coalesce(p_device, '') = '' or p_device = '__bloqueado__' then raise exception 'datos_invalidos'; end if;
+  select * into m from cb_mov where id = p_id;
+  if not found or m.link_token is null then raise exception 'no_existe'; end if;
+  if coalesce(m.meta ->> 'estado', 'activa') <> 'activa' then raise exception 'no_existe'; end if;
+  if coalesce(m.meta ->> 'puestos', '') <> 'true' then raise exception 'sin_permiso'; end if;
+  -- El lado lo tenía otro equipo (no bloqueado): pasa al equipo de este usuario. Las lecturas se mantienen.
+  delete from cb_mov_lado where mov = p_id and rol = v_rol and device <> p_device and device <> '__bloqueado__';
+  -- Si este equipo había tomado el otro rol por error en esta entrega, se suelta (cada usuario tiene un solo rol).
+  delete from cb_mov_lado where mov = p_id and rol <> v_rol and device = p_device;
+  return cb_mov_abrir(p_id, m.link_token, p_device, v_rol);
+end $$;
+
+-- Conteo de inventario: solo el usuario al que está asignado; si estaba abierto en otro equipo, pasa a este.
+create or replace function public.cb_puesto_conteo_tomar(p_puesto text, p_ses text, p_id uuid, p_device text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare c cb_conteos;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'conteo') then raise exception 'sin_permiso'; end if;
+  if coalesce(p_device, '') = '' or p_device = '__bloqueado__' then raise exception 'datos_invalidos'; end if;
+  select * into c from cb_conteos where id = p_id for update;
+  if not found or c.link_token is null then raise exception 'no_existe'; end if;
+  if c.puesto is distinct from p_puesto then raise exception 'sin_permiso'; end if;
+  if c.device is not null and c.device <> p_device and c.device <> '__bloqueado__' then
+    update cb_conteos set device = null, secret_hash = null, terminado = null where id = p_id;
+  end if;
+  return cb_abrir(p_id, c.link_token, p_device);
+end $$;
+
+revoke all on function public.cb_puesto_mov_tomar(text, text, uuid, text), public.cb_puesto_conteo_tomar(text, text, uuid, text) from public;
+grant execute on function public.cb_puesto_mov_tomar(text, text, uuid, text), public.cb_puesto_conteo_tomar(text, text, uuid, text) to anon, authenticated;
 </script>
   </div>
 
@@ -3427,14 +3475,15 @@ $("#btnReconteo").onclick=async()=>{
   const raiz=padre&&padre.reconteoDe?conteos.find(c=>c.id===padre.reconteoDe)||padre:padre;
   const ahora=new Date(), vv=$("#reVence").value;
   const vence=venceDesde(vv,ahora);
+  const puR=$("#rePuesto").value;if(nubeOn()&&!puR){$("#rePuesto").focus();return toast("Elige a quién se asigna el reconteo")}
   const nombre="Reconteo · "+(raiz?raiz.nombre:ahora.toLocaleDateString("es-CL"));
   const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,reconteoDe:raiz?raiz.id:null,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnReconteo").disabled=true;
   try{const c=await crearNube(m,its,null,true);c.codes=its.map(i=>i.cod);if(raiz)c.reconteoDe=raiz.id;
+    if(puR){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puR});c.puesto=puR}catch(e){toast("El reconteo se creó, pero no se pudo asignar a "+uNombre(puR))}}
     conteos.unshift(c);store.set("inv_conteos",conteos);renderConteos();
     $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)}</div>
-      <div class="small">Mándalo a quien hará el reconteo (idealmente otra persona) desde <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div><div class="row">${'<button class="btn primary" data-irperm>Ir a 6 · Permisos</button>'}</div></div>`;
-    irPermisos($("#reRes"));
+      <div class="small">${c.puesto?`📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso.`:'<span style="color:var(--bad)">No quedó asignado: asígnalo en 6 · Permisos → Conteos en curso.</span>'}</div></div>`;
     toast("Reconteo creado");renderResult();
   }catch(e){toast(sbMsg(e))}finally{$("#btnReconteo").disabled=false}
 };
@@ -3631,6 +3680,7 @@ $("#btnCrear").onclick=async()=>{
   const sel=rot?null:sgSelected(), its=rot?rot.found:(sel?d.items.filter(i=>sel.has(i.sg||"(sin subgrupo)")):d.items);
   if(!its.length)return toast(rot?"Ninguno de los códigos pegados está en el informe":"Elige al menos un subgrupo");
   const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,rotativo:!!rot,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
+  if(nubeOn()&&!$("#cPuesto").value){$("#cPuesto").focus();return toast("Elige a quién se asigna el conteo")}
   $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
   try{
    if(nubeOn()){
@@ -3671,8 +3721,7 @@ function showCreated(c){
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
-    ${c.puesto?`<div>📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su celular, con aviso. No tienes que hacer nada más.</div></div>`:`<div class="small">Para mandarlo al contador (WhatsApp o copiar link): <b>6 · Permisos → Liberar o bloquear accesos → Links de conteo</b>.</div>
-    <div class="row"><button class="btn primary" data-irperm>Ir a 6 · Permisos</button></div></div>`}`;irPermisos(box);return}
+    ${c.puesto?`<div>📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso. No tienes que hacer nada más.</div></div>`:`<div class="small" style="color:var(--bad)">No quedó asignado a nadie: asígnalo en 6 · Permisos → Liberar o bloquear accesos → Conteos en curso.</div></div>`}`;return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
@@ -3701,7 +3750,10 @@ function edRender(){const card=$("#edCard");if(!card)return;const L=nubeOn()?edC
   const s=$("#edSel"),v=L.some(c=>c.id===s.value)?s.value:L[0].id;
   s.innerHTML=L.map(c=>`<option value="${esc(c.id)}" ${c.id===v?"selected":""}>${esc(c.nombre)} · ${fmt(c.productos)} productos</option>`).join("");
   if(s.dataset.v!==v||!$("#edNom").value){s.dataset.v=v;$("#edNom").value=(L.find(c=>c.id===v)||{}).nombre||""}}
-function cPuSync(){const w=$("#cPuWrap");if(!w)return;w.hidden=!(nubeOn()&&typeof usersCon==="function"&&usersCon("conteo").length);if(!w.hidden){const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— A nadie (lo mando por link) —")}}
+function cPuSync(){const w=$("#cPuWrap");if(!w)return;w.hidden=!nubeOn();if(w.hidden)return;const n=typeof usersCon==="function"?usersCon("conteo").length:0;
+  const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— Elige a quién —");
+  const rs=$("#rePuesto");if(rs){const rv=rs.value;rs.innerHTML=uOpts("conteo",rv,"— Elige a quién —")}
+  $("#cPuHint").innerHTML=n?"Le llega a su app en unos segundos, con aviso.":'<span style="color:var(--bad)">Ningún usuario tiene permiso de conteo: créalo o dale el permiso en 6 · Permisos.</span>'}
 function renderConteosOnly(){
   if(!$("#conteosTbl")){
     cPuSync();edRender();
@@ -4197,7 +4249,7 @@ async function crearMov(conSol){
     if(!prod){movs.unshift(m);movs=movs.slice(0,60);store.set("inv_movs",movs)}
     movSel=m.id;store.set("inv_movsel",movSel);
     $("#mpRef").value="";
-    if(!prod&&hayPuestos()&&$("#mpPuestos").checked){try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:r.id,p_si:true})}catch(e){}}
+    if(!prod){try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:r.id,p_si:true})}catch(e){}}
     if(prod){$("#mpCreated").innerHTML=`<div class="cbox" style="max-width:none"><b>Solicitud enviada a bodega</b><div class="small">Bodega la ve al instante y genera el link para quien entrega y quien recibe. Aquí verás el avance en vivo.</div></div>`;toast("Solicitud enviada a bodega")}
     else mpShowCreated(m);
     await refreshMov(true);
@@ -4284,12 +4336,12 @@ $("#solPasteBtn").onclick=()=>{let n=0,bad=0;const pu=(document.querySelector('i
 $("#solClear").onclick=()=>{mpSol=[];solSave();renderSol()};
 renderSol();
 function mpShowCreated(m){
+  const E=usersCon("mp_entregar").map(u=>u.nombre||u.id),R=usersCon("mp_recibir").map(u=>u.nombre||u.id);
   $("#mpCreated").innerHTML=`<div class="cbox" style="max-width:none">
-    <div><b>Creada: ${esc(m.nombre)}</b></div>
-    <div class="small">Envía <b>este mismo link</b> a quien entrega en bodega y a quien recibe. Al abrirlo, cada uno elige <b>Entrego</b> o <b>Recibo</b>.</div>
-    <input readonly id="mpLinkOut" value="${esc(m.link)}">
-    <div class="row"><a class="btn primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="mpCopy">Copiar link</button><button class="btn sm" id="mpCreatedX">Listo</button></div></div>`;
-  $("#mpCopy").onclick=()=>copyText(m.link,$("#mpLinkOut"));$("#mpCreatedX").onclick=()=>$("#mpCreated").innerHTML="";
+    <div><b>📱 Asignada: ${esc(m.nombre)}</b></div>
+    <div class="small">Ya les aparece en su app, con aviso: <b>entrega</b> ${E.length?esc(E.join(", ")):"(nadie tiene el permiso Entrega MP)"} · <b>recibe</b> ${R.length?esc(R.join(", ")):"(nadie tiene el permiso Recibe MP)"}. No hay que mandar nada.</div>
+    <div class="row"><button class="btn sm" id="mpCreatedX">Listo</button></div></div>`;
+  $("#mpCreatedX").onclick=()=>$("#mpCreated").innerHTML="";
 }
 
 /* ---------- Acceso para producción (solo el supervisor) ---------- */
@@ -4382,7 +4434,7 @@ async function refreshMov(force){
 setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-mp").hidden)refreshMov(false)},15000);
 $("#btnMpRefresh").onclick=()=>refreshMov(true);
 $("#btnMpTraer").onclick=()=>refreshMov(true);
-function mpEnter(){mpNote();renderAcc();renderSol();renderPuAdm();$("#mpPuWrap").hidden=prodMode()||!hayPuestos();renderMp();catLoad(false).then(()=>{mpNote();solHint()});refreshMov(true)}
+function mpEnter(){mpNote();renderAcc();renderSol();renderPuAdm();$("#mpPuWrap").hidden=true;renderMp();catLoad(false).then(()=>{mpNote();solHint()});refreshMov(true)}
 
 function renderMp(){
   if($("#v-mp").hidden)return;
@@ -4393,7 +4445,7 @@ function renderMp(){
       const side=r=>{const [d,t]=ladoEstado(L[r],x);return `<div class="ms"><span class="dot ${d}"></span><span>${r==="E"?"Entrega":"Recibe"}: <b style="color:var(--ink)">${t}</b>${L[r]&&L[r].persona?" · "+esc(L[r].persona):""}${L[r]?" · "+fmt(L[r].n_lecturas):""}</span></div>`};
       return `<div class="mpItem${m.id===movSel?" sel":""}" data-mv="${i}"><div class="mh"><b>${esc(m.nombre)}${m.ref?`<span class="small muted" style="font-weight:500"> · ${esc(m.ref)}</span>`:""}</b>${movEstado(x)}</div>
       <div class="ms">${m.por?"Solicita "+esc(m.por)+" · ":""}${m.sol?fmt(m.sol.length)+" productos · ":""}creada ${fmtDT(m.creado)}</div>${esSolicitada(x)?`<div class="ms" style="color:var(--warn)">${prodMode()?"Esperando que bodega genere el link":"Falta generar el link para bodega"}</div>`:x?side("E")+side("R"):""}
-      <div class="acts">${open&&m.link?`<a class="btn sm" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-mc="${i}">Copiar link</button>`:""}${open?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${prodMode()?"":`<button class="btn sm danger" data-mx="${i}" title="La borra de Supabase con sus lecturas">Eliminar…</button>`}</div></div>`}).join("")
+      <div class="acts">${open?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${prodMode()?"":`<button class="btn sm danger" data-mx="${i}" title="La borra de Supabase con sus lecturas">Eliminar…</button>`}</div></div>`}).join("")
     :`<div class="muted small">Todavía no hay entregas.</div>`;
   $$("#mpTbl .acts").forEach(a=>a.onclick=e=>e.stopPropagation());
   $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=L0[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();if(innerWidth<=980)setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
@@ -4421,11 +4473,11 @@ const MPST={porent:["Por entregar","p-mut"],ok:["Cuadra","p-ok"],falta:["Recibi�
 function mpQty(t,r,n){if(t==null)return "";return qBC(t,r.ce,r.f,r.um)}
 async function activarMov(m){
   const b=$("#btnAct");b.disabled=true;
-  try{const asig=$("#actPu")&&$("#actPu").checked;
+  try{const asig=true;
     const r=await rpc(SB,"cb_mov_activar",{p_clave:SB.admin,p_id:m.id,p_vence:venceDesde($("#actVence").value)});
     if(asig){try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:m.id,p_si:true})}catch(e){}}
     const mm=Object.assign({},m,{link:movLink(m.id,r.token)});movs.unshift(mm);store.set("inv_movs",movs.slice(0,60));
-    $("#mpCreated").innerHTML="";await refreshMov(true);mpShowCreated(mm);$("#mpCreated").scrollIntoView({behavior:"smooth",block:"center"});toast("Link generado: envíalo a bodega y a quien recibe")}
+    $("#mpCreated").innerHTML="";await refreshMov(true);mpShowCreated(mm);$("#mpCreated").scrollIntoView({behavior:"smooth",block:"center"});toast("Asignada: ya les aparece en su app a bodega y producción")}
   catch(e){toast(movMsg(e));b.disabled=false}
 }
 // Aviso de solicitudes nuevas (solo el supervisor): número en la pestaña, banner y sonido.
@@ -4450,10 +4502,10 @@ function renderMpCmp(){
   if(!m){card.hidden=true;return}card.hidden=false;
   const x=movLive.get(m.id),L=(x&&x.lados)||{};
   const sol=esSolicitada(x), open=x&&!x.finalizado&&!isVenc(x.vence);
-  $("#mpAct").innerHTML=sol?(prodMode()?`<div class="notice">Solicitud enviada a bodega${x.meta.por?" por "+esc(x.meta.por):""} ${hace(x.creado)}. Bodega genera el link para quien entrega y quien recibe; aquí verás el avance en vivo.</div>`
-    :`<div class="actBox"><div><b>🔔 Solicitud de ${esc(x.meta.por||"producción")}</b> <span class="small muted">· ${fmt((x.meta.sol||[]).length)} productos · ${hace(x.creado)}</span><div class="small">Revisa lo solicitado y genera el link para el operario de bodega y quien recibe.</div></div>
-       <div class="row" style="gap:8px"><label class="f" style="flex:0 1 170px">Vigencia del link<select id="actVence"><option value="2">2 horas</option><option value="4" selected>4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy">Hasta hoy 23:59</option></select></label><button class="btn accent" id="btnAct" style="margin-top:16px">Generar link para bodega</button></div>${hayPuestos()?`<label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="actPu" checked> Enviar a los celulares fijos de bodega y producción (sin mandar link)</label>`:""}</div>`)
-    :(!prodMode()&&open&&m.link?`<div class="row" style="gap:6px"><span class="small muted">Link para bodega y quien recibe:</span><a class="btn sm primary" href="${esc(movWa(m))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" id="actCopy">Copiar link</button>${hayPuestos()?(x.meta&&x.meta.puestos?'<span class="pill p-ok">📱 En los celulares fijos</span>':'<button class="btn sm accent" id="actAsig">📱 Enviar a celulares fijos</button>'):""}</div>`:"");
+  $("#mpAct").innerHTML=sol?(prodMode()?`<div class="notice">Solicitud enviada a bodega${x.meta.por?" por "+esc(x.meta.por):""} ${hace(x.creado)}. Bodega la asigna a quien entrega y quien recibe; aquí verás el avance en vivo.</div>`
+    :`<div class="actBox"><div><b>🔔 Solicitud de ${esc(x.meta.por||"producción")}</b> <span class="small muted">· ${fmt((x.meta.sol||[]).length)} productos · ${hace(x.creado)}</span><div class="small">Revisa lo solicitado y asígnala: le llega directo a la app de quien entrega (bodega) y de quien recibe (producción).</div></div>
+       <div class="row" style="gap:8px"><label class="f" style="flex:0 1 170px">Vigencia<select id="actVence"><option value="2">2 horas</option><option value="4">4 horas</option><option value="8">8 horas (un turno)</option><option value="hoy" selected>Hasta hoy 23:59</option></select></label><button class="btn accent" id="btnAct" style="margin-top:16px">📱 Asignar a bodega y producción</button></div></div>`)
+    :(!prodMode()&&open?`<div class="row" style="gap:6px">${x.meta&&x.meta.puestos?'<span class="pill p-ok">📱 Asignada a los usuarios de MP</span><span class="small muted">les aparece en su app</span>':'<button class="btn sm accent" id="actAsig">📱 Asignar a los usuarios de MP</button>'}</div>`:"");
   const R0=!sol&&x&&!x.finalizado?mpRows(m.id):[],completa=R0.length>0&&R0.every(r=>r.E!=null&&r.R!=null)&&!!(L.R&&L.R.terminado);
   if(!prodMode()&&completa){
     $("#mpAct").insertAdjacentHTML("beforeend",`<div class="actBox" style="border-color:var(--ok);background:var(--ok-bg)"><div><b>✓ Proceso completo</b><div class="small">Todo lo solicitado fue entregado y recibido${R0.some(r=>r.st!=="ok")?" (revisa las diferencias abajo)":""}. Ciérrala para que quede finalizada.</div></div><button class="btn sm primary" id="btnFinMov" style="align-self:flex-start">Cerrar entrega</button></div>`);
@@ -4464,7 +4516,7 @@ function renderMpCmp(){
     $("#btnExt").onclick=async()=>{const v=$("#extVence").value;let ve=venceDesde(v,new Date());if(v==="hoy"&&Date.parse(ve)<=Date.now()+60e3)ve=venceDesde("2",new Date());
       try{await rpc(SB,"cb_mov_extender",{p_clave:SB.admin,p_id:m.id,p_vence:ve});toast("Vigencia extendida hasta "+fmtDT(ve)+": los celulares la ven de nuevo en unos segundos");refreshMov(true)}
       catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 09.":movMsg(e))}}}
-  if($("#actAsig"))$("#actAsig").onclick=async()=>{try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:m.id,p_si:true});toast("Enviada a los celulares fijos");refreshMov(true)}catch(e){toast(movMsg(e))}};
+  if($("#actAsig"))$("#actAsig").onclick=async()=>{try{await rpc(SB,"cb_mov_asignar",{p_clave:SB.admin,p_id:m.id,p_si:true});toast("Asignada: ya les aparece en su app");refreshMov(true)}catch(e){toast(movMsg(e))}};
   if($("#btnAct"))$("#btnAct").onclick=()=>activarMov(m);
   if($("#actCopy"))$("#actCopy").onclick=()=>copyText(m.link);
   $("#mpSides").hidden=sol;
@@ -4531,11 +4583,11 @@ async function checkMovLink(){
   }catch(e){ban.innerHTML=`<div class="lockCard"><div class="big">⚠️</div><h2>No se puede abrir esta entrega</h2><p>${esc(movMsg(e))}</p></div>`}
   return true;
 }
-async function omTake(id,token,url,k,rol){
+async function omTake(id,token,url,k,rol,pre){
   const ban=$("#omBanner");
   try{
     if(om&&om.id!==id&&om.dirty&&!om.fin){await omSync();}
-    const m=await rpc({url,key:k},"cb_mov_abrir",{p_id:id,p_token:token,p_device:cfg.dev,p_rol:rol});
+    const m=pre||await rpc({url,key:k},"cb_mov_abrir",{p_id:id,p_token:token,p_device:cfg.dev,p_rol:rol});
     const loc=om&&om.id===id&&om.rol===rol&&!om.fin&&om.lect?om.lect:null, srv=Array.isArray(m.lect)?m.lect:[], keep=loc&&(loc.length>=srv.length||om.dirty)?loc:srv;
     om={id,rol,nombre:m.nombre,ref:(m.meta&&m.meta.ref)||"",vence:m.vence,conf:{url,key:k,secret:m.secret},items:omItems(m.items),sol:(m.meta&&m.meta.sol)||null,stock:m.stock||null,stockAt:m.stock_at||null,lect:keep||[],persona:(om&&om.persona)||cfg.user||"",dirty:keep!==srv,ver:0,syncAt:null,syncErr:"",fin:false};
     omSave();ban.innerHTML="";$("#omPick").innerHTML="";omEnter();if(om.dirty)omSync();omLatido();
@@ -4817,7 +4869,10 @@ async function puAbrirMov(t){
   puVista="mp";puestoApply();
   if(om&&om.id===t.id&&om.rol===rol&&!om.fin){omEnter();omSync();return}
   if(om&&!om.fin&&om.dirty)await omSync();
-  await omTake(t.id,t.token,PST.url,PST.key,rol);
+  // La tarea llega por la sesión del usuario (sin link): el servidor valida su permiso y, si el lado lo tenía otro equipo, lo pasa a este.
+  let pre=null;try{pre=await prpc("cb_puesto_mov_tomar",{p_id:t.id,p_device:cfg.dev})}
+  catch(e){if(!/function|PGRST202|404/.test(e.message)){toast(movMsg(e));puestoMenu();return}}
+  await omTake(t.id,t.token,PST.url,PST.key,rol,pre);
   if(om&&om.id===t.id&&!om.persona){om.persona=PST.persona;omSave();omRender()}
 }
 async function puAbrirConteo(t){
@@ -4826,7 +4881,8 @@ async function puAbrirConteo(t){
   if(erp&&erp.conteo&&erp.conteo.id===t.id){puestoApply();renderConteoBox();return}
   try{
     if(nubeConf()&&cfg.dirty){await syncNow();if(cfg.dirty)throw new Error("Hay lecturas de otro conteo sin enviar. Busca señal y vuelve a intentar.")}
-    const m=await rpc(pconf(),"cb_abrir",{p_id:t.id,p_token:t.token,p_device:cfg.dev});
+    let m;try{m=await prpc("cb_puesto_conteo_tomar",{p_id:t.id,p_device:cfg.dev})}
+    catch(e){if(!/function|PGRST202|404/.test(e.message))throw e;m=await rpc(pconf(),"cb_abrir",{p_id:t.id,p_token:t.token,p_device:cfg.dev})}
     scans=[];store.set("inv_scans",scans);
     applyConteo(m,t.id,{url:PST.url,key:PST.key,secret:m.secret});
     puestoApply();
@@ -4851,11 +4907,11 @@ async function uCargar(){
 function renderPuAdm(){
   const box=$("#puAdmBox");if(!box)return;
   $("#puAdm").hidden=prodMode()||!nubeOn();
-  const w=$("#mpPuWrap");if(w)w.hidden=prodMode()||!hayPuestos();
+  const w=$("#mpPuWrap");if(w)w.hidden=true;
   if(prodMode()||!nubeOn())return;
   SB.pu=SB.pu||{};
   uPintar();
-  if(!uBusy){uBusy=true;uCargar().then(()=>{uPintar();if(typeof renderConteosOnly==="function")renderConteosOnly();const w2=$("#mpPuWrap");if(w2)w2.hidden=prodMode()||!hayPuestos()}).finally(()=>uBusy=false)}
+  if(!uBusy){uBusy=true;uCargar().then(()=>{uPintar();if(typeof renderConteosOnly==="function")renderConteosOnly();const w2=$("#mpPuWrap");if(w2)w2.hidden=true}).finally(()=>uBusy=false)}
 }
 function uEstado(u){
   if(u.activo===false)return '<span class="pill p-mut">Desactivado</span>';
@@ -4943,9 +4999,8 @@ function lbRender(){
   box.innerHTML=`
     <h3 class="lbH">Usuarios</h3>${U.length?U.map(u=>`<div class="uRow${u.activo===false?" off":""}"><div class="row" style="gap:8px"><b>${esc(u.nombre||u.id)}</b>${u.area?`<span class="small muted">${esc(u.area)}</span>`:""}<span class="sep"></span>${u.activo===false?'<span class="pill p-bad">Bloqueado</span>':u.usado?`<span class="small">${esc(u.equipo||"Vinculado")}${u.visto?" · "+(enLinea(u.visto)?"en línea":hace(u.visto)):""}</span>`:'<span class="pill p-mut">Sin equipo vinculado</span>'}</div>
       <div class="row" style="gap:6px">${u.usado&&u.activo!==false&&!u.legado?`<button class="btn sm" data-lbu="${esc(u.id)}">🔓 Liberar equipo</button>`:""}${u.legado?"":`<button class="btn sm ${u.activo===false?"primary":"danger"}" data-lbk="${esc(u.id)}">${u.activo===false?"Desbloquear":"⛔ Bloquear"}</button>`}</div></div>`).join(""):'<p class="muted small" style="margin:0">Sin usuarios.</p>'}
-    <h3 class="lbH">Links de conteo</h3>${C.length?C.map(x=>{const link=conteoLink(x.id,x),i=x.id;return `<div class="uRow"><div class="row" style="gap:8px"><b>${esc(x.nombre)}</b><span class="small muted">${x.contador?esc(x.contador)+" · ":""}${fmt(x.n_lecturas||0)} lecturas${x.vence?" · vence "+fmtDT(x.vence):""}</span><span class="sep"></span>${estC(x)}</div>
-      <div class="row" style="gap:6px">${link&&(!x.abierto||x.libre)&&!x.bloqueado?`<a class="btn sm primary" href="${esc(waLink(`Conteo: ${x.nombre}\nÁbrelo en tu celular:\n${link}`))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-lbcp="${esc(i)}">Copiar link</button>`:""}
-        ${x.asignable&&usersCon("conteo").length?`<select class="selSm" data-lba="${esc(i)}" title="Usuario que lo ve en su menú">${uOpts("conteo",x.puesto,"📱 Asignar a…")}</select>`:""}
+    <h3 class="lbH">Conteos en curso</h3>${C.length?C.map(x=>{const link=conteoLink(x.id,x),i=x.id;return `<div class="uRow"><div class="row" style="gap:8px"><b>${esc(x.nombre)}</b><span class="small muted">${x.contador?esc(x.contador)+" · ":""}${fmt(x.n_lecturas||0)} lecturas${x.vence?" · vence "+fmtDT(x.vence):""}</span><span class="sep"></span>${estC(x)}</div>
+      <div class="row" style="gap:6px">${x.asignable&&usersCon("conteo").length?`<select class="selSm" data-lba="${esc(i)}" title="Usuario que lo ve en su app">${uOpts("conteo",x.puesto,"⚠ Sin asignar")}</select>`:""}
         ${x.abierto&&!x.libre&&!x.bloqueado?`<button class="btn sm" data-lbl="${esc(i)}">🔓 Liberar celular</button>`:""}<button class="btn sm ${x.bloqueado?"primary":"danger"}" data-lbb="${esc(i)}">${x.bloqueado?"Desbloquear":"⛔ Bloquear"}</button><span class="sep"></span><button class="btn sm" data-lbf="${esc(i)}">Finalizar…</button></div></div>`}).join(""):'<p class="muted small" style="margin:0">No hay conteos abiertos.</p>'}
     <h3 class="lbH">Entregas de materia prima</h3>${M.length?M.map(x=>{const L=x.lados||{};return `<div class="uRow"><div class="row" style="gap:8px"><b>${esc(x.nombre)}</b>${x.meta&&x.meta.ref?`<span class="small muted">${esc(x.meta.ref)}</span>`:""}</div>
       ${["E","R"].map(r=>{const l=L[r];return `<div class="row" style="gap:6px"><span class="small" style="min-width:130px">${ROLN[r]}</span>${l?(l.bloqueado?'<span class="pill p-bad">Bloqueado</span>':`<span class="small">${esc(l.persona||"sin nombre")} · ${fmt(l.n_lecturas||0)} lecturas${l.terminado?" · terminó":""}</span>`):'<span class="pill p-mut">Sin abrir</span>'}<span class="sep"></span>
