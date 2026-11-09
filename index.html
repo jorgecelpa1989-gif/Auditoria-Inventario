@@ -3538,6 +3538,12 @@ async function saveData(name,blob,fallback){
 function erpBase(){if(erpDraft&&erpDraft.items&&erpDraft.items.length)return erpDraft;
   if(erp&&!erp.maestro&&erp.items&&erp.items.length)return {file:erp.file,items:erp.items,merged:erp.merged||0,map:{cod:0}};return null}
 function maestroSync(){const c=$("#maestroCard");if(!c)return;c.hidden=!erpBase();if(!c.hidden&&typeof renderSg==="function")renderSg()}
+/* Regla única de conversiones (todos los módulos): la cantidad se ingresa en BULTOS. Si una lectura llegó sin conversión
+   (celular con catálogo viejo) y el producto sí la tiene, se usa la del producto y queda marcada (convAp). */
+function convFix(d){if(!d||(d.ce&&+d.f>0&&+d.f!==1))return d;const k=key(d.k||d.code||"");let c=null;
+  if(typeof prodMode==="function"&&prodMode()){const cat=(typeof movCat!=="undefined"&&movCat)||[];c=cat.find(i=>key(i.cod)===k&&conv(i))||null}
+  else{const x=FACT[k];if(x&&x.ce&&+x.f>0&&+x.f!==1)c={ce:x.ce,f:+x.f,um:(MASTER[k]||{}).um||""}}
+  if(c){d.ce=c.ce;d.f=+c.f;if(!d.um||UMN(d.um)==="un")d.um=c.um||d.um;d.convAp=true}return d}
 function factItems(){return erpDraft&&erpDraft.items&&erpDraft.items.length?erpDraft.items:(erp&&!erp.maestro?erp.items:[])}
 let factFilter="pend";
 function saveFact(){store.set("inv_fact",FACT);for(const arr of [erpDraft&&erpDraft.items,erp&&!erp.maestro&&erp.items])if(arr)enrich(arr);if(erp&&!erp.maestro)store.set("inv_erp",erp);renderFactSum()}
@@ -3934,7 +3940,7 @@ function nubeEstado(c,x){
 async function traerLecturas(c,silent){
   const arr=await rpc(SB,"cb_lecturas_de",{p_clave:SB.admin,p_id:c.id});
   scans=scans.filter(s=>s.nube!==c.id);
-  for(const d of arr||[])scans.push({code:d.code,qty:+d.qty||0,f:+d.f>0&&+d.f!==1?+d.f:undefined,ce:d.ce||undefined,um:d.um||undefined,ubic:d.ubic||"",user:d.user||"",t:d.t,src:"nube: "+c.nombre,nube:c.id,lid:d.lid,conteo:c.nombre});
+  for(const d of arr||[]){convFix(d);scans.push({code:d.code,qty:+d.qty||0,f:+d.f>0&&+d.f!==1?+d.f:undefined,ce:d.ce||undefined,um:d.um||undefined,ubic:d.ubic||"",user:d.user||"",t:d.t,src:"nube: "+c.nombre,nube:c.id,lid:d.lid,conteo:c.nombre})}
   saveScans();
   if(!silent)toast(`${fmt((arr||[]).length)} lecturas de "${c.nombre}" listas para el cruce`);
   return (arr||[]).length;
@@ -4460,7 +4466,7 @@ $("#mpListBox").open=store.get("inv_mplist",false);
 $("#mpListBox").addEventListener("toggle",()=>store.set("inv_mplist",$("#mpListBox").open));
 function mpSolOf(id){const m=movById(id);return (m&&m.sol)||null}
 function mpRows(id){
-  const ls=movLect[id]||[], map=new Map(), sol=mpSolOf(id);
+  const ls=(movLect[id]||[]).map(convFix), map=new Map(), sol=mpSolOf(id);
   for(const [cod,q,desc,um,ce,f] of sol||[]){const k=key(cod),r=map.get(k)||{cod,desc:desc||"",um:um||"",ce:ce||"",f:+f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0,S:null};r.S=(r.S||0)+(+q||0);map.set(k,r)}
   for(const d of ls){const k=key(d.k||d.code);const r=map.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0};
     if(!r.desc&&d.desc)r.desc=d.desc;if(!r.um&&d.um)r.um=d.um;if(!(r.ce&&r.f!==1)&&d.ce&&+d.f>0&&+d.f!==1){r.ce=d.ce;r.f=+d.f}const t=(+d.qty||0)*(+d.f||1);
@@ -4559,7 +4565,11 @@ const omSave=()=>store.set("inv_om",om);
 const movOn=()=>!!(om&&om.rol&&!om.fin&&(omForce||!isSupDevice()));
 function omIndex(){omIdx=new Map();if(!om||!om.items)return;om.items.forEach((it,i)=>{if(it.cod)omIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!omIdx.has(k))omIdx.set(k,i)})})}
 const omFind=c=>{const i=omIdx.get(key(c));return i==null?null:om.items[i]};
-function omItems(arr){return arr.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}
+function omItems(arr){const its=arr.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}));
+  // Si la entrega se creó con un catálogo sin conversiones, se completan con el catálogo actual del celular (regla: se ingresan bultos).
+  const cat=(typeof puCat!=="undefined"&&puCat&&puCat.items)||[];if(cat.length){const m=new Map(cat.filter(conv).map(i=>[key(i.cod),i]));
+    for(const it of its)if(!conv(it)){const c=m.get(key(it.cod));if(c){it.ce=c.ce;it.f=+c.f;if(!it.um)it.um=c.um}}}
+  return its}
 async function checkMovLink(){
   let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
   const mv=q.get("mov");if(!mv)return false;
@@ -5035,7 +5045,7 @@ async function ptAbrir(){
   puVista="pt";puestoApply();
   $("#ptTitle").textContent=can("pt_retirar")?"Recepción de PT · retiro para despacho":esReceptorPT()?"Recepción de producto terminado":"Entrega de producto terminado";
   try{
-    if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
+    if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>5*60e3){const r=await prpc("cb_puesto_catalogo");
       if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}
     ptIndex();
     const srv=await prpc("cb_pt_mis")||[], loc=ptCel.lect.filter(l=>!l.sync), ids=new Set(srv.map(x=>x.lid));
@@ -5201,7 +5211,7 @@ const dvEstado=d=>d.finalizado?["Cerrada","p-mut"]:d.recibido?["Recibida","p-ok"
 async function puDevRefresh(m){if(!(puDevCarga()||puDevRec()))return;m=m||(puVista==="dev"?dvModo:(puDevRec()?"rec":"carga"));
   try{let r;try{r=await prpc("cb_dev_mis",{p_modo:m})}catch(e){if(/PGRST202|function/.test(e.message))r=await prpc("cb_dev_mis");else throw e}puDev=Array.isArray(r)?r:[];puDevModo=m}catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e}}
 async function dvCatalogo(){
-  try{if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>6*3600e3){const r=await prpc("cb_puesto_catalogo");
+  try{if(!puCat||!puCat.at||Date.now()-Date.parse(puCat.at)>5*60e3){const r=await prpc("cb_puesto_catalogo");
     if(r&&r.items){puCat={at:new Date().toISOString(),items:r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))};store.set("inv_pucat",puCat)}}}catch(e){}
   ptIndex();
 }
@@ -5418,7 +5428,7 @@ async function devRefresh(silent){
 }
 setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-devol").hidden)devRefresh(true)},20000);
 function devCuadre(d){
-  const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",ce:"",f:1,D:null,R:null};
+  const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){convFix(l);const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",ce:"",f:1,D:null,R:null};
     r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}r[side]=(r[side]||0)+(+l.qty||0)*(+l.f||1);m.set(k,r)}};
   add(d.lect,"D");add(d.rec,"R");
   return [...m.values()].map(r=>{if(!r.desc&&erp&&typeof findItem==="function"){const it=findItem(r.cod);if(it){r.desc=it.desc;r.um=r.um||umTxt(it.um)}}
@@ -5571,7 +5581,7 @@ $("#ptAdOk").onclick=async()=>{const it=ptAdInfo(),q=num($("#ptAdQty").value);if
     $("#ptAdPal").value="";$("#ptAdCod").value="";$("#ptAdQty").value="";ptAdInfo();toast("Registro agregado");await ptRefresh(true)}
   catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 14 en Supabase.":movMsg(e))}finally{b.disabled=false}};
 
-const ptBase=d=>(+d.qty||0)*(+d.f||1);
+const ptBase=d=>{convFix(d);return (+d.qty||0)*(+d.f||1)};
 const ptSNd=d=>!!(d&&(d.sn||/^SN-/i.test(String(d.pallet||""))));
 const PTSN={ok:["Cuadra","p-ok"],faltan:["Falta recepción","p-bad"],sobran:["Se recibió más","p-warn"],transito:["Solo producción (en tránsito)","p-info"],sinprod:["Solo recepción","p-warn"]};
 const PTREC={bodega:"Bodega",retail:"Retail"};
@@ -5580,7 +5590,7 @@ function ptRows(){
   if(!ini){const c=ptData.cierres.filter(x=>x.puesto==="produccion").map(x=>x.t).sort().at(-1);ini=c?new Date(c):new Date(new Date().setHours(0,0,0,0))}
   const E=new Map(),R=new Map();
   const SN=new Map();
-  for(const d of ptData.pallets){
+  for(const d of ptData.pallets){convFix(d);
     if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
       if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
