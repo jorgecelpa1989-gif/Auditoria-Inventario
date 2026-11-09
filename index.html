@@ -653,6 +653,11 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="tbl"><table id="ptList"></table></div>
     <div id="ptSync"></div>
   </div>
+  <div class="card contarCard" id="ptPrevCard" hidden>
+    <div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Días anteriores</h2><span class="sep"></span><select id="ptPrevDia" style="flex:1 1 180px"></select></div>
+    <p class="small muted" style="margin:6px 0 0">Elige el día para ver tus pallets recibidos y corregir una cantidad. Cada corrección queda anotada para el supervisor.</p>
+    <div class="tbl"><table id="ptPrevList"></table></div>
+  </div>
   <div class="card contarCard">
     <div class="eyebrow">Al terminar el turno</div>
     <p class="small">Avisa al supervisor que terminaste. El celular sigue conectado: el próximo pallet empieza un turno nuevo.</p>
@@ -2586,6 +2591,56 @@ end $$;
 
 revoke all on function public.cb_puesto_mov_crear(text, text, text, text) from public;
 grant execute on function public.cb_puesto_mov_crear(text, text, text, text) to anon, authenticated;
+-- =====================================================================
+--  Actualización 13 · PT: ver y corregir cantidades de días anteriores
+--  · Celular (quien recibe PT): ve sus pallets de un día de los últimos 14 y corrige la cantidad.
+--  · Panel del supervisor: corrige la cantidad de cualquier registro de PT.
+--  Cada corrección queda anotada en el registro (de → a, quién, cuándo, desde dónde).
+--  Solo agrega funciones: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create or replace function public.cb_pt_dia(p_puesto text, p_ses text, p_dia date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_ini timestamptz; v_hoy date := (now() at time zone 'America/Santiago')::date;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_dia is null or p_dia > v_hoy or p_dia < v_hoy - 14 then raise exception 'fecha_invalida'; end if;
+  v_ini := p_dia::timestamp at time zone 'America/Santiago';
+  return coalesce((select jsonb_agg(data || jsonb_build_object('rt', t) order by t) from cb_pt
+                    where puesto = p_puesto and t >= v_ini and t < v_ini + interval '1 day'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_pt_editar(p_puesto text, p_ses text, p_lid text, p_qty numeric, p_persona text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r cb_pt;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_qty is null or p_qty <= 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  select * into r from cb_pt where lid = p_lid and puesto = p_puesto for update;
+  if not found then raise exception 'no_existe'; end if;
+  if r.t < now() - interval '15 days' then raise exception 'muy_antiguo'; end if;
+  update cb_pt set data = data || jsonb_build_object('qty', p_qty, 'ed', coalesce(data->'ed', '[]'::jsonb) ||
+         jsonb_build_array(jsonb_build_object('de', data->'qty', 'a', p_qty, 'por', left(coalesce(p_persona, ''), 80), 't', now(), 'via', 'celular')))
+   where lid = p_lid;
+  return (select data from cb_pt where lid = p_lid);
+end $$;
+
+create or replace function public.cb_pt_editar_panel(p_clave text, p_lid text, p_qty numeric, p_persona text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_qty is null or p_qty <= 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  update cb_pt set data = data || jsonb_build_object('qty', p_qty, 'ed', coalesce(data->'ed', '[]'::jsonb) ||
+         jsonb_build_array(jsonb_build_object('de', data->'qty', 'a', p_qty, 'por', left(coalesce(p_persona, 'Supervisor'), 80), 't', now(), 'via', 'panel')))
+   where lid = p_lid;
+  if not found then raise exception 'no_existe'; end if;
+  return (select data from cb_pt where lid = p_lid);
+end $$;
+
+revoke all on function public.cb_pt_dia(text, text, date), public.cb_pt_editar(text, text, text, numeric, text),
+  public.cb_pt_editar_panel(text, text, numeric, text) from public;
+grant execute on function public.cb_pt_dia(text, text, date), public.cb_pt_editar(text, text, text, numeric, text),
+  public.cb_pt_editar_panel(text, text, numeric, text) to anon, authenticated;
 </script>
   </div>
 
@@ -4841,7 +4896,27 @@ async function ptAbrir(){
     const srv=await prpc("cb_pt_mis")||[], loc=ptCel.lect.filter(l=>!l.sync), ids=new Set(srv.map(x=>x.lid));
     ptCel.lect=srv.map(x=>Object.assign(x,{sync:true})).concat(loc.filter(l=>!ids.has(l.lid)));ptSave();
   }catch(e){toast(puMsg(e))}
-  ptIndex();ptRender();ptLimpiar();ptSyncAll();
+  ptIndex();ptRender();ptLimpiar();ptSyncAll();ptPrevInit();
+}
+/* Días anteriores (solo quien recibe PT en bodega): ver los pallets de un día y corregir la cantidad. */
+const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+function ptPrevInit(){const card=$("#ptPrevCard");card.hidden=!can("pt_recibir");if(card.hidden)return;
+  const sel=$("#ptPrevDia"),v=sel.value,h=new Date();h.setHours(0,0,0,0);const o=['<option value="">— Elige un día —</option>'];
+  for(let i=1;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="${ymd(d)}">${i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
+  sel.innerHTML=o.join("");sel.value=v;if(!sel.value)$("#ptPrevList").innerHTML="";}
+$("#ptPrevDia").onchange=()=>ptPrevLoad();
+async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");if(!dia){tb.innerHTML="";return}
+  tb.innerHTML='<tr><td class="muted">Cargando…</td></tr>';
+  try{const L=await prpc("cb_pt_dia",{p_dia:dia})||[];
+    tb.innerHTML=L.length?L.slice().reverse().map(l=>{const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),ed=Array.isArray(l.ed)&&l.ed.length;
+      return `<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${hm24(l.rt||l.t)}${ed?` · <span style="color:var(--warn)">corregido</span>`:""}</div></td>
+        <td style="white-space:nowrap"><input data-pq="${esc(l.lid)}" value="${fmt2(l.qty)}" inputmode="decimal" style="width:72px;text-align:right"> <span class="small muted">${esc(u)}</span></td>
+        <td><button class="btn sm primary" data-ps="${esc(l.lid)}">Guardar</button></td></tr>`}).join(""):'<tr><td class="muted">No registraste pallets ese día.</td></tr>';
+    $$("#ptPrevList [data-ps]").forEach(b=>b.onclick=async()=>{const lid=b.dataset.ps,q=num($(`#ptPrevList [data-pq="${CSS.escape(lid)}"]`).value);
+      if(q==null||q<=0)return toast("Escribe una cantidad mayor que 0");
+      b.disabled=true;try{await prpc("cb_pt_editar",{p_lid:lid,p_qty:q,p_persona:PST.persona||null});toast("Cantidad corregida");await ptPrevLoad()}
+      catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":/muy_antiguo/.test(e.message)?"Ese registro tiene más de 15 días: pídele al supervisor que lo corrija.":puMsg(e))}finally{b.disabled=false}})}
+  catch(e){tb.innerHTML=`<tr><td class="muted">${esc(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":puMsg(e))}</td></tr>`}
 }
 function ptLimpiar(){ptDecl=null;$("#ptPallet").value="";$("#ptScan").value="";$("#ptQty").value="";$("#ptPending").hidden=true;$("#ptSugg").hidden=true;$("#ptPalletInfo").innerHTML="";$("#ptQtyEb").textContent="3 · Cantidad";ptHold=false;if(!ptCamI)setTimeout(()=>$("#ptPallet").focus(),50)}
 async function ptPalletRead(v){
@@ -5356,7 +5431,7 @@ const PTSN2ST={ok:"ok",faltan:"dif",sobran:"dif",transito:"transito",sinprod:"si
 function ptTabla(){
   const {rows,ini,fin,snRows}=ptRows(),T=[];
   for(const r of rows)T.push({pallet:r.pallet,cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,pe:r.pe,pr:r.pr,dif:r.dif,st:r.st,
-    rec:r.r?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
+    rec:r.r?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
   for(const o of snRows)T.push({sn:true,pallet:`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`,cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
     rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
   return {T,ini,fin};
@@ -5364,6 +5439,14 @@ function ptTabla(){
 const hm24=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hour12:false});
 const ptBul=(base,r)=>base==null?"":(r.ce&&r.f!==1?`<b>${fmt2(base/r.f)}</b> <span class="small muted">${esc(plural(r.ce))}</span>`:`<b>${fmt2(base)}</b> <span class="small muted">${esc(umTxt(r.um))}</span>`);
 const ptConv=(base,r)=>base==null?"":(r.ce&&r.f!==1?`${fmt2(base)} <span class="small muted">${esc(umTxt(r.um))}</span><span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:'<span class="muted">—</span>');
+/* Supervisor: corregir la cantidad de un registro de PT (de cualquier día). Queda anotado de → a. */
+function ptEdBtn(d){if(!d||!d.lid||prodMode())return "";const ed=Array.isArray(d.ed)&&d.ed.length;
+  return `<span class="sub">${ed?`<span title="${esc(d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}${x.via==="panel"?" (panel)":""}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pted="${esc(d.lid)}">✎ corregir</button></span>`}
+function ptEdBind(){$$("#ptRes [data-pted]").forEach(b=>b.onclick=async()=>{const d=ptData.pallets.find(x=>x.lid===b.dataset.pted);if(!d)return;
+  const u=d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um),v=prompt(`Pallet ${d.pallet||"sin número"} · ${d.desc||d.k||d.code}\nNueva cantidad (en ${u}):`,fmt2(d.qty));if(v==null)return;
+  const q=num(v);if(q==null||q<=0)return toast("Escribe una cantidad mayor que 0");
+  try{await rpc(SB,"cb_pt_editar_panel",{p_clave:SB.admin,p_lid:d.lid,p_qty:q,p_persona:"Supervisor"});toast("Cantidad corregida");await ptRefresh(true)}
+  catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":movMsg(e))}})}
 function renderPtPanel(){
   if($("#v-pt").hidden)return;
   ptDias();
@@ -5390,11 +5473,12 @@ function renderPtPanel(){
   f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
   $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th><th>Pallet recibido</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th><th>Hora de captura</th></tr></thead><tbody>`+
     (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.otro?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.otro)}</span>`:""}</td>
-      <td class="num">${ptBul(r.pe,r)}</td><td class="num">${ptConv(r.pe,r)}</td><td class="small">${r.rec?esc(r.rec):'<span class="muted">—</span>'}</td>
-      <td class="num">${r.pr==null?"":qBC(r.pr,r.ce,r.f,r.um)}</td>
+      <td class="num">${ptBul(r.pe,r)}${ptEdBtn(r.dE)}</td><td class="num">${ptConv(r.pe,r)}</td><td class="small">${r.rec?esc(r.rec):'<span class="muted">—</span>'}</td>
+      <td class="num">${r.pr==null?"":qBC(r.pr,r.ce,r.f,r.um)}${ptEdBtn(r.dR)}</td>
       <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td>
       <td class="small" style="white-space:nowrap" title="${r.uE?"Producción: "+esc(r.uE):""}">${r.tE?"Prod. "+hm24(r.tE):""}${r.tE&&r.tR?"<br>":""}${r.tR?"Recep. "+hm24(r.tR):""}${!r.tE&&!r.tR?'<span class="muted">—</span>':""}</td></tr>`).join("")
     :`<tr><td colspan="10" class="muted">${T.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
+  ptEdBind();
   const dd=x=>`${String(x.getDate()).padStart(2,"0")}-${String(x.getMonth()+1).padStart(2,"0")}-${x.getFullYear()}`;
   $("#ptCierres").innerHTML=`<div class="muted" style="margin-bottom:6px">${fin===Infinity?"Desde "+fmtDT(ini):`Día ${dd(ini)}, de 00:00 a 23:59`}${ptAt?` · actualizado ${hhmm(ptAt)}, se refresca cada 20 s`:""}</div>`+
     ([...ptData.cierres].filter(c=>{const t=Date.parse(c.t);return t>=ini.getTime()&&t<fin}).reverse().slice(0,12).map(c=>`<div style="padding:4px 0;border-bottom:1px solid var(--line)"><b>${c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto}</b> cerró turno · ${fmtDT(c.t)}${c.persona?" · "+esc(c.persona):""}</div>`).join("")||'<div class="muted">Sin cierres de turno todavía.</div>');
