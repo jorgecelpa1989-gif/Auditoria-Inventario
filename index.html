@@ -4914,7 +4914,7 @@ async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");
         <td><button class="btn sm primary" data-ps="${esc(l.lid)}">Guardar</button></td></tr>`}).join(""):'<tr><td class="muted">No registraste pallets ese día.</td></tr>';
     $$("#ptPrevList [data-ps]").forEach(b=>b.onclick=async()=>{const lid=b.dataset.ps,q=num($(`#ptPrevList [data-pq="${CSS.escape(lid)}"]`).value);
       if(q==null||q<=0)return toast("Escribe una cantidad mayor que 0");
-      b.disabled=true;try{await prpc("cb_pt_editar",{p_lid:lid,p_qty:q,p_persona:PST.persona||null});toast("Cantidad corregida");await ptPrevLoad()}
+      b.disabled=true;try{await prpc("cb_pt_editar",{p_lid:lid,p_qty:q,p_persona:PST.persona||null});const lc=ptCel.lect.find(z=>z.lid===lid);if(lc){lc.qty=q;ptSave();ptRender()}toast("Cantidad corregida");await ptPrevLoad()}
       catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":/muy_antiguo/.test(e.message)?"Ese registro tiene más de 15 días: pídele al supervisor que lo corrija.":puMsg(e))}finally{b.disabled=false}})}
   catch(e){tb.innerHTML=`<tr><td class="muted">${esc(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":puMsg(e))}</td></tr>`}
 }
