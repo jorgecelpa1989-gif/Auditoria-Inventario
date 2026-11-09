@@ -2556,6 +2556,36 @@ end $$;
 
 revoke all on function public.cb_conteo_codigos(text, uuid[]) from public;
 grant execute on function public.cb_conteo_codigos(text, uuid[]) to anon, authenticated;
+-- =====================================================================
+--  Actualización 12 · Entrega directa de MP desde el celular de bodega
+--  El usuario con permiso "Entrega MP" puede abrir una entrega él mismo (cuando producción
+--  le pide algo en el momento), sin esperar que el supervisor la genere. Queda visible para
+--  quien recibe en producción y en el panel, como cualquier entrega. Solo agrega una función.
+-- =====================================================================
+
+create or replace function public.cb_puesto_mov_crear(p_puesto text, p_ses text, p_ref text default null, p_persona text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex'); v_id uuid; v_items jsonb; v_vence timestamptz; v_nom text;
+        v_hoy timestamptz := date_trunc('day', now() at time zone 'America/Santiago') at time zone 'America/Santiago';
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'mp_entregar') then raise exception 'sin_permiso'; end if;
+  if (select count(*) from cb_mov where meta->>'origen' = p_puesto and creado >= v_hoy) >= 40 then raise exception 'limite_diario'; end if;
+  select items into v_items from cb_catalogo where id = 1;
+  if v_items is null or jsonb_array_length(v_items) = 0 then raise exception 'sin_productos'; end if;
+  v_vence := greatest(v_hoy + interval '23 hours 59 minutes', now() + interval '4 hours');
+  v_nom := 'Entrega directa · ' || to_char(now() at time zone 'America/Santiago', 'DD-MM HH24:MI')
+           || coalesce(' · ' || nullif(left(trim(p_ref), 60), ''), '');
+  insert into cb_mov(nombre, vence, token_hash, link_token, items, meta)
+  values (v_nom, v_vence, extensions.crypt(v_token, extensions.gen_salt('bf')), v_token, v_items,
+          jsonb_build_object('estado', 'activa', 'activada', now(), 'puestos', true, 'directa', true, 'creado_por', 'puesto',
+                             'origen', p_puesto, 'ref', nullif(left(trim(coalesce(p_ref, '')), 60), ''), 'por', nullif(left(trim(coalesce(p_persona, '')), 80), '')))
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'token', v_token, 'nombre', v_nom, 'vence', v_vence);
+end $$;
+
+revoke all on function public.cb_puesto_mov_crear(text, text, text, text) from public;
+grant execute on function public.cb_puesto_mov_crear(text, text, text, text) to anon, authenticated;
 </script>
   </div>
 
@@ -4595,7 +4625,7 @@ function renderPuesto(){
   const nMp=puTareas.mp.length,pMp=pend(puTareas.mp),nC=puTareas.conteos.length,pC=pend(puTareas.conteos);
   const devN=puDevModo==="rec"?(puDev||[]).filter(d=>!d.recibido).length:0;
   const items=[];
-  if(can("mp_entregar"))items.push({k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} asignada${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas",dot:pMp});
+  if(can("mp_entregar"))items.push({k:"mp",ic:"📦",t:"Entrega de materia prima (MP)",s:(nMp?`${nMp} entrega${nMp>1?"s":""} abierta${nMp>1?"s":""}${nMp>pMp?` · ${nMp-pMp} terminada${nMp-pMp>1?"s":""}`:""}`:"Sin entregas asignadas")+" · puedes crear una entrega directa",dot:pMp});
   if(can("mp_recibir"))items.push({k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp});
   if(can("pt_entregar"))items.push({k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"});
   if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
@@ -4613,10 +4643,27 @@ function puAbrir(k){
   if(k==="pt")return ptAbrir();
   if(k==="dev"||k==="devrec")return dvAbrir(k==="devrec"?"rec":"carga");
   const lista=k==="mp"?puTareas.mp:puTareas.conteos;
-  if(!lista.length)return toast(k==="mp"?"No tienes entregas asignadas por ahora":"No tienes conteos asignados por ahora");
-  if(lista.length===1)return k==="mp"?puAbrirMov(lista[0]):puAbrirConteo(lista[0]);
+  const directa=k==="mp"&&can("mp_entregar");          // bodega puede abrir una entrega sin esperar al supervisor
+  if(!lista.length&&!directa)return toast(k==="mp"?"No tienes entregas asignadas por ahora":"No tienes conteos asignados por ahora");
+  if(lista.length===1&&!directa)return k==="mp"?puAbrirMov(lista[0]):puAbrirConteo(lista[0]);
+  if(directa)return puMpLista(lista);
   $("#puList").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Elige la tarea</h2>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":fmt(t.productos)+" productos"}</span></button>`).join("")+`</div>`;
   $$("#puList [data-pi]").forEach(b=>b.onclick=()=>{const t=lista[+b.dataset.pi];k==="mp"?puAbrirMov(t):puAbrirConteo(t)});
+}
+/* Bodega: lista de entregas + "Nueva entrega directa" (cuando producción pide algo en el momento). */
+function puMpLista(lista){
+  $("#puList").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Entrega de materia prima</h2>
+    <div class="cbox" style="max-width:none;gap:8px"><b>＋ Nueva entrega directa</b><span class="small muted">Para cuando producción te pide algo en el momento. Le llega a quien recibe en producción y al panel, como cualquier entrega.</span>
+      <label class="f">¿Quién la pide? / OT (opcional)<input id="puMpRef" maxlength="60" autocomplete="off" autocapitalize="characters" placeholder="Ej: OT 4512 o nombre"></label>
+      <button class="btn primary" id="puMpNew" style="justify-content:center">Crear y empezar a entregar</button></div>`+
+    (lista.length?`<div class="small muted" style="margin-top:6px">Entregas abiertas</div>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":t.productos?fmt(t.productos)+" productos":"directa"}</span></button>`).join(""):"")+`</div>`;
+  $$("#puList [data-pi]").forEach(b=>b.onclick=()=>puAbrirMov(lista[+b.dataset.pi]));
+  $("#puMpNew").onclick=async()=>{const b=$("#puMpNew");b.disabled=true;
+    try{const r=await prpc("cb_puesto_mov_crear",{p_ref:norm($("#puMpRef").value).toUpperCase()||null,p_persona:PST.persona||null});
+      puVistos=puVistos.concat([r.id]);store.set("inv_puvistos",puVistos);
+      toast("Entrega creada: registra lo que entregas");await puAbrirMov({id:r.id,token:r.token,nombre:r.nombre});puRefresh()}
+    catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 12 en Supabase.":/limite_diario/.test(e.message)?"Llegaste al máximo de entregas directas de hoy.":/sin_productos/.test(e.message)?"Falta la lista de productos: pídele al supervisor que cargue el ERP.":movMsg(e))}
+    finally{b.disabled=false}};
 }
 async function puAbrirMov(t){
   const rol=can("mp_entregar")?"E":"R";
