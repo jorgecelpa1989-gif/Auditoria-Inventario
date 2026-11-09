@@ -2535,6 +2535,27 @@ begin
   returning id into v_id;
   return jsonb_build_object('id', v_id);
 end $$;
+-- =====================================================================
+--  Actualización 11 · Recuperar conteos en cualquier PC del supervisor
+--  Devuelve los códigos (y la meta: rotativo / reconteo de) de varios conteos, para que el
+--  panel muestre sus resultados aunque se hayan creado en otro equipo o en otra dirección.
+--  Solo agrega una función: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create or replace function public.cb_conteo_codigos(p_clave text, p_ids uuid[]) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if p_ids is null or array_length(p_ids, 1) is null then return '{}'::jsonb; end if;
+  if array_length(p_ids, 1) > 500 then raise exception 'datos_invalidos'; end if;
+  return coalesce((select jsonb_object_agg(c.id::text, jsonb_build_object(
+      'codes', (select coalesce(jsonb_agg(e->>0), '[]'::jsonb) from jsonb_array_elements(c.items) e),
+      'meta', c.meta))
+    from cb_conteos c where c.id = any(p_ids)), '{}'::jsonb);
+end $$;
+
+revoke all on function public.cb_conteo_codigos(text, uuid[]) from public;
+grant execute on function public.cb_conteo_codigos(text, uuid[]) to anon, authenticated;
 </script>
   </div>
 
@@ -3258,7 +3279,7 @@ $("#btnReconteo").onclick=async()=>{
   const ahora=new Date(), vv=$("#reVence").value;
   const vence=venceDesde(vv,ahora);
   const nombre="Reconteo · "+(raiz?raiz.nombre:ahora.toLocaleDateString("es-CL"));
-  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
+  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,reconteoDe:raiz?raiz.id:null,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnReconteo").disabled=true;
   try{const c=await crearNube(m,its,null,true);c.codes=its.map(i=>i.cod);if(raiz)c.reconteoDe=raiz.id;
     conteos.unshift(c);store.set("inv_conteos",conteos);renderConteos();
@@ -3623,16 +3644,32 @@ $("#btnEd").onclick=async()=>{const c=conteos.find(z=>z.id===$("#edSel").value);
   catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 09.":/finalizado/.test(e.message)?"Ese conteo ya está finalizado.":sbMsg(e))}
   finally{b.disabled=false}};
 async function crearNube(m,its,sel,rot){
-  const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo}});
+  const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo,reconteo_de:m.reconteoDe||null}});
   const link=appUrl()+"?nube="+r.id+"."+r.token+sbLinkParams();
   return {id:r.id,nube:true,codes:its.map(i=>i.cod),nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
 }
 
 /* ---- estado en vivo de los conteos ---- */
 let nubeLive=new Map(), nubeAt=null, nubeBusy=false;
+/* Conteos creados en otro equipo o en otra dirección de la app: se recuperan desde el servidor (nombre, fechas y sus códigos),
+   así sus resultados se ven en cualquier PC del supervisor. Los datos nunca dejaron de estar en Supabase. */
+var recBusy=false;
+async function conteosRecuperar(arr){
+  if(recBusy)return;const have=new Set(conteos.map(c=>c.id));const nuevos=arr.filter(x=>!have.has(x.id));
+  const sinCod=conteos.filter(c=>c.nube&&c.recuperado&&!c.codes).map(c=>c.id);
+  if(!nuevos.length&&!sinCod.length)return;recBusy=true;
+  try{let det={};try{det=await rpc(SB,"cb_conteo_codigos",{p_clave:SB.admin,p_ids:[...nuevos.map(x=>x.id),...sinCod]})||{}}catch(e){}
+    for(const x of nuevos){const d=det[x.id]||{};
+      conteos.push({id:x.id,nube:true,recuperado:true,nombre:x.nombre,creado:x.creado,vence:x.vence,productos:x.productos,codes:Array.isArray(d.codes)?d.codes:null,
+        reconteoDe:d.meta&&d.meta.reconteo_de||undefined,rot:!!(d.meta&&d.meta.rotativo),fin:!!(x.finalizado||x.terminado),link:x.token?appUrl()+"?nube="+x.id+"."+x.token+sbLinkParams():""})}
+    for(const id of sinCod){const c=conteos.find(z=>z.id===id),d=det[id];if(c&&d&&Array.isArray(d.codes))c.codes=d.codes}
+    conteos.sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));store.set("inv_conteos",conteos);
+    if(nuevos.length&&typeof renderResult==="function"&&!$("#v-resultado").hidden)renderResult()}
+  finally{recBusy=false}
+}
 async function refreshNube(silent){
   if(!nubeOn()||nubeBusy)return;nubeBusy=true;
-  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();if(typeof catSync==="function")catSync(false);for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}renderConteosOnly();renderLive()}
+  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();await conteosRecuperar(arr||[]);if(typeof catSync==="function")catSync(false);for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}renderConteosOnly();renderLive()}
   catch(e){if(!silent)toast(sbMsg(e))}
   finally{nubeBusy=false}
 }
