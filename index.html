@@ -4111,7 +4111,7 @@ function applyConteo(m,id,sb){
   show("contar");
 }
 
-if((location.hash||"")==="#panel"){cfg.sup=true;store.set("inv_cfg",cfg)}
+if(/^#panel$/i.test(location.hash||"")){cfg.sup=true;store.set("inv_cfg",cfg)}
 const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.login);
 /* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
 function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(typeof gh!=="undefined"&&gh.login)||(erp&&!erp.maestro))}
@@ -4123,7 +4123,10 @@ function lockScreen(msg,title,icon,force){
     <div class="lockLink"><label class="small" for="lockUrl"><b>¿Tienes el link?</b> Cópialo desde WhatsApp y pégalo aquí (sirve también si abriste la app desde el ícono de inicio).</label>
       <input id="lockUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…">
       <button class="btn primary" id="lockGo" style="justify-content:center">Abrir link</button><span class="small" id="lockErr" style="color:var(--bad)"></span></div></div>`;
-  const go=()=>{const u=linkPegado($("#lockUrl").value);if(!u){$("#lockErr").textContent="Ese no parece un link de esta app. Cópialo completo desde el mensaje.";return}location.href=u};
+  const go=()=>{const u=linkPegado($("#lockUrl").value);if(!u){$("#lockErr").textContent="Ese no parece un link de esta app. Cópialo completo desde el mensaje.";return}
+    /* Link del panel (…/#panel): el ícono de inicio del iPhone tiene su propio almacenamiento, así que se marca aquí y se recarga. */
+    if(/^#panel$/i.test(new URL(u).hash)){cfg.sup=true;store.set("inv_cfg",cfg);location.replace(location.pathname+"#erp");location.reload();return}
+    location.href=u};
   $("#lockGo").onclick=go;$("#lockUrl").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();go()}});
   return true;
 }
@@ -4133,6 +4136,7 @@ function linkPegado(v){
   let u;try{u=new URL(v,location.href)}catch(e){return null}
   const base=location.pathname.replace(/[^/]*$/,"");
   if(u.origin!==location.origin||!u.pathname.startsWith(base))return null;
+  if(/^#panel$/i.test(u.hash))return u.href;
   if(!["nube","c","mov","puesto","prod"].some(k=>u.searchParams.has(k)))return null;
   return u.href;
 }
