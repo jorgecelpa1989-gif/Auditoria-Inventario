@@ -18,9 +18,12 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await s.goto(B+'#permisos');await s.reload();await s.waitForTimeout(2500);
  check(await s.isVisible('#supAdm')&&/Todavía no hay supervisores/.test(await s.textContent('#supBox')),'Permisos: aparece la tarjeta "Supervisores de área"');
  await s.click('#supNew');await s.fill('#supNom','Supervisor Prod. 1');
- check((await s.$$eval('#supEd [data-sp]',c=>c.filter(x=>x.checked).length))===5,'Nuevo supervisor: vienen marcados MP, PT y Devoluciones');
- await s.uncheck('#supEd [data-sp="mp_ver"]');check(!(await s.isChecked('#supEd [data-sp="mp_solicitar"]')),'Si quitas "ver", se quita "crear" del mismo módulo');
- await s.check('#supEd [data-sp="mp_solicitar"]');check(await s.isChecked('#supEd [data-sp="mp_ver"]'),'Si marcas "crear", se marca "ver"');
+ const marc=()=>s.$$eval('#supEd [data-sp]',c=>c.filter(x=>x.checked).map(x=>x.dataset.sp).sort().join(','));
+ check((await s.$$('#supEd [data-sp]')).length===14&&(await marc())==='','Nuevo supervisor: 14 permisos en 5 módulos, ninguno marcado (tú eliges)');
+ await s.check('#supEd [data-sp="mp_operar"]');check((await marc())==='mp_operar,mp_solicitar,mp_ver','Marcar "operar" marca también "ver" y "solicitar" → '+(await marc()));
+ await s.uncheck('#supEd [data-sp="mp_ver"]');check((await marc())==='','Quitar "ver" quita todo lo que dependía de él');
+ for(const q of ['mp_solicitar','pt_ver','dev_crear'])await s.check(`#supEd [data-sp="${q}"]`);
+ check((await marc())==='dev_crear,dev_ver,mp_solicitar,mp_ver,pt_ver','Perfil pedido para Supervisor Prod.: MP ver+solicitar, PT ver, Devoluciones ver+crear');
  await s.click('#supSave');await s.waitForTimeout(2500);
  const id=sql("select id from cb_sup");const link0=await s.inputValue('#sl-'+id).catch(()=>''),link=link0.replace(/^https?:\/\/[^?]+/,B);   // en local el link sale con la dirección pública
  check(/\?sup=s_[0-9a-f]+&t=/.test(link)&&/Link sin abrir/.test(await s.textContent('#supBox')),'Se crea con su link propio, estado "Link sin abrir"');
@@ -30,8 +33,8 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await p.goto(link);await p.waitForTimeout(3500);
  const tabs=async()=>p.$$eval('nav.tabs button',bs=>bs.filter(x=>x.offsetParent!==null).map(x=>x.dataset.v).join(','));
  check((await tabs())==='mp,pt,devol','Supervisor: su menú muestra solo Entrega MP, Recepción PT y Devoluciones → '+(await tabs()));
- check(/Supervisor Prod\. 1/.test(await p.textContent('#status'))&&!/\?sup=|t=/.test(p.url()),'Se ve su nombre arriba y el link desaparece de la barra de direcciones');
- check(await p.evaluate(a=>!(localStorage.inv_sb||'').includes(a),ADMIN)&&await p.evaluate(()=>/^s_[0-9a-f]+\./.test(JSON.parse(localStorage.inv_prod).ses)),'En su navegador queda solo su sesión (ninguna clave de administrador)');
+ check(/Supervisor Prod\. 1/.test(await p.textContent('#supChip'))&&!/\?sup=|t=/.test(p.url()),'Se ve su nombre arriba y el link desaparece de la barra de direcciones');
+ check(await p.evaluate(a=>!(localStorage.inv_sb||'').includes(a),ADMIN)&&await p.evaluate(()=>/^s_[0-9a-f]+\./.test(JSON.parse(localStorage.inv_sup).ses)),'En su navegador queda solo su sesión (ninguna clave de administrador)');
  // MP
  check(await p.isVisible('#solCard')&&await p.isDisabled('#solPor')&&(await p.inputValue('#solPor'))==='SUPERVISOR PROD. 1','MP: puede solicitar; "Solicita" viene con su nombre y no se puede cambiar');
  const mpTxt=await p.textContent('#v-mp');
@@ -72,4 +75,22 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(/Desactivado/.test(await s.textContent('#supBox')),'Administrador: lo desactiva');
  await p.evaluate(()=>supYo());await p.waitForTimeout(1500);
  check(/Acceso desactivado/.test(await p.textContent('#lockBox')),'Supervisor: su panel se bloquea ("Acceso desactivado")');
+ // ---- El jefe cambia de perfil: el administrador le da más permisos (sin link nuevo) ----
+ rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:id,p_nombre:'Supervisor Prod. 1',p_permisos:['inv_ver','mp_operar','mp_eliminar','pt_corregir','dev_todas','dev_cerrar'],p_activo:true});
+ await p.reload();await p.waitForTimeout(3500);
+ check((await tabs())==='erp,mp,resultado,pt,devol','Con más permisos: aparecen Panel e Inventario, sin link nuevo → '+(await tabs()));
+ await p.click('nav.tabs button[data-v="pt"]');await p.waitForTimeout(2500);
+ check((await p.$$('#ptRes [data-pted]')).length>0&&await p.isVisible('#ptAddTog'),'PT con "corregir": aparecen "✎ corregir" y "＋ Agregar registro"');
+ await p.click('nav.tabs button[data-v="mp"]');await p.waitForTimeout(2500);
+ check((await p.$$('#v-mp [data-mx]')).length>0&&await p.isVisible('#btnMpSinSol'),'MP con "operar" y "eliminar": aparecen Eliminar y "Crear entrega sin solicitud"');
+ await p.click('nav.tabs button[data-v="devol"]');await p.waitForTimeout(2500);
+ const dt2=await p.textContent('#dvTbl');check(/G-DIST/.test(dt2)&&/G-PROD/.test(dt2)&&await p.isHidden('#dpCard'),'Devoluciones con "todas las áreas": ve también Distribución; sin "crear" no hay formulario');
+ await p.click('#dvTbl [data-di]');await p.waitForTimeout(500);check(await p.isVisible('#dvCerrar')&&await p.isHidden('#dvDel'),'Devoluciones con "cerrar" pero sin "eliminar": solo aparece Cerrar');
+ await p.click('nav.tabs button[data-v="resultado"]');await p.waitForTimeout(2500);
+ check(await p.isVisible('#v-resultado')&&await p.isHidden('#maestroCard')&&await p.isHidden('#edCard')&&await p.isHidden('#reCard'),'Inventario solo "ver": entra, pero sin Crear conteo, Modificar ni Reconteo');
+ await p.goto(B+'#permisos');await p.waitForTimeout(1200);check(await p.isHidden('#v-permisos'),'Sin permiso de usuarios: no entra a 6 · Permisos');
+ await p.screenshot({path:S+'/sup_mas_permisos.png'});
+ rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:id,p_nombre:'Supervisor Prod. 1',p_permisos:['usr_admin'],p_activo:true});await p.reload();await p.waitForTimeout(3500);
+ check((await tabs())==='permisos'&&await p.isVisible('#uEdCard')&&await p.isHidden('#sbCard')&&await p.isHidden('#supAdm')&&await p.isHidden('#mpAcc'),'Solo "Usuarios": ve 6 · Permisos con los usuarios, sin Supabase, sin supervisores ni acceso de producción');
+ check(!(await p.content()).includes(ADMIN),'En ningún momento su página contiene la clave del administrador');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

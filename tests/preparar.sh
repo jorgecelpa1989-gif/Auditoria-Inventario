@@ -32,5 +32,6 @@ PY
   "${PSQL[@]}" -d "$DB" -f "$RAIZ/tests/sql/post.sql" >/dev/null
   rm -f "$TMP"; echo "Base local '$DB' creada desde index.html"
 fi
-curl -s -o /dev/null localhost:8811/index.html || { (cd "$RAIZ" && nohup python3 -m http.server 8811 >/dev/null 2>&1 &); sleep 1; }
+# El servidor web queda en segundo plano, sin heredar la salida de este script (si no, quien lo llama no termina nunca).
+curl -s -o /dev/null localhost:8811/index.html || { (cd "$RAIZ" && exec nohup python3 -m http.server 8811) >/dev/null 2>&1 </dev/null & sleep 1; }
 echo "Listo: PostgreSQL en $D/sock:$PUERTO (base $DB) · app en http://localhost:8811/"
