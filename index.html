@@ -6552,12 +6552,14 @@ function renderPtPanel(){
   if($("#v-pt").hidden)return;
   ptDias();
   const {T,ini,fin}=ptTabla(), cnt=s=>T.filter(r=>s.includes(r.st)).length, P=ptData.puestos||{};
-  const cier=p=>ptData.cierres.filter(x=>x.puesto===p).map(x=>x.t).sort().at(-1);
+  const enPer=x=>{const t=Date.parse(x.t);return t>=ini.getTime()&&t<fin};   // solo cierres del período elegido arriba
+  const cier=p=>ptData.cierres.filter(x=>x.puesto===p&&enPer(x)).map(x=>x.t).sort().at(-1);
+  const hCie=t=>{const d=new Date(t);return d.toDateString()===new Date().toDateString()?hm24(t):String(d.getDate()).padStart(2,"0")+"-"+String(d.getMonth()+1).padStart(2,"0")+" "+hm24(t)};   // si no es de hoy, con fecha
   const PTL={produccion:"Entrega",bodega:"Recibe",retail:"Retira"};
   if(Array.isArray(ptData.usuarios)){const U=ptData.usuarios.filter(u=>u.usado).map(u=>({...u,on:enLinea(u.visto)})).sort((a,b)=>(b.on-a.on)||String(a.persona||a.nombre).localeCompare(String(b.persona||b.nombre)));
-    const cU=id=>ptData.cierres.filter(x=>x.usuario===id).map(x=>x.t).sort().at(-1),nOn=U.filter(u=>u.on).length;
+    const cU=id=>ptData.cierres.filter(x=>x.usuario===id&&enPer(x)).map(x=>x.t).sort().at(-1),nOn=U.filter(u=>u.on).length;
     $("#ptSides").innerHTML=`<div class="small muted" style="margin:-4px 0 6px">${fmt(nOn)} en línea de ${fmt(U.length)}</div>`+(U.length?U.map(u=>{const c=cU(u.id);
-      return `<div class="ptU${u.on?"":" off"}" title="${esc(u.nombre||"")}${u.visto?" · última señal "+fmtDT(u.visto):""}"><span class="dot ${u.on?"on":"off"}"></span><span><b>${esc(u.persona||u.nombre||u.id)}</b><span class="small muted">${PTL[u.lado]||""}${u.on?"":" · "+(u.visto?hace(u.visto):"sin señal")}${c?" · cierre "+hm24(c):""}</span></span></div>`}).join(""):'<div class="small muted">Ningún usuario con permiso de PT está vinculado.</div>')}
+      return `<div class="ptU${u.on?"":" off"}" title="${esc(u.nombre||"")}${u.visto?" · última señal "+fmtDT(u.visto):""}"><span class="dot ${u.on?"on":"off"}"></span><span><b>${esc(u.persona||u.nombre||u.id)}</b><span class="small muted">${PTL[u.lado]||""}${u.on?"":" · "+(u.visto?hace(u.visto):"sin señal")}${c?" · cerró turno "+hCie(c):""}</span></span></div>`}).join(""):'<div class="small muted">Ningún usuario con permiso de PT está vinculado.</div>')}
   else $("#ptSides").innerHTML=[["produccion","🏭 Producción entrega"],["bodega","🏷️ Bodega recibe"],["retail","🛒 Picking retail retira"]].map(([p,t])=>{const x=P[p]||{},on=enLinea(x.visto),c=cier(p);
     return `<div class="mpSide"><span class="rl">${t}</span><div><span class="dot ${x.usado?(on?"on":"off"):""}"></span><b>${!x.usado?"Sin usuario vinculado":on?"En línea":"Sin señal"}</b>${x.visto&&!on?` <span class="small muted">· última señal ${hace(x.visto)}</span>`:""}</div><div class="small muted">${x.persona?esc(x.persona)+" · ":""}${c?"último cierre "+fmtDT(c):"sin cierres registrados"}</div></div>`}).join("");
   // 3 indicadores: pallets, SKU y unidades (bultos)
