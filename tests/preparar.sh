@@ -19,7 +19,8 @@ if [ "${1:-}" = "--recrear" ] || [ "$tiene" = "0" ]; then
   else "${PSQL[@]}" -d postgres -c "drop schema if exists public cascade; create schema public; drop schema if exists extensions cascade"; fi
   TMP="$(mktemp)"
   # El SQL sale del mismo index.html (bloque #sqlScript): se prueba exactamente lo que se instala en Supabase.
-  python3 -I - "$RAIZ/index.html" > "$TMP" <<'PY'
+  # CC_SQL_DESDE: otro index.html del que sacar el SQL (para probar la app publicada contra un SQL más nuevo).
+  python3 -I - "${CC_SQL_DESDE:-$RAIZ/index.html}" > "$TMP" <<'PY'
 import sys,re
 s=open(sys.argv[1],encoding='utf-8').read()
 m=re.search(r'<script type="text/plain" id="sqlScript">(.*?)</script>',s,re.S)

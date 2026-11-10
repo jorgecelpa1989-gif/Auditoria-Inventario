@@ -3916,7 +3916,7 @@ $("#rotCodes").oninput=renderRot;
 
 /* ================= PANEL: crear conteo y compartir link ================= */
 const GH="https://api.github.com", RAW="https://gist.githubusercontent.com/";
-const DEFAULT_APP="https://jorgecelpa1989-gif.github.io/Auditoria-Inventario/";
+const DEFAULT_APP="https://control-operaciones-vector.jorge-celpa-1989.workers.dev/";   // sitio oficial (Cloudflare); GitHub es solo respaldo del código
 let gh=store.get("inv_gh",{token:"",login:""});
 let conteos=store.get("inv_conteos",[]);
 const appUrl=()=>{let u=norm(cfg.appUrl||"");
@@ -5864,7 +5864,7 @@ async function dpEnter(){
   if(prodMode()&&!movCat)await catLoad(false).catch(()=>{});
   if(!prodMode()&&!movCatalog()&&!dpCat){try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(r&&r.items)dpCat=r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}catch(e){}}
   dpIndex();dpRender();
-  $("#dpCat").textContent=dpItems().length?`Lista de productos: ${fmt(dpItems().length)} productos${movCatalog()?" (informe del ERP de este PC)":" (desde Supabase)"}.`:"Sin lista de productos: carga el informe del ERP en 1 · Panel.";
+  $("#dpCat").textContent=dpItems().length?`Lista de productos: ${fmt(dpItems().length)} productos${prodMode()?" (lista de bodega)":movCatalog()?" (informe del ERP de este PC)":" (desde Supabase)"}.`:"Sin lista de productos: carga el informe del ERP en 1 · Panel.";
 }
 function dpPend(v){
   const it=dpFind(v),h=$("#dpHint");
