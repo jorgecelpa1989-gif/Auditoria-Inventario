@@ -405,10 +405,20 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="mpMain">
   <div class="notice" id="mpNote" hidden></div>
   <div id="mpAlert"></div>
-  <div class="card mpEmpty" id="mpEmpty"><div class="eyebrow">Entrega vs Recepción</div><p class="muted" style="margin:0">Genera una solicitud o elige una entrega de la lista para ver aquí, en tiempo real, lo solicitado, entregado y recibido.</p></div>
+  <div class="card mpEmpty" id="mpEmpty"><div class="row"><div class="eyebrow">Entrega vs Recepción</div><span class="sep"></span><select id="mpDia2" class="mpDiaSel" style="flex:0 1 210px"></select></div><p class="muted" style="margin:0" id="mpEmptyTxt">Genera una solicitud o elige una entrega de la lista para ver aquí, en tiempo real, lo solicitado, entregado y recibido.</p></div>
   <div class="card" id="mpCard" hidden>
     <div class="eyebrow">Entrega vs Recepción</div>
-    <div class="row"><h2 id="mpTitle" style="margin:0"></h2><span class="sep"></span><button class="btn primary" id="btnMpTraer">Actualizar lecturas</button><button class="btn" id="btnMpExp">Excel</button></div>
+    <div class="row"><h2 id="mpTitle" style="margin:0"></h2><span class="sep"></span><select id="mpDia" class="mpDiaSel" style="flex:0 1 210px"></select><button class="btn primary" id="btnMpTraer">Actualizar lecturas</button><button class="btn" id="btnMpExp">Excel</button><button class="btn" id="mpAddTog">＋ Agregar registro</button></div>
+    <div class="cbox" id="mpAddPanel" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b id="mpAddTit">Agregar un registro que faltó</b>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:0 1 190px">Quién<select id="mpAdL"><option value="E">📦 Bodega entrega</option><option value="R">📥 Producción recibe</option></select></label>
+        <label class="f" style="flex:1 1 200px">Código<input id="mpAdCod" autocomplete="off" placeholder="Código del producto"></label>
+        <label class="f" style="flex:0 1 110px"><span id="mpAdQL">Cantidad</span><input id="mpAdQty" inputmode="decimal" placeholder="0" autocomplete="off"></label>
+        <label class="f" style="flex:0 1 110px">Hora<input id="mpAdHora" type="time"></label>
+        <button class="btn primary" id="mpAdOk">Agregar</button></div>
+      <div class="small" id="mpAdInfo"></div>
+    </div>
     <div id="mpAct"></div>
     <div class="mpSides" id="mpSides"></div>
     <div class="kpis" id="mpKpis"></div>
@@ -3023,6 +3033,56 @@ revoke all on function public.cb_sup_listar(text), public.cb_sup_guardar(text, t
 grant execute on function public.cb_sup_listar(text), public.cb_sup_guardar(text, text, text, jsonb, boolean), public.cb_sup_link(text, text, text),
   public.cb_sup_eliminar(text, text), public.cb_sup_vincular(text, text, text), public.cb_sup_yo(text) to anon, authenticated;
 -- =====================================================================
+--  Actualización 17b · Entrega MP: agregar registros que faltaron, desde el panel
+--  El administrador agrega una lectura a una entrega, del lado que elija (E = bodega entrega,
+--  R = producción recibe). Queda marcada como agregada a mano ('manual') y los celulares
+--  ya no la borran cuando vuelven a enviar sus lecturas.
+--  Solo agrega una función y ajusta cb_mov_enviar: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create or replace function public.cb_mov_agregar_panel(p_clave text, p_id uuid, p_rol text, p_hora text, p_data jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; v_t timestamptz; v_lid text; v_dia date;
+begin
+  perform cb_check(p_clave);
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  select * into m from cb_mov where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  if coalesce(p_data->>'code','') = '' or coalesce((p_data->>'qty')::numeric, 0) <= 0 or (p_data->>'qty')::numeric > 1000000 then raise exception 'datos_invalidos'; end if;
+  -- la hora se toma en el día en que se creó la entrega (hora de Chile); nunca en el futuro
+  v_dia := (m.creado at time zone 'America/Santiago')::date;
+  begin v_t := (v_dia + coalesce(nullif(p_hora,'')::time, (m.creado at time zone 'America/Santiago')::time)) at time zone 'America/Santiago';
+  exception when others then raise exception 'datos_invalidos'; end;
+  if v_t > now() then v_t := now(); end if;
+  v_lid := 'man-' || encode(extensions.gen_random_bytes(8), 'hex');
+  insert into cb_mov_lect(mov, rol, lid, data)
+  values (p_id, p_rol, v_lid, p_data || jsonb_build_object('lid', v_lid, 't', v_t,
+          'manual', jsonb_build_object('por', left(coalesce(p_data->>'user', 'Supervisor'), 80), 'at', now(), 'via', 'panel')));
+  return jsonb_build_object('lid', v_lid, 't', v_t);
+end $$;
+
+revoke all on function public.cb_mov_agregar_panel(text, uuid, text, text, jsonb) from public;
+grant execute on function public.cb_mov_agregar_panel(text, uuid, text, text, jsonb) to anon, authenticated;
+
+create or replace function public.cb_mov_enviar(p_id uuid, p_rol text, p_secret text, p_persona text, p_lecturas jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; n int;
+begin
+  perform cb_mov_lado_ok(p_id, p_rol, p_secret);
+  select * into m from cb_mov where id = p_id;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() - interval '24 hours' then raise exception 'vencido'; end if;
+  if jsonb_typeof(p_lecturas) <> 'array' or jsonb_array_length(p_lecturas) > 20000 then raise exception 'datos_invalidos'; end if;
+  delete from cb_mov_lect where mov = p_id and rol = p_rol and not (data ? 'manual');   -- lo agregado a mano desde el panel no se borra
+  insert into cb_mov_lect(mov, rol, lid, data)
+    select p_id, p_rol, coalesce(e->>'lid', md5(e::text)), e from jsonb_array_elements(p_lecturas) e
+    on conflict (mov, rol, lid) do update set data = excluded.data;
+  get diagnostics n = row_count;
+  update cb_mov_lado set n_lecturas = n, ultimo_envio = now(), visto = now(), persona = left(p_persona, 80) where mov = p_id and rol = p_rol;
+  return jsonb_build_object('n', n, 'at', now());
+end $$;
+
+-- =====================================================================
 --  Actualización 18 · Supervisores: todos los módulos, permisos a elección del administrador
 --  El administrador marca, para cada supervisor, qué puede hacer en cada módulo:
 --    Inventario     inv_ver · inv_operar (crear, modificar, asignar, finalizar conteos, cargar ERP)
@@ -3481,6 +3541,27 @@ begin
   else
     raise exception 'no_existe';
   end if;
+end $$;
+
+-- Agregar un registro que faltó en una entrega de MP (actualización 17b): también el supervisor con "operar"; queda a su nombre.
+create or replace function public.cb_mov_agregar_panel(p_clave text, p_id uuid, p_rol text, p_hora text, p_data jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; v_t timestamptz; v_lid text; v_dia date;
+begin
+  perform cb_puede(p_clave, 'mp_operar');
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  select * into m from cb_mov where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  if coalesce(p_data->>'code','') = '' or coalesce((p_data->>'qty')::numeric, 0) <= 0 or (p_data->>'qty')::numeric > 1000000 then raise exception 'datos_invalidos'; end if;
+  v_dia := (m.creado at time zone 'America/Santiago')::date;
+  begin v_t := (v_dia + coalesce(nullif(p_hora,'')::time, (m.creado at time zone 'America/Santiago')::time)) at time zone 'America/Santiago';
+  exception when others then raise exception 'datos_invalidos'; end;
+  if v_t > now() then v_t := now(); end if;
+  v_lid := 'man-' || encode(extensions.gen_random_bytes(8), 'hex');
+  insert into cb_mov_lect(mov, rol, lid, data)
+  values (p_id, p_rol, v_lid, p_data || jsonb_build_object('lid', v_lid, 't', v_t, 'user', coalesce(cb_sup_nombre(p_clave), p_data->>'user', 'Supervisor'),
+          'manual', jsonb_build_object('por', left(coalesce(cb_sup_nombre(p_clave), p_data->>'user', 'Supervisor'), 80), 'at', now(), 'via', 'panel')));
+  return jsonb_build_object('lid', v_lid, 't', v_t);
 end $$;
 </script>
   </div>
@@ -4536,7 +4617,7 @@ const sbRef=u=>{const m=String(u||"").match(/^https:\/\/([a-z0-9]{10,40})\.supab
 const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a-z0-9]{10,40}$/i.test(u))u="https://"+u+".supabase.co";return u};
 /* Permiso que exige cada función de panel (igual que en el servidor). "__admin" = solo el administrador. */
 const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
-  cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",
+  cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",
   cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
@@ -4938,7 +5019,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 /* Lo que se oculta cuando falta cada permiso (el servidor lo rechaza igual). */
 const SUP_SIEMPRE="#sbCard,#ghCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
-  mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
+  mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
   pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
@@ -5301,7 +5382,7 @@ async function refreshMov(force){
     const arr=await mrpc("cb_mov_listar");
     movLive=new Map((arr||[]).map(x=>[x.id,x]));movAt=new Date();
     for(const x of movLive.values()){const L=x.lados||{};if(L.E&&L.E.terminado&&L.R&&L.R.terminado&&!x.finalizado){x.finalizado=new Date().toISOString();mrpc("cb_mov_finalizar",{p_id:x.id}).catch(()=>{})}}
-    if(!movSel){const f=movList()[0];if(f){movSel=f.id;store.set("inv_movsel",movSel)}}
+    if(!movSel){const f=movList().filter(mpDiaOk)[0];if(f){movSel=f.id;store.set("inv_movsel",movSel)}}
     if(movSel){const x=movLive.get(movSel),L=(x&&x.lados)||{},sig=["E","R"].map(r=>L[r]?(L[r].ultimo_envio||"")+"|"+L[r].n_lecturas:"-").join("/");
       if(force||movSeen[movSel]!==sig||!movLect[movSel]){try{movLect[movSel]=await mrpc("cb_mov_lecturas",{p_id:movSel})||[];movSeen[movSel]=sig}catch(e){}}}
     renderMp();avisoSolicitudes();catSync(false);
@@ -5315,7 +5396,14 @@ function mpEnter(){mpNote();renderAcc();renderSol();renderPuAdm();$("#mpPuWrap")
 
 function renderMp(){
   if($("#v-mp").hidden)return;
-  const L0=movList(), pen=L0.filter(m=>esSolicitada(movLive.get(m.id))).length, act=L0.filter(m=>{const x=movLive.get(m.id);return x&&!x.finalizado&&!isVenc(x.vence)&&!esSolicitada(x)}).length;
+  mpDias();
+  let L0=movList();
+  /* Si se eligió una entrega de otro día (aviso, entrega recién creada), el menú salta a ese día. */
+  {const all=L0,sel=all.find(m=>m.id===movSel);if(sel&&!mpDiaOk(sel)){const v=mpDiaDe(sel);mpDiaSet(v)}}
+  L0=L0.filter(mpDiaOk);
+  if(movAt&&!L0.some(m=>m.id===movSel)){movSel=L0[0]?L0[0].id:null;   // solo con los datos de Supabase ya cargados (si no, se perdía la entrega elegida)
+   store.set("inv_movsel",movSel);if(movSel&&!movLect[movSel])setTimeout(()=>refreshMov(true),0)}
+  const pen=L0.filter(m=>esSolicitada(movLive.get(m.id))).length, act=L0.filter(m=>{const x=movLive.get(m.id);return x&&!x.finalizado&&!isVenc(x.vence)&&!esSolicitada(x)}).length;
   $("#mpAt").textContent=movAt?`actualizado ${hhmm(movAt)} · se refresca cada 15 s`:"";
   $("#mpListSum").textContent=`${pen?`· ${fmt(pen)} por generar link `:""}· ${fmt(act)} en curso · ${fmt(L0.length)} en total`;
   $("#mpTbl").innerHTML=L0.length?L0.map((m,i)=>{const x=movLive.get(m.id),L=(x&&x.lados)||{},open=x&&!x.finalizado&&!isVenc(x.vence);
@@ -5376,7 +5464,9 @@ setInterval(()=>{if(nubeOn()&&!mpLim()&&!document.hidden&&$("#v-mp").hidden)refr
 function renderMpCmp(){
   const card=$("#mpCard"), m=movById(movSel);
   $("#mpEmpty").hidden=!!m;
+  $("#mpEmptyTxt").textContent=mpDiaV()!=="all"&&!movList().some(mpDiaOk)?`No hay entregas creadas el ${$("#mpDia").selectedOptions[0]?$("#mpDia").selectedOptions[0].textContent.replace(/^(Hoy|Ayer) · /,"").toLowerCase():"día elegido"}. Elige otro día arriba, o genera una solicitud.`:"Genera una solicitud o elige una entrega de la lista para ver aquí, en tiempo real, lo solicitado, entregado y recibido.";
   if(!m){card.hidden=true;return}card.hidden=false;
+  {const no=!mpPuedeAg()||esSolicitada(movLive.get(m.id));$("#mpAddTog").hidden=no;if(no)$("#mpAddPanel").hidden=true;else if(!$("#mpAddPanel").hidden)mpAdInfo()}
   const x=movLive.get(m.id),L=(x&&x.lados)||{};
   const sol=esSolicitada(x), open=x&&!x.finalizado&&!isVenc(x.vence);
   $("#mpAct").innerHTML=sol?(mpLim()?`<div class="notice">Solicitud enviada a bodega${x.meta.por?" por "+esc(x.meta.por):""} ${hace(x.creado)}. Bodega la asigna a quien entrega y quien recibe; aquí verás el avance en vivo.</div>`
@@ -5417,9 +5507,35 @@ function renderMpCmp(){
   const ls=[...(movLect[m.id]||[])].sort((a,b)=>String(b.t).localeCompare(String(a.t)));
   $("#mpDetBox").querySelector("summary").textContent=`Detalle de lecturas (${fmt(ls.length)})`;
   $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th></tr></thead><tbody>`+
-    ls.map(d=>`<tr><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}</td>${(()=>{const [u,c]=uCv(d.qty,d.ce,d.f,d.um);return `<td class="num">${u}</td><td class="num">${c}</td>`})()}</tr>`).join("")+"</tbody>";
+    ls.map(d=>`<tr><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}${d.manual?' <span class="pill p-warn" title="Agregado a mano desde el panel">a mano</span>':""}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}</td>${(()=>{const [u,c]=uCv(d.qty,d.ce,d.f,d.um);return `<td class="num">${u}</td><td class="num">${c}</td>`})()}</tr>`).join("")+"</tbody>";
 }
 $("#mpQ").addEventListener("input",()=>renderMpCmp());
+/* ---------- Entrega MP: menú de días (igual que Recepción PT) ---------- */
+const mpDiaV=()=>$("#mpDia").value||store.get("inv_mpdia","d0");
+function mpDias(){const v=store.get("inv_mpdia","d0"),h=new Date();h.setHours(0,0,0,0);
+  const o=[];for(let i=0;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="d${i}">${i===0?"Hoy · ":i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
+  o.push('<option value="all">Todos los días (últimas 40)</option>');const html=o.join("");
+  $$(".mpDiaSel").forEach(sel=>{if(sel.dataset.k!==html){sel.innerHTML=html;sel.dataset.k=html}sel.value=v;if(!sel.value)sel.value="d0"})}
+function mpDiaSet(v){store.set("inv_mpdia",v);$$(".mpDiaSel").forEach(sel=>sel.value=v)}
+const mpDiaDe=m=>{const h=new Date();h.setHours(0,0,0,0);const d=new Date(m.creado);d.setHours(0,0,0,0);const n=Math.round((h-d)/864e5);return n>=0&&n<=14?"d"+n:"all"};
+function mpDiaOk(m){const v=mpDiaV();return v==="all"||mpDiaDe(m)===v}
+$$(".mpDiaSel").forEach(sel=>sel.onchange=()=>{mpDiaSet(sel.value);movSel=null;store.set("inv_movsel",null);$("#mpAddPanel").hidden=true;renderMp();refreshMov(true)});
+/* ---------- Entrega MP: agregar un registro que faltó (igual que Recepción PT) ---------- */
+const mpPuedeAg=()=>typeof pvCan==="function"?pvCan("mp_operar"):!prodMode();
+function mpAdItem(){const c=codeStr($("#mpAdCod").value);if(!c)return null;const its=(typeof movCatalog==="function"&&movCatalog())||[];const k=key(c);return its.find(i=>key(i.cod)===k||(i.ean&&String(i.ean).split(/[;,/ ]+/).some(e=>key(e)===k)))||null}
+function mpAdInfo(){const it=mpAdItem(),c=$("#mpAdCod").value.trim(),cv=it&&conv(it),m=movById(movSel);
+  $("#mpAdQL").textContent=it?`Cantidad (${cv?plural(it.ce).toLowerCase():umTxt(it.um)})`:"Cantidad";
+  $("#mpAddTit").textContent="Agregar un registro que faltó"+(m?" · "+m.nombre:"");
+  $("#mpAdInfo").innerHTML=!c?"Se suma a esta entrega, del lado elegido, marcado como agregado a mano. Los celulares no lo borran cuando vuelven a enviar.":it?`<b>${esc(it.desc)}</b>${cv?` <span class="muted">· 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</span>`:""}`:'<span style="color:var(--bad)">Ese código no está en la lista de productos</span>';return it}
+$("#mpAddTog").onclick=()=>{const p=$("#mpAddPanel");p.hidden=!p.hidden;if(!p.hidden){if(!$("#mpAdHora").value)$("#mpAdHora").value=hm24(new Date());mpAdInfo();$("#mpAdCod").focus()}};
+$("#mpAdCod").addEventListener("input",mpAdInfo);
+$("#mpAdOk").onclick=async()=>{const m=movById(movSel);if(!m)return toast("Elige una entrega");const it=mpAdInfo(),q=num($("#mpAdQty").value);
+  if(!it)return toast("Escribe un código de la lista de productos");if(q==null||q<=0)return toast("Escribe la cantidad");
+  const b=$("#mpAdOk");b.disabled=true;
+  try{await rpc(SB,"cb_mov_agregar_panel",{p_clave:SB.admin,p_id:m.id,p_rol:$("#mpAdL").value,p_hora:$("#mpAdHora").value||"",
+      p_data:{code:it.cod,k:it.cod,desc:it.desc||"",um:umTxt(it.um),ce:conv(it)?it.ce:"",f:conv(it)?+it.f:1,qty:q,user:"Supervisor"}});
+    $("#mpAdCod").value="";$("#mpAdQty").value="";mpAdInfo();toast("Registro agregado");await refreshMov(true)}
+  catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 17b.":movMsg(e))}finally{b.disabled=false}};
 $("#btnMpExp").onclick=()=>{
   const m=movById(movSel);if(!m)return;const rows=mpRows(m.id);
   const wb=XLSX.utils.book_new();

@@ -458,3 +458,24 @@ begin
     raise exception 'no_existe';
   end if;
 end $$;
+
+-- Agregar un registro que faltó en una entrega de MP (actualización 17b): también el supervisor con "operar"; queda a su nombre.
+create or replace function public.cb_mov_agregar_panel(p_clave text, p_id uuid, p_rol text, p_hora text, p_data jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; v_t timestamptz; v_lid text; v_dia date;
+begin
+  perform cb_puede(p_clave, 'mp_operar');
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  select * into m from cb_mov where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  if coalesce(p_data->>'code','') = '' or coalesce((p_data->>'qty')::numeric, 0) <= 0 or (p_data->>'qty')::numeric > 1000000 then raise exception 'datos_invalidos'; end if;
+  v_dia := (m.creado at time zone 'America/Santiago')::date;
+  begin v_t := (v_dia + coalesce(nullif(p_hora,'')::time, (m.creado at time zone 'America/Santiago')::time)) at time zone 'America/Santiago';
+  exception when others then raise exception 'datos_invalidos'; end;
+  if v_t > now() then v_t := now(); end if;
+  v_lid := 'man-' || encode(extensions.gen_random_bytes(8), 'hex');
+  insert into cb_mov_lect(mov, rol, lid, data)
+  values (p_id, p_rol, v_lid, p_data || jsonb_build_object('lid', v_lid, 't', v_t, 'user', coalesce(cb_sup_nombre(p_clave), p_data->>'user', 'Supervisor'),
+          'manual', jsonb_build_object('por', left(coalesce(cb_sup_nombre(p_clave), p_data->>'user', 'Supervisor'), 80), 'at', now(), 'via', 'panel')));
+  return jsonb_build_object('lid', v_lid, 't', v_t);
+end $$;
