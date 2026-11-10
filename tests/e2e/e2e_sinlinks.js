@@ -17,7 +17,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  // ---- MP: solicitud desde el panel ----
  await s.goto(B+'#mp');await s.reload();await s.waitForTimeout(3000);
  check(await s.isHidden('#mpPuWrap')&&(await s.inputValue('#mpVence'))==='hoy','Panel MP: sin casilla de "enviar a usuarios" (siempre se asigna) y vigencia por defecto hasta hoy 23:59');
- await s.fill('#solPor','JEFE');await s.fill('#solCod','221317');await s.fill('#solQty','3');await s.click('#solAddBtn');await s.waitForTimeout(300);await s.click('#btnSolGen');await s.waitForTimeout(2500);
+ if(await s.isEnabled('#solPor'))await s.fill('#solPor','JEFE');await s.fill('#solCod','221317');await s.fill('#solQty','3');await s.click('#solAddBtn');await s.waitForTimeout(300);await s.click('#btnSolGen');await s.waitForTimeout(2500);
  const cr=await s.textContent('#mpCreated');check(/Asignada/.test(cr)&&/Felipe/.test(cr)&&/David/.test(cr)&&!/WhatsApp|Copiar link/.test(cr),'Panel MP: al generar dice "Asignada" a Felipe (entrega) y David (recibe), sin WhatsApp ni link');
  const mv=sql("select id||'|'||link_token||'|'||(meta->>'puestos') from cb_mov").split('|');check(mv[2]==='true','Servidor: la solicitud queda asignada a los usuarios');
  check(!/WhatsApp|Copiar link/.test(await s.textContent('#mpTbl'))&&!/WhatsApp|Copiar link/.test(await s.textContent('#mpAct')),'Panel MP: lista y detalle sin botones de WhatsApp ni Copiar link');

@@ -24,7 +24,14 @@ begin
     update cb_sup set visto = now() where id = s.id;
     return 'sup';
   end if;
-  r := cb_rol(p_clave);                                  -- admin o acceso antiguo de producción (o error)
+  begin
+    r := cb_rol(p_clave);                                -- admin o acceso antiguo de producción (o error)
+  exception when others then
+    -- Clave equivocada: las funciones que siempre fueron solo del administrador siguen respondiendo
+    -- "clave_supervisor" (el mensaje que el panel ya sabe explicar); las de producción, "acceso_produccion".
+    if sqlerrm = 'acceso_produccion' and p_perm <> '*' and not (v_op && array['mp_ver','mp_solicitar','pt_ver']) then raise exception 'clave_supervisor'; end if;
+    raise;
+  end;
   if r = 'prod' and p_perm <> '*' and not (v_op && array['mp_ver','mp_solicitar','pt_ver']) then raise exception 'sin_permiso'; end if;
   return r;
 end $$;
