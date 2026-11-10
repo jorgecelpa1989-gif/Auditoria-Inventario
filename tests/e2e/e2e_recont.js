@@ -1,0 +1,21 @@
+const {chromium}=require('playwright');const {execFileSync}=require('child_process');
+const PG=['-h','/var/lib/postgresql/cctest/sock','-p','55432','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'];
+const sql=q=>execFileSync('psql',[...PG,'-c',q],{encoding:'utf8'}).trim();
+function rpc(fn,args){const s=`set role anon; select rpc_test($$${fn}$$, $j$${JSON.stringify(args)}$j$::jsonb)::text;`;
+  try{return {ok:true,body:execFileSync('psql',[...PG,'-c',s],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()||'null'}}catch(e){const m=(e.stderr||'').match(/ERROR:\s+(.*)/);return {ok:false,body:JSON.stringify({message:m?m[1].trim():'error'})}}}
+const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN='clave-supervisor-123';let fail=0;const check=(c,m)=>{console.log((c?'✅ ':'❌ ')+m);if(!c)fail++};
+(async()=>{rpc('cb_configurar',{p_clave:ADMIN});sql("delete from cb_conteos");
+ const fId=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMIN,p_id:'',p_nombre:'Pedro R',p_area:'Bodega',p_permisos:['conteo'],p_activo:true}).body);
+ const a=JSON.parse(rpc('cb_crear',{p_clave:ADMIN,p_nombre:'Conteo base',p_vence:new Date(Date.now()+3600e3).toISOString(),p_items:[["221317","","Mos.Gal 14","m"],["110107","","ALAMBRE","kg"]],p_meta:null}).body);
+ const o=JSON.parse(rpc('cb_abrir',{p_id:a.id,p_token:a.token,p_device:'d1'}).body);rpc('cb_enviar',{p_id:a.id,p_secret:o.secret,p_contador:'X',p_lecturas:[{lid:'l1',code:'221317',k:'221317',qty:5,t:new Date().toISOString()}]});
+ const b=await chromium.launch();const c=await b.newContext({viewport:{width:1366,height:900}});
+ await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
+ const s=await c.newPage();const errs=[];s.on('pageerror',e=>errs.push(e.message));await s.goto(B+'#panel');
+ await s.evaluate(([u,ad,id])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:ad,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));localStorage.setItem('inv_rsel',JSON.stringify(id));
+   localStorage.setItem('inv_erp',JSON.stringify({file:'stock.txt',at:new Date().toISOString(),items:[{cod:'221317',ean:'',desc:'Mos.Gal 14',um:'m',stock:9},{cod:'110107',ean:'',desc:'ALAMBRE',um:'kg',stock:3}]}))},[SBU,ADMIN,a.id]);
+ await s.goto(B+'#resultado');await s.reload();await s.waitForTimeout(4000);await s.selectOption('#rSel',a.id).catch(()=>{});await s.waitForTimeout(2500);
+ const opts=await s.$$eval('#rePuesto option',o=>o.map(x=>x.textContent));check(opts.some(t=>/Pedro R/.test(t)),'Reconteo: selector "Asignar reconteo a" con los usuarios de conteo → '+opts.join(' | '));
+ await s.click('#btnReconteo');await s.waitForTimeout(800);check(sql("select count(*) from cb_conteos where nombre like 'Reconteo%'")==='0','Reconteo: sin elegir a quién, no se crea');
+ await s.selectOption('#rePuesto',fId);await s.click('#btnReconteo');await s.waitForTimeout(2500);
+ check(sql(`select puesto from cb_conteos where nombre like 'Reconteo%'`)===fId&&/Enviado a Pedro R/.test(await s.textContent('#reRes'))&&!/Permisos|WhatsApp/.test(await s.textContent('#reRes')),'Reconteo: se crea asignado a Pedro R y lo confirma, sin links');
+ check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

@@ -1,0 +1,26 @@
+const {chromium}=require('playwright');const {execFileSync}=require('child_process');
+const PG=['-h','/var/lib/postgresql/cctest/sock','-p','55432','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'];
+function rpc(fn,args){const s=`set role anon; select rpc_test($$${fn}$$, $j$${JSON.stringify(args)}$j$::jsonb)::text;`;
+  try{return {ok:true,body:execFileSync('psql',[...PG,'-c',s],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()||'null'}}catch(e){const m=(e.stderr||'').match(/ERROR:\s+(.*)/);return {ok:false,body:JSON.stringify({message:m?m[1].trim():'error'})}}}
+const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN='clave-supervisor-123';let fail=0;const check=(c,m)=>{console.log((c?'✅ ':'❌ ')+m);if(!c)fail++};
+(async()=>{rpc('cb_configurar',{p_clave:ADMIN});
+ console.log('cat',rpc('cb_catalogo_subir',{p_clave:ADMIN,p_items:[["221317","","Mos.Gal 14 BWG33","m","ROLLO",90],["221616","","Hex Gal 1 BWG 21","m","ROLLO",50],["221602","","Hex Gal 3/4 BWG22","m","ROLLO",50],["230125","","M. Jardin Verde 6x6","m","ROLLO",30],["110107","","ALAMBRE","kg","",1]],p_stock:null,p_origen:'test'}).body);
+ const b=await chromium.launch();const c=await b.newContext({viewport:{width:1366,height:900},deviceScaleFactor:2});
+ await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
+ const p=await c.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto(B+'#panel');
+ await p.evaluate(([u,a])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));localStorage.removeItem('inv_mpsol');
+   const it=(c,d,um,ce,f)=>({cod:c,ean:'',desc:d,um,ce,f,stock:null,costo:null,ubic:''});
+   localStorage.setItem('inv_erp',JSON.stringify({file:'erp.xlsx',at:new Date().toISOString(),items:[it('221317','Mos.Gal 14 BWG33','m','ROLLO',90),it('221616','Hex Gal 1 BWG 21','m','ROLLO',50),it('221602','Hex Gal 3/4 BWG22','m','ROLLO',50),it('230125','M. Jardin Verde 6x6','m','ROLLO',30),it('110107','ALAMBRE','kg','',1)]}))},[SBU,ADMIN]);
+ await p.goto(B+'#mp');await p.reload();await p.waitForTimeout(3000);
+ await p.evaluate(()=>{for(const [c,f] of [['221317',90],['221616',50],['221602',50],['230125',30]])FACT[key(c)]={ce:'ROLLO',f};const d=document.querySelector('#solPaste').closest('details');d.open=true;mpSol=[];renderSol()});
+ await p.fill('#solPaste','221317\t6\n221616 11\n221602\t56\n230125 27\n110107\t15\n999999 3\nCódigo\tCantidad');await p.waitForTimeout(300);
+ const prev=await p.textContent('#solPrev');console.log('PREV',prev.replace(/\s+/g,' '));
+ check(/221317 · Mos.Gal 14 BWG33 · 6 ROLLOS = 540 m/.test(prev)&&/230125 · M. Jardin Verde 6x6 · 27 ROLLOS = 810 m/.test(prev),'Vista previa: por defecto en bultos (6 ROLLOS = 540 m, 27 ROLLOS = 810 m)');
+ check(/110107 · ALAMBRE · 15 kg/.test(prev)&&/999999 · 3 · no está en la lista/.test(prev)&&/Código\s+Cantidad · sin cantidad/.test(prev),'Vista previa: sin conversión en su unidad, código inexistente y encabezado marcados');
+ check(/Agregar lista \(6\)/.test(await p.textContent('#solPasteBtn')),'Botón indica cuántas líneas se agregan (6)');
+ await p.screenshot({path:S+'/solpaste.png',clip:await p.evaluate(()=>{const r=document.querySelector('#solPaste').closest('details').getBoundingClientRect();return {x:r.x,y:r.y+scrollY,width:r.width,height:r.height+40}})});
+ await p.check('input[name="solPU"][value="base"]');await p.waitForTimeout(200);check(/221317 · Mos.Gal 14 BWG33 · 6 m = 0,07 ROLLOS/.test(await p.textContent('#solPrev')),'Al elegir "unidad del ERP": 6 m = 0,07 ROLLOS');
+ await p.check('input[name="solPU"][value="ce"]');await p.click('#solPasteBtn');await p.waitForTimeout(400);
+ const sol=await p.evaluate(()=>mpSol.map(x=>x.cod+':'+x.q+':'+x.u));console.log('SOL',sol.join(' '));
+ check(sol.includes('221317:540:ce')&&sol.includes('221602:2800:ce')&&sol.includes('230125:810:ce')&&sol.includes('110107:15:base'),'Solicitud: guarda 540 m (6 rollos), 2800 m (56 rollos), 810 m (27 rollos), 15 kg');
+ check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

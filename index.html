@@ -178,7 +178,7 @@ body.puesto nav.tabs,body.puesto #status{display:none!important}
 .puBtn .dotR{position:absolute;top:10px;right:12px;min-width:22px;height:22px;border-radius:11px;background:var(--bad);color:#fff;font:700 12px var(--font);display:flex;align-items:center;justify-content:center;padding:0 6px}
 .puBtn[disabled]{opacity:.5;cursor:default}
 .stk{font-size:12px;font-weight:600;padding:1px 7px;border-radius:9px;white-space:nowrap}
-body.prodv nav.tabs button:not([data-v="mp"]):not([data-v="pt"]),body.prodv #status{display:none!important}
+body.prodv nav.tabs button:not(.pvOk),body.prodv:not(.supv) #status{display:none!important}
 body.prodv .supOnly{display:none!important}
 .mpRight{display:flex;flex-direction:column;gap:16px;min-width:0}
 .solAdd{display:grid;grid-template-columns:minmax(0,1fr) 76px auto;gap:6px}
@@ -422,7 +422,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
 
  <div class="mpRight">
-  <div class="card">
+  <div class="card" id="solCard">
     <div class="eyebrow">Entrega y recepción de MP</div>
     <h2 style="margin:0">Solicitud de materiales</h2>
     <p class="small" style="margin:0" id="solTxt">Agrega los códigos y cantidades que necesitas y toca <b>Generar solicitud</b>.</p>
@@ -2770,6 +2770,258 @@ end $$;
 
 revoke all on function public.cb_catalogo_stock(text) from public;
 grant execute on function public.cb_catalogo_stock(text) to anon, authenticated;
+-- =====================================================================
+--  Actualización 17 · Supervisores con nombre y permisos por módulo
+--  Cada supervisor entra con su propio link (una sola vez, queda amarrado a su equipo) y
+--  solo puede ver / hacer lo que el administrador le marque:
+--    mp_ver        ver el panel de Entrega de MP y su detalle
+--    mp_solicitar  crear solicitudes de MP
+--    pt_ver        ver la cuadratura de Recepción de PT (y exportarla)
+--    dev_ver       ver las devoluciones de Producción
+--    dev_crear     crear devoluciones de Producción
+--  Nunca puede: eliminar, corregir, cerrar, bloquear/liberar, ni entrar a Inventario o Permisos
+--  (esas funciones siguen pidiendo la clave del administrador).
+--  La clave del administrador y el acceso antiguo de producción siguen funcionando igual.
+-- =====================================================================
+
+create table if not exists public.cb_sup (
+  id          text primary key,
+  nombre      text not null,
+  permisos    text[] not null default '{}',
+  activo      boolean not null default true,
+  hash        text,
+  sesion_hash text,
+  creado      timestamptz not null default now(),
+  usado       timestamptz,
+  equipo      text,
+  visto       timestamptz
+);
+alter table public.cb_sup enable row level security;
+revoke all on public.cb_sup from public, anon, authenticated;
+
+-- Sesión de supervisor: "s_<id>.<secreto>". Devuelve la fila, o una fila vacía si no es válida.
+create or replace function public.cb_sup_de(p_clave text) returns public.cb_sup
+language plpgsql security definer set search_path = public, extensions as $$
+declare s cb_sup; v_id text := split_part(coalesce(p_clave,''), '.', 1); v_sec text := split_part(coalesce(p_clave,''), '.', 2);
+begin
+  if v_id !~ '^s_[0-9a-f]{6,20}$' or length(v_sec) < 16 then return null; end if;
+  select * into s from cb_sup where id = v_id;
+  if not found or s.sesion_hash is null or s.sesion_hash <> extensions.crypt(v_sec, s.sesion_hash) then return null; end if;
+  return s;
+end $$;
+
+-- ¿Quién llama y puede hacer esto?  Devuelve 'admin', 'prod' (acceso antiguo) o 'sup'; si no, error.
+--   p_perm = '*'  → cualquier supervisor activo (por ejemplo, para leer la lista de productos).
+create or replace function public.cb_puede(p_clave text, p_perm text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare s cb_sup; r text;
+begin
+  if coalesce(p_clave,'') like 's\_%.%' then
+    s := cb_sup_de(p_clave);
+    if s.id is null then perform pg_sleep(0.5); raise exception 'acceso_produccion'; end if;
+    if not s.activo then raise exception 'usuario_inactivo'; end if;
+    if p_perm <> '*' and not (p_perm = any(s.permisos)) then raise exception 'sin_permiso'; end if;
+    update cb_sup set visto = now() where id = s.id;
+    return 'sup';
+  end if;
+  r := cb_rol(p_clave);                                  -- admin o acceso antiguo de producción (o error)
+  if r = 'prod' and p_perm not in ('*','mp_ver','mp_solicitar','pt_ver') then raise exception 'sin_permiso'; end if;
+  return r;
+end $$;
+
+revoke execute on function public.cb_sup_de(text), public.cb_puede(text, text) from public, anon, authenticated;
+
+-- ---------- Administrador: crear, editar, dar link, eliminar ----------
+create or replace function public.cb_sup_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  return coalesce((select jsonb_agg(jsonb_build_object('id', id, 'nombre', nombre, 'permisos', to_jsonb(permisos), 'activo', activo,
+      'creado', creado, 'usado', usado, 'equipo', equipo, 'visto', visto, 'link', hash is not null) order by creado) from cb_sup), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_sup_guardar(p_clave text, p_id text, p_nombre text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[];
+begin
+  perform cb_check(p_clave);
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('mp_ver','mp_solicitar','pt_ver','dev_ver','dev_crear')) then raise exception 'datos_invalidos'; end if;
+  -- para crear hay que poder ver el módulo
+  if 'mp_solicitar' = any(v_perm) and not ('mp_ver' = any(v_perm)) then v_perm := v_perm || 'mp_ver'::text; end if;
+  if 'dev_crear' = any(v_perm) and not ('dev_ver' = any(v_perm)) then v_perm := v_perm || 'dev_ver'::text; end if;
+  if v_id is null then
+    if (select count(*) from cb_sup) >= 50 then raise exception 'datos_invalidos'; end if;
+    v_id := 's_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_sup(id, nombre, permisos, activo) values (v_id, left(trim(p_nombre), 80), v_perm, coalesce(p_activo, true));
+  else
+    update cb_sup set nombre = left(trim(p_nombre), 80), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
+
+-- Link nuevo: el anterior deja de servir y el equipo vinculado queda desconectado ("liberar").
+create or replace function public.cb_sup_link(p_clave text, p_id text, p_token text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  if length(coalesce(p_token,'')) < 16 then raise exception 'clave_corta'; end if;
+  update cb_sup set hash = extensions.crypt(p_token, extensions.gen_salt('bf')), usado = null, sesion_hash = null, equipo = null, visto = null where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+create or replace function public.cb_sup_eliminar(p_clave text, p_id text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_check(p_clave);
+  delete from cb_sup where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+-- ---------- Supervisor: abrir su link (una sola vez) y consultar sus permisos ----------
+create or replace function public.cb_sup_vincular(p_id text, p_token text, p_equipo text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s cb_sup; v_sec text := encode(extensions.gen_random_bytes(24), 'hex');
+begin
+  select * into s from cb_sup where id = p_id for update;
+  if not found or s.hash is null or s.hash <> extensions.crypt(coalesce(p_token,''), s.hash) then perform pg_sleep(0.5); raise exception 'acceso_produccion'; end if;
+  if not s.activo then raise exception 'usuario_inactivo'; end if;
+  if s.usado is not null then raise exception 'prod_usado'; end if;
+  update cb_sup set usado = now(), visto = now(), equipo = left(p_equipo, 120), sesion_hash = extensions.crypt(v_sec, extensions.gen_salt('bf')) where id = p_id;
+  return jsonb_build_object('ses', s.id || '.' || v_sec, 'nombre', s.nombre, 'permisos', to_jsonb(s.permisos));
+end $$;
+
+create or replace function public.cb_sup_yo(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s cb_sup;
+begin
+  perform cb_puede(p_clave, '*');
+  s := cb_sup_de(p_clave);
+  if s.id is null then return jsonb_build_object('rol', cb_rol(p_clave)); end if;
+  return jsonb_build_object('rol', 'sup', 'id', s.id, 'nombre', s.nombre, 'permisos', to_jsonb(s.permisos));
+end $$;
+
+-- ---------- Funciones del panel que ahora aceptan supervisores (según permiso) ----------
+create or replace function public.cb_catalogo_ver(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, '*');
+begin
+  return (select jsonb_build_object('items', items, 'actualizado', actualizado, 'origen', origen) from cb_catalogo where id = 1);
+end $$;
+
+create or replace function public.cb_mov_listar(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'mp_ver');
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'finalizado', m.finalizado, 'meta', m.meta, 'token', case when r = 'admin' then m.link_token end,
+      'lados', coalesce((select jsonb_object_agg(l.rol, jsonb_build_object(
+          'persona', l.persona, 'abierto', l.abierto, 'visto', l.visto, 'terminado', l.terminado,
+          'ultimo_envio', l.ultimo_envio, 'n_lecturas', l.n_lecturas, 'bloqueado', l.device = '__bloqueado__')) from cb_mov_lado l where l.mov = m.id), '{}'::jsonb)
+    ) order by m.creado desc)
+    from cb_mov m where m.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_mov_lecturas(p_clave text, p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'mp_ver');
+begin
+  return coalesce((select jsonb_agg(data || jsonb_build_object('rol', rol) order by data->>'t') from cb_mov_lect where mov = p_id), '[]'::jsonb);
+end $$;
+
+-- Cerrar una entrega: el administrador (y el acceso antiguo) cuando quiera; un supervisor NO.
+-- Excepción: el cierre automático cuando los dos lados ya terminaron, que no es una decisión.
+create or replace function public.cb_mov_finalizar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'mp_ver');
+begin
+  if r = 'sup' and (select count(*) from cb_mov_lado where mov = p_id and rol in ('E','R') and terminado is not null) < 2 then
+    raise exception 'sin_permiso';
+  end if;
+  update cb_mov set finalizado = coalesce(finalizado, now()) where id = p_id;
+end $$;
+
+create or replace function public.cb_mov_crear(p_clave text, p_nombre text, p_vence timestamptz, p_items jsonb, p_meta jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v_token text := encode(extensions.gen_random_bytes(12), 'hex'); v_id uuid; v_items jsonb := p_items; r text := cb_puede(p_clave, 'mp_solicitar'); v_nom text;
+begin
+  if v_items is null or jsonb_typeof(v_items) <> 'array' or jsonb_array_length(v_items) = 0 then
+    select items into v_items from cb_catalogo where id = 1;
+  end if;
+  if v_items is null or jsonb_array_length(v_items) = 0 then raise exception 'sin_productos'; end if;
+  if r in ('prod','sup') then
+    -- Producción solo envía la SOLICITUD: bodega (administrador) la activa.
+    if coalesce(jsonb_typeof(p_meta -> 'sol'), '') <> 'array' or jsonb_array_length(p_meta -> 'sol') = 0 then raise exception 'sin_productos'; end if;
+    if r = 'sup' then v_nom := (cb_sup_de(p_clave)).nombre; end if;
+    insert into cb_mov(nombre, vence, token_hash, link_token, items, meta)
+    values (left(p_nombre, 120), null, extensions.crypt(encode(extensions.gen_random_bytes(16), 'hex'), extensions.gen_salt('bf')), null, v_items,
+            coalesce(p_meta, '{}'::jsonb) || jsonb_build_object('creado_por', r, 'estado', 'solicitada')
+              || case when v_nom is not null then jsonb_build_object('creado_nombre', v_nom) else '{}'::jsonb end)
+    returning id into v_id;
+    return jsonb_build_object('id', v_id);
+  end if;
+  insert into cb_mov(nombre, vence, token_hash, link_token, items, meta)
+  values (left(p_nombre, 120), p_vence, extensions.crypt(v_token, extensions.gen_salt('bf')), v_token, v_items,
+          coalesce(p_meta, '{}'::jsonb) || jsonb_build_object('creado_por', r, 'estado', 'activa'))
+  returning id into v_id;
+  return jsonb_build_object('id', v_id, 'token', v_token);
+end $$;
+
+create or replace function public.cb_pt_listar(p_clave text, p_desde timestamptz) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'pt_ver');
+begin
+  return jsonb_build_object(
+    'pallets', coalesce((select jsonb_agg(data || jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'pallet', pallet, 'rt', t) order by t) from cb_pt where t >= p_desde), '[]'::jsonb),
+    'cierres', coalesce((select jsonb_agg(jsonb_build_object('puesto', case lado when 'E' then 'produccion' when 'D' then 'retail' else 'bodega' end,
+        'usuario', puesto, 'persona', persona, 't', t) order by t) from cb_pt_cierre where t >= p_desde - interval '1 day'), '[]'::jsonb),
+    'puestos', jsonb_build_object(
+        'produccion', (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_entregar' = any(permisos)),
+        'bodega',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_recibir' = any(permisos)),
+        'retail',     (select jsonb_build_object('visto', max(visto), 'usado', max(usado), 'persona', string_agg(distinct coalesce(persona, nombre), ', ')) from cb_puesto where activo and 'pt_retirar' = any(permisos))),
+    'usuarios', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'nombre', nombre, 'persona', persona, 'visto', visto, 'usado', usado,
+        'lado', case when 'pt_entregar' = any(permisos) then 'produccion' when 'pt_retirar' = any(permisos) then 'retail' else 'bodega' end) order by visto desc nulls last)
+      from cb_puesto where activo and permisos && array['pt_entregar','pt_recibir','pt_retirar']::text[]), '[]'::jsonb));
+end $$;
+
+-- Devoluciones: un supervisor solo ve las de Producción.
+create or replace function public.cb_dev_listar(p_clave text, p_desde timestamptz default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'dev_ver');
+begin
+  return coalesce((select jsonb_agg(to_jsonb(d) order by d.creado desc) from cb_dev d
+    where d.creado > coalesce(p_desde, now() - interval '120 days')
+      and (r = 'admin' or d.area ilike 'producci_n%')), '[]'::jsonb);
+end $$;
+
+-- Crear devolución desde el panel: la de un supervisor siempre queda en Producción y a su nombre.
+create or replace function public.cb_dev_crear_panel(p_clave text, p_area text, p_doc jsonb, p_lect jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_id uuid; v_fecha date; r text := cb_puede(p_clave, 'dev_crear'); v_area text := p_area; v_pers text := p_doc->>'persona';
+begin
+  if r = 'sup' then v_area := 'Producción'; v_pers := (cb_sup_de(p_clave)).nombre; end if;
+  if p_lect is null or jsonb_typeof(p_lect) <> 'array' or jsonb_array_length(p_lect) = 0 then raise exception 'sin_productos'; end if;
+  if jsonb_array_length(p_lect) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_lect);
+  if coalesce(trim(p_doc->>'guia'),'') = '' and coalesce(trim(p_doc->>'factura'),'') = '' then raise exception 'falta_documento'; end if;
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if v_fecha is null then raise exception 'fecha_invalida'; end if;
+  insert into cb_dev(origen, area, persona, guia, factura, fecha, nota, lect, enviado)
+  values ('panel', left(coalesce(nullif(trim(v_area),''), 'Panel'), 60), left(v_pers, 80), left(trim(p_doc->>'guia'), 40), left(trim(p_doc->>'factura'), 40),
+          v_fecha, left(p_doc->>'nota', 300), p_lect, now())
+  returning id into v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+
+revoke all on function public.cb_sup_listar(text), public.cb_sup_guardar(text, text, text, jsonb, boolean), public.cb_sup_link(text, text, text),
+  public.cb_sup_eliminar(text, text), public.cb_sup_vincular(text, text, text), public.cb_sup_yo(text) from public;
+grant execute on function public.cb_sup_listar(text), public.cb_sup_guardar(text, text, text, jsonb, boolean), public.cb_sup_link(text, text, text),
+  public.cb_sup_eliminar(text, text), public.cb_sup_vincular(text, text, text), public.cb_sup_yo(text) to anon, authenticated;
 </script>
   </div>
 
@@ -2794,6 +3046,13 @@ grant execute on function public.cb_catalogo_stock(text) to anon, authenticated;
     <p class="small">La llave queda guardada solo en este computador. No la compartas ni la mandes por WhatsApp.</p>
   </div>
 
+  <details class="card mpFold" id="supAdm" open>
+    <summary><b>Supervisores de área</b> <span class="small muted" id="supSum"></span></summary>
+    <p class="small" style="margin:8px 0 0">Para jefes o supervisores que usan el panel <b>en su PC</b> con acceso limitado. Cada uno entra con su propio link (se abre una sola vez y queda amarrado a ese equipo) y ve <b>solo los módulos que marques</b>. Nunca pueden eliminar, corregir, cerrar ni entrar a Inventario o Permisos: eso sigue siendo solo tuyo. Lo que hacen queda a su nombre.</p>
+    <div id="supEd"></div>
+    <div id="supBox"></div>
+    <div id="supConfirm"></div>
+  </details>
   <details class="card mpFold" id="mpAcc" open>
     <summary><b>Acceso para producción</b> <span class="small muted" id="mpAccSum"></span></summary>
     <p class="small" style="margin:8px 0 0">Un link para que el jefe de producción vea y use <b>solo esta pestaña</b> desde su computador, en tiempo real. No ve conteos, stock ni costos.</p>
@@ -2941,12 +3200,12 @@ function updStatus(){
 
 /* ================= pestañas ================= */
 function show(v){
-  if(typeof prodMode==="function"&&prodMode()&&v!=="mp"&&v!=="pt")v="mp";   // el jefe de producción solo ve MP y PT
+  if(typeof prodMode==="function"&&prodMode()){const V=pvViews();if(!V.includes(v))v=V[0]||"mp"}   // producción / supervisor de área: solo sus módulos
   if(v==="pt"&&typeof ptEnter==="function")setTimeout(ptEnter,0);
   if(v!=="ptcel"&&typeof ptStopCam==="function")ptStopCam();
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   menuOpen(false);
-  if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm();if(typeof lbEnter==="function")lbEnter()}
+  if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm();if(typeof renderSup==="function")renderSup();if(typeof lbEnter==="function")lbEnter()}
   if(v==="devol"&&typeof devEnter==="function")devEnter();
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
@@ -4137,14 +4396,14 @@ function linkPegado(v){
   const base=location.pathname.replace(/[^/]*$/,"");
   if(u.origin!==location.origin||!u.pathname.startsWith(base))return null;
   if(/^#panel$/i.test(u.hash))return u.href;
-  if(!["nube","c","mov","puesto","prod"].some(k=>u.searchParams.has(k)))return null;
+  if(!["nube","c","mov","puesto","prod","sup"].some(k=>u.searchParams.has(k)))return null;
   return u.href;
 }
 function lockFromBanner(title){const t=($("#conteoBanner").textContent||"").trim();lockScreen(esc(t),title||"No se puede abrir este link","⚠️")}
 function applyMode(){
   if(typeof puestoMode==="function"&&puestoMode()){puestoApply();return}
   document.body.classList.remove("puesto");
-  if(typeof prodApply==="function"&&prodApply()){if($("#v-mp").hidden&&$("#v-pt").hidden)show("mp");return}
+  if(typeof prodApply==="function"&&prodApply()){const V=pvViews();if(V.length&&!V.some(v=>!$("#v-"+v).hidden))show(V[0]);return}
   document.body.classList.remove("prodv");
   if(typeof movOn==="function"&&movOn()){document.body.classList.add("mov");document.body.classList.remove("op");if($("#v-opmov").hidden)show("opmov");return}
   document.body.classList.remove("mov");
@@ -4187,12 +4446,16 @@ setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>
 var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
     movLect={}, movSeen={}, mpFilter="todos", movHide=store.get("inv_movhide",[]);
 const ROL={E:"Entrega",R:"Recepción"};
-const movMsg=e=>({bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (6 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
+const movMsg=e=>({bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (6 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
 
 /* ---------- ¿Quién usa esta pestaña? supervisor (clave de Supabase) o jefe de producción (link propio) ---------- */
 // PRD = {url,key,tok,ses} en el PC del jefe de producción: tok viene en su link, ses es la llave que recibe ESE equipo al vincularse.
 var PRD=store.get("inv_prod",null), prodForce=false, movCat=null, prodReady=Promise.resolve();
 const prodMode=()=>!!(PRD&&PRD.url&&PRD.key&&(PRD.ses||PRD.tok))&&(prodForce||!nubeOn());
+/* Supervisor de área: mismo panel limitado, pero con nombre y permisos propios (PRD.sup). El servidor valida cada acción. */
+const supOn=()=>!!(prodMode()&&PRD.sup);
+const pvCan=p=>!prodMode()?true:PRD.sup?(PRD.sup.permisos||[]).includes(p):["mp_ver","mp_solicitar","mp_finalizar","pt_ver"].includes(p);
+const pvViews=()=>[["mp","mp_ver"],["pt","pt_ver"],["devol","dev_ver"]].filter(x=>pvCan(x[1])).map(x=>x[0]);
 const movOk=()=>prodMode()||nubeOn();
 const movC=()=>prodMode()?{url:PRD.url,key:PRD.key,clave:PRD.ses||""}:{url:SB.url,key:SB.key,clave:SB.admin};
 const mrpc=async(fn,args)=>{await prodReady;const c=movC();return rpc(c,fn,Object.assign({p_clave:c.clave},args||{}))};
@@ -4347,6 +4610,8 @@ function renderSol(){
   $("#solInfo").textContent=mpSol.length?`${fmt(mpSol.length)} productos en la solicitud`:"Sin productos todavía";
   $("#solClear").hidden=!mpSol.length;
   const pm=prodMode();
+  $("#solCard").hidden=!pvCan("mp_solicitar");
+  if(supOn()){$("#solPor").value=(PRD.sup.nombre||"").toUpperCase();$("#solPor").disabled=true}
   $("#btnSolGen").textContent=(pm?"Enviar solicitud a bodega":"Generar solicitud")+(mpSol.length?` (${fmt(mpSol.length)} productos)`:"");
   $("#solTxt").innerHTML=pm?"Agrega los códigos y cantidades que necesitas y toca <b>Enviar solicitud a bodega</b>. Bodega la recibe al instante y prepara la entrega.":"Agrega códigos y cantidades y toca <b>Generar solicitud</b>: le llega directo a la app de bodega (entrega) y de producción (recibe). Las solicitudes de producción llegan como aviso arriba.";
   $$("#solList [data-sr]").forEach(b=>b.onclick=()=>{mpSol.splice(+b.dataset.sr,1);solSave();renderSol()});
@@ -4413,6 +4678,58 @@ async function accSet(){
   catch(e){toast(movMsg(e))}
 }
 
+/* ---------- 6 · Permisos: supervisores de área (administrador) ---------- */
+var SUPS=null, supEdit=null, supBusy=false;
+const SUP_PERM=[["mp_ver","Entrega MP","Ver el panel y el detalle"],["mp_solicitar","Entrega MP","Crear solicitudes de MP"],["pt_ver","Recepción PT","Ver cuadraturas y bajar Excel"],["dev_ver","Devoluciones (Producción)","Ver devoluciones y su avance"],["dev_crear","Devoluciones (Producción)","Crear devoluciones de MP"]];
+const SUP_TXT={mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",pt_ver:"PT · ver",dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear"};
+const supLink=id=>{const t=(SB.sup||{})[id];return t?appUrl()+"?sup="+encodeURIComponent(id)+"&t="+encodeURIComponent(t)+sbLinkParams():""};
+const supMsg=e=>/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 17 (supervisores).":({falta_nombre:"Escribe el nombre.",no_existe:"Ese supervisor ya no existe."}[e.message]||movMsg(e));
+async function supCargar(){const r=await rpc(SB,"cb_sup_listar",{p_clave:SB.admin});SUPS=Array.isArray(r)?r:[];return SUPS}
+function renderSup(){
+  const card=$("#supAdm");if(!card)return;card.hidden=prodMode()||!nubeOn();if(card.hidden)return;
+  SB.sup=SB.sup||{};supPintar();
+  if(!supBusy){supBusy=true;supCargar().then(supPintar).catch(e=>{$("#supBox").innerHTML=`<div class="notice small">${esc(supMsg(e))}</div>`;$("#supEd").innerHTML=""}).finally(()=>supBusy=false)}
+}
+function supPintar(){
+  const box=$("#supBox");if(!box)return;const L=SUPS||[];
+  $("#supSum").textContent=L.length?`· ${fmt(L.length)} · ${fmt(L.filter(u=>u.usado&&u.activo).length)} vinculado${L.filter(u=>u.usado&&u.activo).length===1?"":"s"}`:"";
+  const e=supEdit, grupos=[...new Set(SUP_PERM.map(p=>p[1]))];
+  $("#supEd").innerHTML=e?`<div class="uRow"><b>${e.id?"Editar supervisor":"Nuevo supervisor"}</b>
+      <label class="f">Nombre<input id="supNom" maxlength="80" value="${esc(e.nombre||"")}" placeholder="Ej: Supervisor Prod. 1" autocomplete="off"></label>
+      ${grupos.map(g=>`<div class="small"><b>${esc(g)}</b><div class="row" style="gap:14px;flex-wrap:wrap">${SUP_PERM.filter(p=>p[1]===g).map(p=>`<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-sp="${p[0]}"${(e.permisos||[]).includes(p[0])?" checked":""}> ${esc(p[2])}</label>`).join("")}</div></div>`).join("")}
+      <div class="small muted">Inventario y Permisos: sin acceso (solo administrador).</div>
+      <div class="row" style="gap:6px"><button class="btn primary sm" id="supSave">Guardar</button><button class="btn sm" id="supCancel">Cancelar</button></div></div>`
+    :`<div class="row"><button class="btn primary sm" id="supNew">＋ Nuevo supervisor</button></div>`;
+  if(e){$("#supCancel").onclick=()=>{supEdit=null;supPintar()};
+    $$("#supEd [data-sp]").forEach(c=>c.onchange=()=>{const k=c.dataset.sp,par={mp_solicitar:"mp_ver",dev_crear:"dev_ver"}[k],hijo={mp_ver:"mp_solicitar",dev_ver:"dev_crear"}[k];   // crear exige ver
+      if(c.checked&&par)$(`#supEd [data-sp="${par}"]`).checked=true;if(!c.checked&&hijo)$(`#supEd [data-sp="${hijo}"]`).checked=false});
+    $("#supSave").onclick=async()=>{const nom=norm($("#supNom").value),perm=$$("#supEd [data-sp]").filter(c=>c.checked).map(c=>c.dataset.sp);
+      if(!nom){toast("Escribe el nombre");return $("#supNom").focus()}
+      try{const nuevo=!e.id,id=await rpc(SB,"cb_sup_guardar",{p_clave:SB.admin,p_id:e.id||"",p_nombre:nom,p_permisos:perm,p_activo:e.activo!==false});
+        if(nuevo)await supNuevoLink(id,true);supEdit=null;await supCargar();supPintar();toast(nuevo?"Supervisor creado: mándale su link":"Cambios guardados")}
+      catch(er){toast(supMsg(er))}}}
+  else $("#supNew").onclick=()=>{supEdit={id:"",nombre:"",permisos:["mp_ver","mp_solicitar","pt_ver","dev_ver","dev_crear"],activo:true};supPintar();$("#supNom").focus()};
+  box.innerHTML=L.length?L.map(u=>{const link=supLink(u.id),pend=link&&!u.usado&&u.activo;
+    const est=!u.activo?'<span class="pill p-bad">Desactivado</span>':u.usado?`<span class="pill ${enLinea(u.visto)?"p-ok":"p-info"}">${enLinea(u.visto)?"En línea":"Vinculado"}</span> <span class="small muted">${esc(u.equipo||"")}${u.visto?" · "+hace(u.visto):""}</span>`:`<span class="pill p-warn">${u.link?"Link sin abrir":"Sin link"}</span>`;
+    return `<div class="uRow${u.activo?"":" off"}"><div class="row" style="gap:8px"><b>${esc(u.nombre)}</b><span class="sep"></span>${est}</div>
+      <div class="uPerm">${(u.permisos||[]).length?SUP_PERM.filter(p=>u.permisos.includes(p[0])).map(p=>`<span>${esc(SUP_TXT[p[0]])}</span>`).join(""):'<span class="muted">Sin módulos</span>'}</div>
+      ${pend?`<input readonly value="${esc(link)}" id="sl-${esc(u.id)}" style="font:12px var(--mono);padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%">`:""}
+      <div class="row" style="gap:6px">${pend?`<a class="btn sm primary" href="${esc(waLink(`${u.nombre} · Control de Operaciones. Ábrelo una sola vez en tu computador:\n`+link))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-scp="${esc(u.id)}">Copiar link</button>`:""}
+        <button class="btn sm" data-sed="${esc(u.id)}">Editar</button><button class="btn sm" data-sln="${esc(u.id)}">${u.usado||u.link?"Nuevo link…":"Generar link"}</button><button class="btn sm" data-sac="${esc(u.id)}">${u.activo?"Desactivar":"Activar"}</button>
+        <span class="sep"></span><button class="btn sm danger" data-sdl="${esc(u.id)}">Eliminar…</button></div></div>`}).join(""):'<p class="muted small" style="margin:8px 0 0">Todavía no hay supervisores de área.</p>';
+  const by=id=>L.find(u=>u.id===id);
+  $$("#supBox [data-scp]").forEach(b=>b.onclick=()=>{const el=$("#sl-"+b.dataset.scp);copyText(el?el.value:supLink(b.dataset.scp),el)});
+  $$("#supBox [data-sed]").forEach(b=>b.onclick=()=>{const u=by(b.dataset.sed);supEdit={id:u.id,nombre:u.nombre,permisos:[...(u.permisos||[])],activo:u.activo};supPintar();$("#supAdm").scrollIntoView({behavior:"smooth",block:"start"})});
+  $$("#supBox [data-sln]").forEach(b=>b.onclick=()=>{const u=by(b.dataset.sln),go=async()=>{try{await supNuevoLink(u.id,false);await supCargar();supPintar();toast("Link nuevo listo")}catch(er){toast(supMsg(er))}};
+    if(u.usado)confirmBox(`Se crea un link nuevo para ${esc(u.nombre)}: el equipo que tiene vinculado queda desconectado.`,go,"#supConfirm");else go()});
+  $$("#supBox [data-sac]").forEach(b=>b.onclick=()=>{const u=by(b.dataset.sac),go=async()=>{try{await rpc(SB,"cb_sup_guardar",{p_clave:SB.admin,p_id:u.id,p_nombre:u.nombre,p_permisos:u.permisos||[],p_activo:!u.activo});await supCargar();supPintar();toast(u.activo?"Acceso desactivado":"Acceso activado")}catch(er){toast(supMsg(er))}};
+    if(u.activo)confirmBox(`Desactivar a ${esc(u.nombre)}: su panel se bloquea de inmediato. Puedes volver a activarlo.`,go,"#supConfirm");else go()});
+  $$("#supBox [data-sdl]").forEach(b=>b.onclick=()=>{const u=by(b.dataset.sdl);confirmBox(`Eliminar a ${esc(u.nombre)}. Su acceso deja de funcionar. Lo que ya registró no se borra.`,async()=>{
+    try{await rpc(SB,"cb_sup_eliminar",{p_clave:SB.admin,p_id:u.id});delete SB.sup[u.id];store.set("inv_sb",SB);await supCargar();supPintar();toast("Supervisor eliminado")}catch(er){toast(supMsg(er))}},"#supConfirm")});
+}
+setInterval(()=>{if(nubeOn()&&!prodMode()&&!document.hidden&&!$("#v-permisos").hidden&&!supEdit&&!$("#supConfirm").innerHTML&&SUPS)supCargar().then(supPintar).catch(()=>{})},20000);
+async function supNuevoLink(id){const t=rndKey(24);await rpc(SB,"cb_sup_link",{p_clave:SB.admin,p_id:id,p_token:t});SB.sup=SB.sup||{};SB.sup[id]=t;store.set("inv_sb",SB)}
+
 /* ---------- Abrir el panel de producción desde su link ---------- */
 function checkProdLink(){
   let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
@@ -4437,7 +4754,10 @@ function equipoDesc(){const u=navigator.userAgent;const os=/Windows/.test(u)?"Wi
 function prodApply(){
   if(!prodMode())return false;
   document.body.classList.add("prodv");document.body.classList.remove("op","locked","mov");$("#lockBox").innerHTML="";
-  $("#status").textContent="";
+  const V=pvViews();$$("nav.tabs button").forEach(b=>b.classList.toggle("pvOk",V.includes(b.dataset.v)));
+  document.body.classList.toggle("supv",supOn());
+  $("#status").textContent=supOn()?"👤 "+(PRD.sup.nombre||"Supervisor"):"";
+  if(supOn()&&!V.length)lockScreen("Tu acceso todavía no tiene módulos habilitados. Habla con el administrador.","Sin módulos habilitados","🔒",true);
   return true;
 }
 
@@ -4463,7 +4783,7 @@ function movEstado(x){
   return '<span class="pill p-ok">En curso</span>';
 }
 async function refreshMov(force){
-  if(!movOk()||movBusy)return;movBusy=true;
+  if(!movOk()||movBusy||!pvCan("mp_ver"))return;movBusy=true;
   try{
     const arr=await mrpc("cb_mov_listar");
     movLive=new Map((arr||[]).map(x=>[x.id,x]));movAt=new Date();
@@ -4472,7 +4792,7 @@ async function refreshMov(force){
     if(movSel){const x=movLive.get(movSel),L=(x&&x.lados)||{},sig=["E","R"].map(r=>L[r]?(L[r].ultimo_envio||"")+"|"+L[r].n_lecturas:"-").join("/");
       if(force||movSeen[movSel]!==sig||!movLect[movSel]){try{movLect[movSel]=await mrpc("cb_mov_lecturas",{p_id:movSel})||[];movSeen[movSel]=sig}catch(e){}}}
     renderMp();avisoSolicitudes();catSync(false);
-  }catch(e){if(force)toast(movMsg(e));if(prodMode()&&/acceso_produccion/.test(e.message))lockScreen(movMsg(e),"Acceso de producción no válido","🔒",true)}
+  }catch(e){if(force)toast(movMsg(e));if(prodMode()&&/acceso_produccion|usuario_inactivo/.test(e.message))lockScreen(movMsg(e),/inactivo/.test(e.message)?"Acceso desactivado":"Acceso de producción no válido","🔒",true)}
   finally{movBusy=false}
 }
 setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-mp").hidden)refreshMov(false)},15000);
@@ -4489,7 +4809,7 @@ function renderMp(){
       const side=r=>{const [d,t]=ladoEstado(L[r],x);return `<div class="ms"><span class="dot ${d}"></span><span>${r==="E"?"Entrega":"Recibe"}: <b style="color:var(--ink)">${t}</b>${L[r]&&L[r].persona?" · "+esc(L[r].persona):""}${L[r]?" · "+fmt(L[r].n_lecturas):""}</span></div>`};
       return `<div class="mpItem${m.id===movSel?" sel":""}" data-mv="${i}"><div class="mh"><b>${esc(m.nombre)}${m.ref?`<span class="small muted" style="font-weight:500"> · ${esc(m.ref)}</span>`:""}</b>${movEstado(x)}</div>
       <div class="ms">${m.por?"Solicita "+esc(m.por)+" · ":""}${m.sol?fmt(m.sol.length)+" productos · ":""}creada ${fmtDT(m.creado)}</div>${esSolicitada(x)?`<div class="ms" style="color:var(--warn)">${prodMode()?"Esperando que bodega genere el link":"Falta generar el link para bodega"}</div>`:x?side("E")+side("R"):""}
-      <div class="acts">${open?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${prodMode()?"":`<button class="btn sm danger" data-mx="${i}" title="La borra de Supabase con sus lecturas">Eliminar…</button>`}</div></div>`}).join("")
+      <div class="acts">${open&&pvCan("mp_finalizar")?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${prodMode()?"":`<button class="btn sm danger" data-mx="${i}" title="La borra de Supabase con sus lecturas">Eliminar…</button>`}</div></div>`}).join("")
     :`<div class="muted small">Todavía no hay entregas.</div>`;
   $$("#mpTbl .acts").forEach(a=>a.onclick=e=>e.stopPropagation());
   $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=L0[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();if(innerWidth<=980)setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
@@ -4597,6 +4917,36 @@ $("#btnMpExp").onclick=()=>{
 
 
 checkProdLink();   // si se abrió con el link de producción, este equipo queda como panel de producción
+/* ---------- Supervisor de área: abrir su link (una sola vez; queda amarrado a este equipo) ---------- */
+function checkSupLink(){
+  let q;try{q=new URLSearchParams(location.search)}catch(e){return false}
+  const id=q.get("sup"),tok=q.get("t");if(!id)return false;
+  const url=q.get("p")?"https://"+q.get("p")+".supabase.co":sbUrl(q.get("u")||""), pk=q.get("k")||"";
+  try{history.replaceState(null,"",location.pathname+"#mp")}catch(e){}
+  if(!/^s_[0-9a-f]{6,20}$/.test(id)||!tok||!url||!pk){lockScreen("El link está incompleto. Pide uno nuevo al administrador.","No se puede abrir este link","⚠️",true);return true}
+  prodForce=true;
+  if(PRD&&PRD.sup&&PRD.tok===id+":"+tok&&PRD.ses)return true;       // este equipo ya está vinculado a este link
+  PRD={url,key:pk,tok:id+":"+tok,ses:"",sup:{id,nombre:"",permisos:[]}};
+  prodReady=(async()=>{
+    try{const r=await rpc({url,key:pk},"cb_sup_vincular",{p_id:id,p_token:tok,p_equipo:equipoDesc()});
+      PRD.ses=r.ses;PRD.sup={id,nombre:r.nombre||"",permisos:r.permisos||[]};store.set("inv_prod",PRD);applyMode();setTimeout(()=>show(pvViews()[0]||"mp"),0)}   // ya con permisos: abre su primer módulo
+    catch(e){PRD=null;store.set("inv_prod",null);prodForce=false;
+      lockScreen(e.message==="prod_usado"?"Este link ya se abrió en otro equipo y quedó amarrado a ese equipo. Si cambiaste de computador, pide un link nuevo al administrador.":movMsg(e),e.message==="prod_usado"?"Link ya usado en otro equipo":"No se puede abrir este link","🔒",true);
+      throw e}
+  })();
+  prodReady.catch(()=>{});
+  return true;
+}
+checkSupLink();
+/* Cada minuto confirma nombre y permisos: si el administrador los cambia o desactiva el acceso, se nota sin recargar. */
+async function supYo(){
+  if(!supOn()||!PRD.ses)return;
+  try{const r=await mrpc("cb_sup_yo");if(!r||r.rol!=="sup")return;
+    const antes=JSON.stringify([PRD.sup.nombre,PRD.sup.permisos]);PRD.sup.nombre=r.nombre||"";PRD.sup.permisos=r.permisos||[];
+    if(JSON.stringify([PRD.sup.nombre,PRD.sup.permisos])!==antes){store.set("inv_prod",PRD);applyMode();const V=pvViews(),cur=V.find(v=>!$("#v-"+v).hidden);show(cur||V[0]||"mp")}}
+  catch(e){if(/acceso_produccion|usuario_inactivo/.test(e.message))lockScreen(movMsg(e),/inactivo/.test(e.message)?"Acceso desactivado":"Acceso no válido","🔒",true)}
+}
+setInterval(()=>{if(!document.hidden)supYo()},60000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)supYo()});setTimeout(supYo,2500);
 /* =================== CELULAR =================== */
 var om=store.get("inv_om",null), omIdx=new Map(), omForce=false, omSyncing=false, omT=null, omHold=false, omCamI=null, omLast={c:"",miss:99};
 const omSave=()=>store.set("inv_om",om);
@@ -5455,17 +5805,17 @@ var devList=[], devSel=store.get("inv_devsel",null), devF=store.get("inv_devf","
 const devSt=d=>d.finalizado?"cerr":d.recibido?"rec":d.rec_inicio?"enrec":d.enviado?"pend":"borr";
 const DEVST={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],norec:["No llegó","p-bad"],nodecl:["No declarado","p-warn"],porrec:["Por recibir","p-info"]};
 function devEnter(){
-  const on=nubeOn();$("#dvNote").hidden=on;if(typeof dpEnter==="function")dpEnter();
+  const on=movOk();$("#dvNote").hidden=on;if(typeof dpEnter==="function")dpEnter();
   if(!on){$("#dvNote").innerHTML='Para ver las devoluciones, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.';$("#dvTbl").innerHTML="";$("#dvDet").hidden=true;$("#dvChips").innerHTML="";return}
   devRender();devRefresh(true);
 }
 async function devRefresh(silent){
-  if(!nubeOn()||devBusy)return;devBusy=true;
-  try{const r=await rpc(SB,"cb_dev_listar",{p_clave:SB.admin});devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;devRender()}
+  if(!movOk()||(prodMode()&&!pvCan("dev_ver"))||devBusy)return;devBusy=true;
+  try{const r=await mrpc("cb_dev_listar");devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;devRender()}
   catch(e){const m=dvMsg(e);if(!silent)toast(m);if(/actualización 07/.test(m)){$("#dvNote").hidden=false;$("#dvNote").textContent=m}}
   finally{devBusy=false}
 }
-setInterval(()=>{if(nubeOn()&&!document.hidden&&!$("#v-devol").hidden)devRefresh(true)},20000);
+setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-devol").hidden)devRefresh(true)},20000);
 function devCuadre(d){
   const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){convFix(l);const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",ce:"",f:1,D:null,R:null};
     r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}r[side]=(r[side]||0)+(+l.qty||0)*(+l.f||1);m.set(k,r)}};
@@ -5499,7 +5849,7 @@ function devDetRender(){
   const ord={falta:0,norec:1,nodecl:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
   $("#dvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Devuelto</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
     (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td><td class="num">${r.D==null?"—":qBC(r.D,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.D==null||r.R==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${DEVST[r.st][1]}">${DEVST[r.st][0]}</span></td></tr>`).join(""):`<tr><td colspan="7" class="muted">Sin productos todavía.</td></tr>`)+"</tbody>";
-  $("#dvCerrar").hidden=!!d.finalizado;$("#dvConfirmS").innerHTML="";
+  $("#dvCerrar").hidden=!!d.finalizado||prodMode();$("#dvDel").hidden=prodMode();$("#dvConfirmS").innerHTML="";
 }
 /* ---------- 5 · Logística inversa: crear una devolución desde el panel del PC ---------- */
 var dpLect=[], dpCat=null, dpIdx=new Map(), dpChk="";
@@ -5507,9 +5857,12 @@ function dpItems(){return movCatalog()||dpCat||[]}
 function dpIndex(){dpIdx=new Map();dpItems().forEach((it,i)=>{if(it.cod)dpIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!dpIdx.has(k))dpIdx.set(k,i)})})}
 const dpFind=c=>{const i=dpIdx.get(key(c));return i==null?null:dpItems()[i]};
 async function dpEnter(){
-  const box=$("#dpCard");if(!box)return;box.hidden=!nubeOn()||prodMode();if(box.hidden)return;
+  const box=$("#dpCard");if(!box)return;box.hidden=!movOk()||(prodMode()&&!pvCan("dev_crear"));if(box.hidden)return;
   if(!$("#dpFecha").value)$("#dpFecha").value=hoyISO();
-  if(!movCatalog()&&!dpCat){try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(r&&r.items)dpCat=r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}catch(e){}}
+  /* Supervisor de área: sus devoluciones son siempre de Producción y a su nombre (el servidor lo fija igual). */
+  {const s=supOn();$("#dpArea").disabled=s;$("#dpPers").disabled=s;if(s){$("#dpArea").value="Producción";$("#dpPers").value=(PRD.sup.nombre||"").toUpperCase()}}
+  if(prodMode()&&!movCat)await catLoad(false).catch(()=>{});
+  if(!prodMode()&&!movCatalog()&&!dpCat){try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(r&&r.items)dpCat=r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}catch(e){}}
   dpIndex();dpRender();
   $("#dpCat").textContent=dpItems().length?`Lista de productos: ${fmt(dpItems().length)} productos${movCatalog()?" (informe del ERP de este PC)":" (desde Supabase)"}.`:"Sin lista de productos: carga el informe del ERP en 1 · Panel.";
 }
@@ -5551,7 +5904,7 @@ async function dpEnviar(){
   if(!dpLect.length){toast("Agrega al menos un producto");return focusSel($("#dpScan"))}
   const area=norm($("#dpArea").value)||"Panel";
   confirmBox(`Enviar a bodega la devolución guía ${esc(doc.guia||"—")} · factura ${esc(doc.factura||"—")} (${esc(area)}) con ${fmt(dpLect.length)} líneas.`,async()=>{
-    try{await rpc(SB,"cb_dev_crear_panel",{p_clave:SB.admin,p_area:area,p_doc:doc,p_lect:dpLect});
+    try{await mrpc("cb_dev_crear_panel",{p_area:area,p_doc:doc,p_lect:dpLect});
       dpLect=[];["#dpGuia","#dpFact","#dpNota"].forEach(s=>$(s).value="");dpRender();toast("✓ Devolución enviada a bodega");devF="pend";await devRefresh(false)}
     catch(e){toast(dvMsg(e))}},"#dpConfirm");
 }

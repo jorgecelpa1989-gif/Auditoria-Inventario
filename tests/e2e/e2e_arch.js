@@ -1,0 +1,27 @@
+const {chromium}=require('playwright');const {execFileSync}=require('child_process');
+const PG=['-h','/var/lib/postgresql/cctest/sock','-p','55432','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'];
+const sql=q=>execFileSync('psql',[...PG,'-c',q],{encoding:'utf8'}).trim();
+function rpc(fn,args){const s=`set role anon; select rpc_test($$${fn}$$, $j$${JSON.stringify(args)}$j$::jsonb)::text;`;
+  try{return {ok:true,body:execFileSync('psql',[...PG,'-c',s],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()||'null'}}catch(e){const m=(e.stderr||'').match(/ERROR:\s+(.*)/);return {ok:false,body:JSON.stringify({message:m?m[1].trim():'error'})}}}
+const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN='clave-supervisor-123';let fail=0;const check=(c,m)=>{console.log((c?'✅ ':'❌ ')+m);if(!c)fail++};
+(async()=>{const b=await chromium.launch();rpc('cb_configurar',{p_clave:ADMIN});
+ const v=new Date(Date.now()+3*3600e3).toISOString(),it=[["110107","","ROLLO","KG","",1]];
+ const a=JSON.parse(rpc('cb_crear',{p_clave:ADMIN,p_nombre:'Conteo activo',p_vence:v,p_items:it,p_meta:null}).body);
+ const f=JSON.parse(rpc('cb_crear',{p_clave:ADMIN,p_nombre:'Conteo cerrado',p_vence:v,p_items:it,p_meta:null}).body);rpc('cb_finalizar',{p_clave:ADMIN,p_id:f.id});
+ const c=await b.newContext({viewport:{width:1366,height:900},deviceScaleFactor:2});await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
+ const p=await c.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto(B+'#panel');
+ await p.evaluate(([u,ad,a,f])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:ad,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));
+   const n=new Date().toISOString();localStorage.setItem('inv_conteos',JSON.stringify([{id:a,nube:true,nombre:'Conteo activo',creado:n,productos:1,codes:['110107'],link:'x'},{id:f,nube:true,nombre:'Conteo cerrado',creado:n,productos:1,codes:['110107'],link:'x'}]));localStorage.setItem('inv_rsel',JSON.stringify(f))},[SBU,ADMIN,a.id,f.id]);
+ await p.goto(B+'#resultado');await p.reload();await p.waitForTimeout(3500);
+ const grp=await p.$$eval('#rSel optgroup',g=>g.map(x=>x.label+':'+[...x.children].map(o=>o.textContent.split(' · ')[0]).join(',')));
+ check(grp.join('|')==='En curso:Conteo activo|Finalizados:Conteo cerrado','Ver resultados de: separa En curso y Finalizados → '+grp.join(' | '));
+ check(/✓ Finalizado/.test(await p.textContent('#rSelInfo'))&&!!(await p.$('#rArch')),'Conteo finalizado: etiqueta "✓ Finalizado" y botón Archivar');
+ await p.screenshot({path:S+'/arch.png',clip:await p.evaluate(()=>{const r=document.querySelector('#rSel').closest('.card').getBoundingClientRect();return {x:r.x,y:r.y+scrollY,width:r.width,height:r.height}})});
+ await p.click('#rArch');await p.waitForTimeout(600);
+ const opts=await p.$$eval('#rSel option',o=>o.map(x=>x.textContent.split(' · ')[0]));check(!opts.includes('Conteo cerrado')&&/Ver archivados \(1\)/.test(await p.textContent('#rSelInfo')),'Archivar: sale de la lista y aparece "Ver archivados (1)"');
+ check(sql(`select count(*) from cb_conteos where id='${f.id}'`)==='1','Archivar no borra nada en Supabase');
+ await p.check('#rVerArch');await p.waitForTimeout(400);check((await p.$$eval('#rSel optgroup',g=>g.map(x=>x.label))).includes('Archivados'),'Ver archivados: vuelve a mostrarlo en el grupo Archivados');
+ check(await p.isVisible('#edCard')&&await p.isVisible('#edForm')&&(await p.$$eval('#edSel option',o=>o.map(x=>x.textContent))).every(t=>/Conteo activo/.test(t)),'Modificar conteo: visible y solo ofrece el conteo en curso');
+ rpc('cb_finalizar',{p_clave:ADMIN,p_id:a.id});await p.reload();await p.waitForTimeout(3500);
+ check(await p.isVisible('#edCard')&&await p.isVisible('#edEmpty')&&await p.isHidden('#edForm'),'Sin conteos en curso: el cuadro sigue visible con "No hay conteos en curso para modificar"');
+ check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

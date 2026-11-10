@@ -1,0 +1,14 @@
+const {chromium,devices}=require('playwright');
+(async()=>{const b=await chromium.launch();const c=await b.newContext({...devices['iPhone 13']});const p=await c.newPage();
+const errs=[];p.on('pageerror',e=>errs.push(e.message));
+await p.goto('http://localhost:8811/index.html#contar');await p.waitForTimeout(1200);
+console.log('locked inicial:',await p.evaluate(()=>document.body.classList.contains('locked')));
+await p.fill('#lockUrl','https://algo.com/#panel');await p.click('#lockGo');await p.waitForTimeout(300);
+console.log('err otro sitio:',await p.textContent('#lockErr'));
+await p.fill('#lockUrl','Mira: http://localhost:8811/#PANEL');await p.click('#lockGo');await p.waitForTimeout(2000);
+console.log('locked tras pegar:',await p.evaluate(()=>document.body.classList.contains('locked')),'hash',await p.evaluate(()=>location.hash),'sup',await p.evaluate(()=>JSON.parse(localStorage.inv_cfg).sup));
+await p.goto('http://localhost:8811/index.html#contar');await p.waitForTimeout(1200);
+console.log('locked reabrir icono:',await p.evaluate(()=>document.body.classList.contains('locked')));
+const c2=await b.newContext({...devices['iPhone 13']});const q=await c2.newPage();await q.goto('http://localhost:8811/index.html#PANEL');await q.waitForTimeout(1200);
+console.log('locked #PANEL directo:',await q.evaluate(()=>document.body.classList.contains('locked')));
+console.log('errores:',errs);await b.close()})();
