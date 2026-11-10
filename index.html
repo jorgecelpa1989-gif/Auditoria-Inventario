@@ -625,7 +625,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <div id="ptReader"></div>
       <div class="small muted" id="ptCamMsg"></div>
     </div>
-    <div class="step">
+    <div class="step" id="ptPalStep">
       <div class="eyebrow">1 · N° de pallet <span style="text-transform:none;letter-spacing:0;font-weight:500">(opcional)</span></div>
       <div class="scanbox">
         <input id="ptPallet" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="N° de pallet, o déjalo vacío">
@@ -634,7 +634,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <div class="small" id="ptPalletInfo"></div>
     </div>
     <div class="step">
-      <div class="eyebrow">2 · Producto</div>
+      <div class="eyebrow" id="ptProdEb">2 · Producto</div>
       <div class="scanbox">
         <input id="ptScan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea, digita el código o el nombre">
         <button class="btn accent" id="ptCamSku">Cámara</button>
@@ -660,7 +660,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <p class="small muted" style="margin:6px 0 0">Aquí están todos tus pallets guardados, también los de turnos ya cerrados. Elige el día para verlos o corregir una cantidad (0 = anular). Cada corrección queda anotada para el supervisor.</p>
     <div class="tbl"><table id="ptPrevList"></table></div>
     <details id="ptAddBox" hidden style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">＋ Agregar un pallet que faltó ese día</summary>
-      <label class="f">N° de pallet (opcional)<input id="ptAddPal" autocomplete="off" autocapitalize="characters" placeholder="Vacío = sin número"></label>
+      <label class="f" id="ptAddPalL">N° de pallet (opcional)<input id="ptAddPal" autocomplete="off" autocapitalize="characters" placeholder="Vacío = sin número"></label>
       <label class="f">Producto (código)<input id="ptAddCod" autocomplete="off" autocapitalize="characters" placeholder="Código o código de barras"></label>
       <div class="small" id="ptAddInfo"></div>
       <div class="row" style="gap:8px"><label class="f" style="flex:1">Cantidad<input id="ptAddQty" inputmode="decimal" placeholder="0" autocomplete="off"></label><label class="f" style="flex:0 1 110px">Hora<input id="ptAddHora" type="time" value="12:00"></label></div>
@@ -5981,7 +5981,10 @@ async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");
       catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":/muy_antiguo/.test(e.message)?"Ese registro tiene más de 15 días: pídele al supervisor que lo corrija.":puMsg(e))}finally{b.disabled=false}})}
   catch(e){tb.innerHTML=`<tr><td class="muted">${esc(/function|PGRST202|404/.test(e.message)?"Falta la actualización 13 en Supabase.":puMsg(e))}</td></tr>`}
 }
-function ptLimpiar(){ptDecl=null;$("#ptPallet").value="";$("#ptScan").value="";$("#ptQty").value="";$("#ptPending").hidden=true;$("#ptSugg").hidden=true;$("#ptPalletInfo").innerHTML="";$("#ptQtyEb").textContent="3 · Cantidad";ptHold=false;if(!ptCamI)setTimeout(()=>$("#ptPallet").focus(),50)}
+function ptLimpiar(){ptDecl=null;$("#ptPallet").value="";$("#ptScan").value="";$("#ptQty").value="";$("#ptPending").hidden=true;$("#ptSugg").hidden=true;$("#ptPalletInfo").innerHTML="";$("#ptQtyEb").textContent=(PT_PALLET?"3":"2")+" · Cantidad";ptHold=false;if(!ptCamI)setTimeout(()=>$(PT_PALLET?"#ptPallet":"#ptScan").focus(),50)}
+/* N° de pallet: oculto por ahora en los celulares (todo se registra "sin número"). Para volver a mostrarlo: PT_PALLET=true. */
+var PT_PALLET=false;
+(function ptPalletVis(){const on=PT_PALLET;$("#ptPalStep").hidden=!on;$("#ptAddPalL").hidden=!on;$("#ptProdEb").textContent=(on?"2":"1")+" · Producto";$("#ptQtyEb").textContent=(on?"3":"2")+" · Cantidad"})();
 async function ptPalletRead(v){
   v=codeStr(v);if(!v)return;$("#ptPallet").value=v;
   if(ptCel.lect.some(l=>codeStr(l.pallet)===v)){$("#ptPalletInfo").innerHTML='<span style="color:var(--bad);font-weight:600">Este pallet ya está registrado en este turno.</span>';audio.beep(false);return}
@@ -6007,7 +6010,7 @@ function ptProducto(v,silent){
   $("#ptSugg").hidden=true;$("#ptScan").value=v;
   const p=$("#ptPending");p.hidden=false;p.className="pending"+(it?"":" bad");
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza.");
-  $("#ptQtyEb").textContent=qtyLabel(it,3);ptChk=v;
+  $("#ptQtyEb").textContent=qtyLabel(it,PT_PALLET?3:2);ptChk=v;
   if(!silent){
     if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
     if(!it&&ptItems().length&&!unkOk.has(key(v))){
@@ -6041,7 +6044,7 @@ function ptAdd(){
   if(ptDecl&&esReceptorPT())l.decl=ptDecl.qty;
   ptCel.lect.push(l);ptSave();audio.beep(!!it);toast(sn?"✓ Pallet sin número registrado":`✓ Pallet ${pallet} registrado`);
   ptRender();ptLimpiar();ptSyncAll();
-  if(ptCamI){ptSetCam("pallet");$("#ptCamMsg").textContent="Listo. Apunta a la etiqueta del siguiente pallet."}
+  if(ptCamI){ptSetCam(PT_PALLET?"pallet":"sku");$("#ptCamMsg").textContent=PT_PALLET?"Listo. Apunta a la etiqueta del siguiente pallet.":"Listo. Apunta al código del siguiente producto."}
 }
 var ptSyncing=false;
 async function ptSyncAll(){
@@ -6514,9 +6517,9 @@ const PTSN2ST={anulado:"anulado",ok:"ok",faltan:"dif",sobran:"dif",transito:"tra
 function ptTabla(){
   const {rows,ini,fin,snRows}=ptRows(),T=[];
   for(const r of rows)T.push({pallet:r.pallet,cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,pe:r.pe,pr:r.pr,dif:r.dif,st:r.st,
-    rec:r.r&&r.pr!=null?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
+    rec:r.r&&r.pr!=null?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,hE:r.e&&r.pe!=null?[r.e.t]:[],hR:r.r&&r.pr!=null?[r.r.t]:[],dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
   for(const o of snRows)T.push({sn:true,pallet:`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`,cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
-    recs:o.recs||[],rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
+    recs:o.recs||[],hE:ptHoras(o.recs,true),hR:ptHoras(o.recs,false),rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
   return {T,ini,fin};
 }
 const hm24=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hour12:false});
@@ -6524,15 +6527,22 @@ const ptBul=(base,r)=>base==null?"":(r.ce&&r.f!==1?`<b>${fmt2(base/r.f)}</b> <sp
 const ptConv=(base,r)=>base==null?"":(r.ce&&r.f!==1?`${fmt2(base)} <span class="small muted">${esc(umTxt(r.um))}</span><span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:'<span class="muted">—</span>');
 /* Filas "Sin N°": se abren para ver cada pallet registrado (producción y recepción) y corregir su cantidad. */
 var ptSnOpen=new Set();
+/* Horas de los registros sin número (sin contar los anulados en 0), en orden. */
+const ptHoras=(recs,prod)=>(recs||[]).filter(d=>+d.qty>0&&(d.puesto==="produccion")===prod).map(d=>d.t||d.rt).filter(Boolean).sort((a,b)=>Date.parse(a)-Date.parse(b));
+const ptPuedeCorr=()=>typeof pvCan==="function"?pvCan("pt_corregir"):!prodMode();
 function ptSnDet(r){const L=[...(r.recs||[])].sort((a,b)=>String(a.t||a.rt).localeCompare(String(b.t||b.rt)));
   const who=d=>d.puesto==="produccion"?"🏭 Producción entrega":d.puesto==="retail"?"🛒 Retail retira":"🏷️ Bodega recibe";
   return `<tr class="ptSnDet"><td colspan="10" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
     L.map(d=>{const f=+d.f||+r.f||1,ce=d.ce||r.ce,um=umTxt(d.um||r.um),cv=ce&&f!==1;
-      return `<span>${who(d)}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap">${+d.qty>0?"":'<s class="muted">'}<b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}${+d.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div></td></tr>`}
+      return `<span>${who(d)}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap">${+d.qty>0?"":'<s class="muted">'}<b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}${+d.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div>`+
+    (ptPuedeCorr()?`<div class="row" style="gap:6px;margin-top:6px"><span class="small muted">¿Falta un registro de este producto?</span><button class="btn sm" data-ptadd="E|${esc(r.cod)}">＋ Agregar entrega de producción</button><button class="btn sm" data-ptadd="R|${esc(r.cod)}">＋ Agregar recepción de bodega</button><button class="btn sm" data-ptadd="D|${esc(r.cod)}">＋ Agregar retiro de retail</button></div>`:"")+`</td></tr>`}
 /* Supervisor: corregir la cantidad de un registro de PT (de cualquier día). Queda anotado de → a. */
 function ptEdBtn(d){if(!d||!d.lid||!pvCan("pt_corregir"))return "";const ed=Array.isArray(d.ed)&&d.ed.length;
   return `<span class="sub">${ed?`<span title="${esc(d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}${x.via==="panel"?" (panel)":""}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pted="${esc(d.lid)}">✎ corregir</button></span>`}
-function ptEdBind(){$$("#ptRes [data-ptsn]").forEach(b=>b.onclick=()=>{const k=b.dataset.ptsn;ptSnOpen.has(k)?ptSnOpen.delete(k):ptSnOpen.add(k);renderPtPanel()});$$("#ptRes [data-pted]").forEach(b=>b.onclick=async()=>{const d=ptData.pallets.find(x=>x.lid===b.dataset.pted);if(!d)return;
+/* Abre el formulario "Agregar registro" con el producto y el lado ya elegidos. */
+function ptAddDesde(lado,cod){const p=$("#ptAddPanel");p.hidden=false;$("#ptAdL").value=lado;$("#ptAdPal").value="";$("#ptAdCod").value=cod;$("#ptAdQty").value="";ptAdInfo();
+  p.scrollIntoView({behavior:"smooth",block:"center"});setTimeout(()=>$("#ptAdQty").focus(),300)}
+function ptEdBind(){$$("#ptRes [data-ptadd]").forEach(b=>b.onclick=()=>{const [l,c]=b.dataset.ptadd.split("|");ptAddDesde(l,c)});$$("#ptRes [data-ptsn]").forEach(b=>b.onclick=()=>{const k=b.dataset.ptsn;ptSnOpen.has(k)?ptSnOpen.delete(k):ptSnOpen.add(k);renderPtPanel()});$$("#ptRes [data-pted]").forEach(b=>b.onclick=async()=>{const d=ptData.pallets.find(x=>x.lid===b.dataset.pted);if(!d)return;
   const u=d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um),v=prompt(`Pallet ${d.pallet||"sin número"} · ${d.desc||d.k||d.code}\nNueva cantidad (en ${u}). Escribe 0 para anular un registro equivocado:`,fmt2(d.qty));if(v==null)return;
   const q=num(v);if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
   if(q===0&&!confirm("¿Dejar este registro en 0?\nQueda anulado: no cuenta como pallet ni suma unidades. Queda en el historial y se puede volver a corregir."))return;
@@ -6562,12 +6572,12 @@ function renderPtPanel(){
   let f=T.filter(r=>ptFilter==="todos"||(ptFilter==="dif"?["dif","otro"].includes(r.st):r.st===ptFilter));
   if(q)f=f.filter(r=>deacc(r.pallet+" "+r.cod+" "+r.desc).includes(q));
   f.sort((a,b)=>ord[a.st]-ord[b.st]||b.t-a.t);
-  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th><th>Pallet recibido</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th><th>Hora de captura</th></tr></thead><tbody>`+
+  $("#ptRes").innerHTML=`<thead><tr><th>Pallet</th><th>Código</th><th>Descripción</th><th class="num">Entregado</th><th class="num">Conversión</th><th>Pallet recibido</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th><th>Hora de captura</th></tr></thead><tbody>`+
     (f.length?f.map(r=>`<tr><td class="code"><b>${esc(r.pallet)}</b></td><td class="code">${esc(r.cod)}</td><td class="desc">${esc(r.desc)}${r.otro?`<span class="sub" style="color:var(--bad)">Bodega recibió: ${esc(r.otro)}</span>`:""}</td>
       <td class="num">${ptBul(r.pe,r)}${ptEdBtn(r.dE)}${r.sn&&pvCan("pt_corregir")?`<span class="sub"><button class="linkBtn" data-ptsn="${esc(key(r.cod))}">${ptSnOpen.has(key(r.cod))?"▲ ocultar pallets":"✎ ver y corregir pallets"}</button></span>`:""}</td><td class="num">${ptConv(r.pe,r)}</td><td class="small">${r.rec?esc(r.rec):'<span class="muted">—</span>'}</td>
       <td class="num">${r.pr==null?"":qBC(r.pr,r.ce,r.f,r.um)}${ptEdBtn(r.dR)}</td>
       <td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${PTST[r.st][1]}">${PTST[r.st][0]}</span></td>
-      <td class="small" style="white-space:nowrap" title="${r.uE?"Producción: "+esc(r.uE):""}">${r.tE?"Prod. "+hm24(r.tE):""}${r.tE&&r.tR?"<br>":""}${r.tR?"Recep. "+hm24(r.tR):""}${!r.tE&&!r.tR?'<span class="muted">—</span>':""}</td></tr>${r.sn&&ptSnOpen.has(key(r.cod))?ptSnDet(r):""}`).join("")
+      <td class="small" title="${r.uE?"Producción: "+esc(r.uE):""}">${[["Prod.",r.hE],["Recep.",r.hR]].filter(x=>x[1]&&x[1].length).map(([l,h])=>`<div style="white-space:nowrap">${l} ${h.map(hm24).join(" · ")}</div>`).join("")||'<span class="muted">—</span>'}</td></tr>${r.sn&&ptSnOpen.has(key(r.cod))?ptSnDet(r):""}`).join("")
     :`<tr><td colspan="10" class="muted">${T.length?"Nada con este filtro.":"Todavía no hay pallets registrados en este período."}</td></tr>`)+"</tbody>";
   ptEdBind();
   const dd=x=>`${String(x.getDate()).padStart(2,"0")}-${String(x.getMonth()+1).padStart(2,"0")}-${x.getFullYear()}`;
@@ -6576,9 +6586,9 @@ function renderPtPanel(){
 }
 $("#ptExp").onclick=()=>{
   const {T}=ptTabla(), wb=XLSX.utils.book_new(), cv=r=>r.ce&&r.f!==1;
-  XLSX.utils.book_append_sheet(wb,sheetFrom(T.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Unidades (bultos)":r.pe==null?"":cv(r)?r.pe/r.f:r.pe,"Bulto":cv(r)?r.ce:umTxt(r.um),
+  XLSX.utils.book_append_sheet(wb,sheetFrom(T.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Entregado (bultos)":r.pe==null?"":cv(r)?r.pe/r.f:r.pe,"Bulto":cv(r)?r.ce:umTxt(r.um),
     "Conversión":r.pe==null?"":r.pe,"Unidad ERP":umTxt(r.um),"Pallet recibido":r.rec,"Recibido (bultos)":r.pr==null?"":cv(r)?r.pr/r.f:r.pr,"Recibido":r.pr??"","Diferencia":r.dif??"","Estado":PTST[r.st][0],
-    "Hora producción":r.tE?fmtDT(r.tE):"","Hora recepción":r.tR?fmtDT(r.tR):""}))),"Pallets");
+    "Hora producción":(r.hE||[]).map(fmtDT).join(" · "),"Hora recepción":(r.hR||[]).map(fmtDT).join(" · ")}))),"Pallets");
   XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Lado":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
   saveWb(wb,"PT_"+new Date().toISOString().slice(0,10)+".xlsx");
 };
