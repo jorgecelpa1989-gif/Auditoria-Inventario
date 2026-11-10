@@ -23,4 +23,5 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  check(/cerró turno 00:01/.test(await u('BARBARA')),'Hoy: Bárbara muestra "cerró turno 00:01" (su cierre sí es de hoy) → '+(await u('BARBARA')));
  await s.selectOption('#ptDesde','d1');await s.waitForTimeout(1500);
  check(/cerró turno \d\d-\d\d 15:40/.test(await u('DAVID'))&&/cerró turno \d\d-\d\d 15:35/.test(await u('FELIPE'))&&!/cerró turno/.test(await u('BARBARA')),'Ayer: David 15:40 y Felipe 15:35, con fecha; Bárbara sin cierre ese día → '+(await u('DAVID')));
+ check(/Entrega · última señal hace 20 min/.test(await u('DAVID')),'La hora de conexión dice "última señal" (no parece un registro) → '+(await u('DAVID')));
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();
