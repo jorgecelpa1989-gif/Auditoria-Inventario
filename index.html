@@ -4842,7 +4842,8 @@ function convFix(d){if(!d||(d.ce&&+d.f>0&&+d.f!==1))return d;const k=key(d.k||d.
   if(c){d.ce=c.ce;d.f=+c.f;if(!d.um||UMN(d.um)==="un")d.um=c.um||d.um;d.convAp=true}return d}
 function factItems(){return erpDraft&&erpDraft.items&&erpDraft.items.length?erpDraft.items:(erp&&!erp.maestro?erp.items:[])}
 let factFilter="pend";
-function saveFact(){store.set("inv_fact",FACT);for(const arr of [erpDraft&&erpDraft.items,erp&&!erp.maestro&&erp.items])if(arr)enrich(arr);if(erp&&!erp.maestro)store.set("inv_erp",erp);renderFactSum()}
+var factT=null;
+function saveFact(){clearTimeout(factT);factT=setTimeout(()=>{if(typeof catSync==="function")catSync(false)},3000);store.set("inv_fact",FACT);for(const arr of [erpDraft&&erpDraft.items,erp&&!erp.maestro&&erp.items])if(arr)enrich(arr);if(erp&&!erp.maestro)store.set("inv_erp",erp);renderFactSum()}
 function setFact(cod,ce,f){const k=key(cod);ce=norm(ce).toUpperCase();f=num(f);
   if(ce&&f!=null&&f>0&&!(ce==="UNIDAD"&&f===1))FACT[k]={ce,f};else delete FACT[k]}
 function renderFactSum(){
@@ -5557,9 +5558,9 @@ async function erpDesdeNube(){
 }
 async function catSync(force){        // supervisor: sube catálogo + stock si cambió
   if(prodMode()||!nubeOn()||catBusy||!pvCan("inv_operar"))return;
-  if(erp&&erp.fromServer)return;        // ese ERP vino de Supabase: no se vuelve a subir
+  if(erp&&erp.fromServer)return factNube(force);   // ese ERP vino de Supabase: solo se suben las equivalencias que falten
   await factRecuperar();
-  if(erp&&erp.fromServer)return;
+  if(erp&&erp.fromServer)return factNube(force);
   if(!force&&!Object.keys(FACT).length)return;      // sin equivalencias no se pisa el catálogo de la nube
   const its=movCatalog();if(!its)return;
   const items=its.map(catRow), stock={};
@@ -5569,6 +5570,21 @@ async function catSync(force){        // supervisor: sube catálogo + stock si c
   catBusy=true;
   try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:(erp&&erp.file)||"ERP"});
     store.set("inv_catsig",sig);store.set("inv_catat",new Date().toISOString());renderAcc();if(force)toast("Catálogo y stock enviados")}
+  catch(e){if(force)toast(movMsg(e))}
+  finally{catBusy=false}
+}
+/* Las equivalencias (bultos) que este PC tiene y el catálogo de Supabase no, se suben a la nube, sin tocar productos ni stock.
+   Así el panel del supervisor, los celulares y este PC convierten igual (antes un supervisor podía ver 10 un donde aquí se veían 10 rollos). */
+async function factNube(force){
+  if(catBusy||!Object.keys(FACT).length)return;catBusy=true;
+  try{const r=await rpc(SB,"cb_catalogo_stock",{p_clave:SB.admin});if(!r||!Array.isArray(r.items)||!r.items.length)return;
+    let n=0;const items=r.items.map(row=>{const [cod,ean,desc,um,ce,f]=row,k=key(cod),x=FACT[k],ms=MASTER[k],u=um||(ms&&ms.um)||"";
+      if(x&&conv(x)){if(ce!==x.ce||+f!==+x.f||u!==um)n++;return [cod,ean||"",desc||"",u,x.ce,+x.f]}
+      if(u!==um){n++;return ce?[cod,ean||"",desc||"",u,ce,f]:[cod,ean||"",desc||"",u]}
+      return row});
+    if(!n){if(force)toast("El catálogo en Supabase ya tiene todas las equivalencias");return}
+    await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:r.stock||null,p_origen:r.origen||"ERP"});
+    movCat=null;store.set("inv_catat",new Date().toISOString());renderAcc();toast(`Equivalencias enviadas a Supabase: ${fmt(n)} producto${n===1?"":"s"}`)}
   catch(e){if(force)toast(movMsg(e))}
   finally{catBusy=false}
 }
@@ -7066,6 +7082,8 @@ function ptFin(){const v=$("#ptDesde").value||"d0";if(v==="turno")return Infinit
 async function ptRefresh(force){
   if(!movOk()||ptBusy)return;ptBusy=true;
   try{
+    // Supervisor de área: las conversiones (bultos) salen del catálogo de Supabase, igual que en el panel del administrador
+    if(catRemoto()&&(!movCat||force))await catLoad(true).catch(()=>{});
     const r=ptRango(), desde=new Date(((r||new Date(Date.now()-2*864e5)).getTime())-2*864e5);   // 2 días antes, para encontrar la producción de pallets recibidos después
     ptData=await mrpc("cb_pt_listar",{p_desde:desde.toISOString()})||ptData;ptAt=new Date();
     $("#ptNote").hidden=true;renderPtPanel();
