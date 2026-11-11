@@ -89,6 +89,10 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(!/Faltante/.test(await s.textContent('#pvCmp'))&&/Cuadra/.test(await s.textContent('#pvCmp')),'Packing list corregido (harina 4 → 3): ahora todo cuadra');
  const [dl]=await Promise.all([s.waitForEvent('download',{timeout:5000}).catch(()=>null),s.click('#pvXls')]);
  check(!!dl&&/Recepcion_ACEROS_DEL_SUR_G-901\.xlsx/.test(dl.suggestedFilename()),'Excel del cuadre: '+(dl?dl.suggestedFilename():'sin descarga'));
+ const leer=async d=>{const f=S+'/'+d.suggestedFilename();await d.saveAs(f);const b64=require('fs').readFileSync(f).toString('base64');
+   return s.evaluate(b=>{const wb=XLSX.read(b,{type:'base64'});return wb.SheetNames.map(n=>({n,rows:XLSX.utils.sheet_to_json(wb.Sheets[n])}))},b64)};
+ const x1=await leer(dl),c1=x1[0].rows;
+ check(x1[0].n==='Cuadre'&&c1.length===3&&c1.every(r=>r['N° de guía']==='G-901'&&r['Fecha']&&'N° de contenedor' in r&&'N° de referencia' in r)&&c1.some(r=>r['Código']==='221317'&&r['Recibido (bultos)']!==undefined),'Excel de la recepción: 3 SKU con su cuadre y guía, referencia, contenedor y fecha en cada fila');
  // Celular: recepción propia, sin packing list
  await m.tap('#pcHome #pcNew');await m.waitForTimeout(400);
  await m.fill('#pcProv','Plasticos Norte');await m.dispatchEvent('#pcProv','change');await m.fill('#pcGuia','G-77');await m.dispatchEvent('#pcGuia','change');
