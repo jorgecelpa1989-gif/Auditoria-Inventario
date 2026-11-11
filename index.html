@@ -4082,7 +4082,7 @@ end $$;
     <h2 id="pvDetT" style="margin:0"></h2>
     <div class="small muted" id="pvDetS"></div>
     <div class="kpis" id="pvDetK"></div>
-    <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Eliminar…</button></div>
+    <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvModTog">✎ Modificar recibido</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Eliminar…</button></div>
     <div class="cbox" id="pvAdd" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Agregar un registro recibido que faltó</b>
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -5507,7 +5507,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 const SUP_SIEMPRE="#sbCard,#ghCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
-  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,[data-pvc]",prov_eliminar:"#pvDel",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
+  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
   let st=$("#supStyle");if(!st){st=document.createElement("style");st.id="supStyle";document.head.appendChild(st)}
@@ -7479,7 +7479,8 @@ async function pvRefresh(silent){
   catch(e){const m=pvMsg(e);if(!silent)toast(m);if(/actualización 19/.test(m)){$("#pvNote").hidden=false;$("#pvNote").textContent=m}}
   finally{pvBusy=false}
 }
-setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-prov").hidden&&$("#pvForm").hidden)pvRefresh(true)},20000);
+setInterval(()=>{const ed=document.activeElement&&document.activeElement.matches&&document.activeElement.matches("#pvCmp [data-pvq],#pvAdd input");   // no borra lo que estás escribiendo
+  if(movOk()&&!document.hidden&&!$("#v-prov").hidden&&$("#pvForm").hidden&&!ed)pvRefresh(true)},20000);
 /* ---------- cuadre por SKU: esperado (packing list) vs recibido (celular + agregado a mano) ---------- */
 function pvRegs(d){return [...(d.rec||[]).map(l=>Object.assign({src:"cel"},l)),...(d.man||[]).map(l=>Object.assign({src:"man"},l))]}
 function pvCuadre(d){
@@ -7509,9 +7510,11 @@ function pvRender(){
     (L.length?L.map(d=>{const s=pvSt(d),[t,c]=PVST[s],cu=d.recibido?pvCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
       return `<tr data-pv="${esc(d.id)}" class="${d.id===pvSel?"sel":""}" style="cursor:pointer"><td>${fechaCL(d.fecha)}</td><td>${esc(PCTIPO[d.tipo]||"")}</td><td>${esc(d.proveedor||"—")}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.referencia||"—")}</td><td class="code">${esc(d.contenedor||"—")}</td><td class="num">${(d.esperado||[]).length?fmt(d.esperado.length)+" líneas":'<span class="muted">sin packing list</span>'}</td><td>${esc(d.rec_persona||"—")}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
      :`<tr><td colspan="10" class="muted">${pvList.length?"No hay recepciones con este filtro.":"Todavía no hay recepciones. Crea la primera con ＋ Nueva recepción, o bodega la crea desde su celular."}</td></tr>`)+"</tbody>";
-  $$("#pvTbl [data-pv]").forEach(tr=>tr.onclick=()=>{pvSel=tr.dataset.pv;store.set("inv_pvsel",pvSel);pvOpen.clear();pvRender();$("#pvDet").scrollIntoView({behavior:"smooth",block:"start"})});
+  $$("#pvTbl [data-pv]").forEach(tr=>tr.onclick=()=>{pvSel=tr.dataset.pv;store.set("inv_pvsel",pvSel);pvOpen.clear();pvMod=false;pvRender();$("#pvDet").scrollIntoView({behavior:"smooth",block:"start"})});
   pvDetRender();
 }
+var pvMod=false;
+$("#pvModTog").onclick=()=>{pvMod=!pvMod;if(!pvMod)pvOpen.clear();pvDetRender();if(pvMod)setTimeout(()=>{const i=$("#pvCmp [data-pvq]");if(i)i.scrollIntoView({behavior:"smooth",block:"center"})},60)};
 function pvDetRender(){
   const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;if(!d)return;
   const rows=pvCuadre(d),cnt=s=>rows.filter(r=>r.st===s).length,[t]=PVST[pvSt(d)];
@@ -7521,22 +7524,27 @@ function pvDetRender(){
   $("#pvDetK").innerHTML=[["En packing list",fmt(rows.filter(r=>r.E!=null).length)],["Recibidos",fmt(rows.filter(r=>r.R!=null).length)],["Cuadran",fmt(cnt("ok"))],["Faltantes",fmt(cnt("falta")+cnt("norec"))],["Sobrantes / no esperados",fmt(cnt("sobra")+cnt("noesp"))],...(hayP?[["Pallets esperados / recibidos",fmt2(pe)+" / "+fmt2(pr)]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
   const cerr=!!d.finalizado;
   $("#pvAddTog").hidden=cerr;$("#pvEdTog").hidden=cerr;$("#pvCerrar").hidden=cerr;if(cerr)$("#pvAdd").hidden=true;
+  const hayReg=rows.some(r=>r.regs.length);$("#pvModTog").hidden=cerr||!hayReg;
+  $("#pvModTog").textContent=pvMod?"✓ Listo (ocultar registros)":"✎ Modificar recibido";$("#pvModTog").classList.toggle("primary",pvMod);
+  if(pvMod)rows.forEach(r=>{if(r.regs.length)pvOpen.add(r.k)});
   const ord={falta:0,norec:1,noesp:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
   const corr=l=>{if(cerr||!pvPuede("prov_operar"))return "";if(l.src==="cel"&&!d.recibido)return "";const ed=Array.isArray(l.ed)&&l.ed.length;
-    return `${ed?`<span class="small" title="${esc(l.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pvc="${esc(l.lid)}">✎ corregir</button>`};
+    return `${ed?`<span class="small" title="${esc(l.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<input data-pvq="${esc(l.lid)}" value="${fmt2(+l.qty||0)}" inputmode="decimal" aria-label="Nueva cantidad" style="width:76px;text-align:right;padding:4px 6px"> <button class="btn sm primary" data-pvg="${esc(l.lid)}">Guardar</button>`};
   $("#pvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>ABC</th><th>Unidad</th><th class="num">Packing list</th><th class="num">Recibido</th><th class="num">Diferencia</th><th class="num">Pallets</th><th>Estado</th></tr></thead><tbody>`+
-    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}${r.regs.length?`<span class="sub"><button class="linkBtn" data-pvo="${esc(r.k)}">${pvOpen.has(r.k)?"▲ ocultar registros":"✎ ver y corregir registros ("+fmt(r.regs.length)+")"}</button></span>`:""}</td><td>${r.abc?`<span class="pill p-mut">${esc(r.abc)}</span>`:""}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td>
+    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}${r.regs.length?`<span class="sub"><button class="linkBtn" data-pvo="${esc(r.k)}">${pvOpen.has(r.k)?"▲ ocultar registros":"✎ ver y modificar lo recibido ("+fmt(r.regs.length)+")"}</button></span>`:""}</td><td>${r.abc?`<span class="pill p-mut">${esc(r.abc)}</span>`:""}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td>
       <td class="num">${r.E==null?"—":qBC(r.E,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td class="num">${r.bxp?`${r.PE!=null?fmt2(r.PE):"—"}<span class="sub">${r.PR!=null?"recibidos "+fmt2(r.PR):""}${r.bxp?" · "+fmt(r.bxp)+" x pallet":""}</span>`:'<span class="muted">—</span>'}</td><td><span class="pill ${PVC[r.st][1]}">${PVC[r.st][0]}</span></td></tr>`+
       (pvOpen.has(r.k)?`<tr class="ptSnDet"><td colspan="9" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
         r.regs.sort((a,b)=>String(a.t).localeCompare(String(b.t))).map(l=>{const f=+l.f||1,cv=l.ce&&f!==1;return `<span>${l.src==="man"?"✍ Agregado a mano":"📱 Celular"}</span><span class="muted">${l.t?hm24(l.t):""}</span><span>${esc(l.user||"")}</span><span style="white-space:nowrap">${+l.qty>0?"":'<s class="muted">'}<b>${fmt2(+l.qty||0)}</b> ${esc(cv?plural(l.ce):umTxt(l.um))}${cv?` <span class="muted">= ${fmt2((+l.qty||0)*f)} ${esc(umTxt(l.um))}</span>`:""}${+l.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span>${corr(l)}</span>`}).join("")+
         `</div>${!d.recibido&&r.regs.some(l=>l.src==="cel")?'<div class="small muted" style="margin-top:4px">Lo registrado por el celular se corrige cuando bodega termine la recepción.</div>':""}</td></tr>`:"")).join("")
      :'<tr><td colspan="9" class="muted">Sin productos todavía: carga el packing list o espera lo que registre bodega.</td></tr>')+"</tbody>";
   $$("#pvCmp [data-pvo]").forEach(b=>b.onclick=()=>{const k=b.dataset.pvo;pvOpen.has(k)?pvOpen.delete(k):pvOpen.add(k);pvDetRender()});
-  $$("#pvCmp [data-pvc]").forEach(b=>b.onclick=async()=>{const l=pvRegs(d).find(x=>x.lid===b.dataset.pvc);if(!l)return;
-    const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),v=prompt(`${l.desc||l.code}\nNueva cantidad (en ${u}). Escribe 0 para anular un registro equivocado:`,fmt2(l.qty));if(v==null)return;
-    const q=num(v);if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
+  const pvGuardar=async b=>{const l=pvRegs(d).find(x=>x.lid===b.dataset.pvg);if(!l)return;
+    const inp=$(`#pvCmp [data-pvq="${CSS.escape(l.lid)}"]`),q=num(inp?inp.value:"");if(q==null||q<0){toast("Escribe una cantidad (0 o más)");return inp&&inp.focus()}
+    if(q===+l.qty)return toast("Es la misma cantidad");
     if(q===0&&!confirm("¿Dejar este registro en 0?\nQueda anulado: no suma. Queda en el historial y se puede volver a corregir."))return;
-    try{await rpc(SB,"cb_prov_corregir",{p_clave:SB.admin,p_id:d.id,p_lid:l.lid,p_qty:q});toast(q===0?"Registro anulado (en 0)":"Cantidad corregida");await pvRefresh(true)}catch(e){toast(pvMsg(e))}});
+    b.disabled=true;try{await rpc(SB,"cb_prov_corregir",{p_clave:SB.admin,p_id:d.id,p_lid:l.lid,p_qty:q});toast(q===0?"Registro anulado (en 0)":"Cantidad corregida");await pvRefresh(true)}catch(e){toast(pvMsg(e))}finally{b.disabled=false}};
+  $$("#pvCmp [data-pvg]").forEach(b=>b.onclick=()=>pvGuardar(b));
+  $$("#pvCmp [data-pvq]").forEach(i=>i.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();const b=$(`#pvCmp [data-pvg="${CSS.escape(i.dataset.pvq)}"]`);if(b)pvGuardar(b)}}));
   $("#pvConfirm").innerHTML="";
 }
 /* ---------- crear o editar: datos y packing list ---------- */
