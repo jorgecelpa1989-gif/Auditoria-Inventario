@@ -4039,7 +4039,7 @@ end $$;
   <div class="card">
     <div class="row"><div class="eyebrow">5 · Recepción de proveedores</div><span class="sep"></span><span class="small muted" id="pvAt"></span></div>
     <div class="row"><h2 style="margin:0">Packing list vs recibido en bodega</h2><span class="sep"></span>
-      <select id="pvDia" style="flex:0 1 210px"></select><button class="btn primary" id="pvRef">Actualizar</button><button class="btn" id="pvXlsAll">Excel</button><button class="btn" id="pvNewTog">＋ Nueva recepción</button></div>
+      <select id="pvDia" style="flex:0 1 210px"></select><button class="btn primary" id="pvRef">Actualizar</button><button class="btn" id="pvNewTog">＋ Nueva recepción</button></div>
     <div class="notice" id="pvNote" hidden></div>
     <div class="cbox" id="pvForm" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b id="pvFormT">Nueva recepción</b>
@@ -7662,15 +7662,16 @@ $("#pvEdTog").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(d)pvFormAbrir
 $("#pvX").onclick=()=>{pvSel=null;store.set("inv_pvsel",null);pvRender()};
 $("#pvCerrar").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Cerrar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}): queda como histórico y bodega ya no la ve.`,async()=>{try{await mrpc("cb_prov_cerrar",{p_id:d.id});toast("Recepción cerrada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
 $("#pvDel").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Eliminar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}) con todo su detalle. No se puede deshacer.`,async()=>{try{await mrpc("cb_prov_eliminar",{p_id:d.id});pvSel=null;store.set("inv_pvsel",null);toast("Recepción eliminada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
-$("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const rows=pvCuadre(d),wb=XLSX.utils.book_new(),cv=r=>r.ce&&r.f!==1;
-  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"ABC":r.abc||"","Bulto":cv(r)?r.ce:umTxt(r.um),"Packing list (bultos)":r.E==null?"":cv(r)?r.E/r.f:r.E,"Recibido (bultos)":r.R==null?"":cv(r)?r.R/r.f:r.R,
-    "Diferencia (bultos)":r.dif==null?"":cv(r)?r.dif/r.f:r.dif,"Packing list":r.E??"","Recibido":r.R??"","Diferencia":r.dif??"","Unidad ERP":umTxt(r.um),"Bultos x pallet":r.bxp||"","Pallets esperados":r.PE??"","Pallets recibidos":r.PR??"","Estado":PVC[r.st][0]}))),"Cuadre");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(pvRegs(d).map(l=>({"Origen":l.src==="man"?"Agregado a mano":"Celular","Hora":l.t?fmtDT(l.t):"","Persona":l.user||"","Código":l.code,"Descripción":l.desc||"","Cantidad":+l.qty||0,"Bulto":l.ce||umTxt(l.um),"Conversión":(+l.qty||0)*(+l.f||1)}))),"Registros");
-  saveWb(wb,`Recepcion_${(d.proveedor||"proveedor").replace(/[^\w-]+/g,"_")}_${d.guia||d.referencia||""}.xlsx`)};
-$("#pvXlsAll").onclick=()=>{const L=pvList.filter(pvDiaOk),wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(L.map(d=>{const cu=pvCuadre(d);return {"Fecha":fechaCL(d.fecha),"Tipo":PCTIPO[d.tipo]||"","Proveedor":d.proveedor||"","Guía":d.guia||"","Referencia":d.referencia||"","Contenedor":d.contenedor||"","Estado":PVST[pvSt(d)][0],
-    "Líneas packing list":(d.esperado||[]).length,"Productos con diferencia":d.recibido?cu.filter(r=>r.st!=="ok").length:"","Recibe":d.rec_persona||"","Terminada":d.recibido?fmtDT(d.recibido):""}})),"Recepciones");
-  saveWb(wb,"Recepciones_proveedores_"+new Date().toISOString().slice(0,10)+".xlsx")};
+/* Detalle del cuadre por SKU, con los datos del documento en cada fila (sirve para filtrar y tablas dinámicas). */
+function pvFilasXls(d){const cv=r=>r.ce&&r.f!==1,ord={falta:0,norec:1,noesp:2,sobra:3,porrec:4,ok:5};
+  return pvCuadre(d).sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod))).map(r=>({"Fecha":fechaCL(d.fecha),"Tipo":PCTIPO[d.tipo]||"","Proveedor":d.proveedor||"","N° de guía":d.guia||"","N° de referencia":d.referencia||"","N° de contenedor":d.contenedor||"",
+    "Código":r.cod,"Descripción":r.desc,"ABC":r.abc||"","Bulto":cv(r)?r.ce:umTxt(r.um),"Packing list (bultos)":r.E==null?"":cv(r)?r.E/r.f:r.E,"Recibido (bultos)":r.R==null?"":cv(r)?r.R/r.f:r.R,
+    "Diferencia (bultos)":r.dif==null?"":cv(r)?r.dif/r.f:r.dif,"Packing list":r.E??"","Recibido":r.R??"","Diferencia":r.dif??"","Unidad ERP":umTxt(r.um),"Bultos x pallet":r.bxp||"","Pallets esperados":r.PE??"","Pallets recibidos":r.PR??"","Estado":PVC[r.st][0],
+    "Estado recepción":PVST[pvSt(d)][0],"Recibe":d.rec_persona||"","Terminada":d.recibido?fmtDT(d.recibido):""}))}
+$("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetFrom(pvFilasXls(d)),"Cuadre");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(pvRegs(d).map(l=>({"N° de guía":d.guia||"","N° de referencia":d.referencia||"","N° de contenedor":d.contenedor||"","Origen":l.src==="man"?"Agregado a mano":"Celular","Hora":l.t?fmtDT(l.t):"","Persona":l.user||"","Código":l.code,"Descripción":l.desc||"","Cantidad":+l.qty||0,"Bulto":l.ce||umTxt(l.um),"Conversión":(+l.qty||0)*(+l.f||1)}))),"Registros");
+  saveWb(wb,`Recepcion_${(d.proveedor||d.contenedor||"proveedor").replace(/[^\w-]+/g,"_")}_${(d.guia||d.referencia||"").replace(/[^\w-]+/g,"_")}.xlsx`)};
 $("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;
 $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
