@@ -178,7 +178,7 @@ body.puesto nav.tabs,body.puesto #status{display:none!important}
 .puBtn .dotR{position:absolute;top:10px;right:12px;min-width:22px;height:22px;border-radius:11px;background:var(--bad);color:#fff;font:700 12px var(--font);display:flex;align-items:center;justify-content:center;padding:0 6px}
 .puBtn[disabled]{opacity:.5;cursor:default}
 .stk{font-size:12px;font-weight:600;padding:1px 7px;border-radius:9px;white-space:nowrap}
-body.prodv nav.tabs button:not(.pvOk),body.prodv #status{display:none!important}
+body.prodv nav.tabs button:not(.pvOk),body.prodv nav.tabs .navGrp:not(.pvOk),body.prodv #status{display:none!important}
 body.prodv .supOnly{display:none!important}
 .mpRight{display:flex;flex-direction:column;gap:16px;min-width:0}
 .solAdd{display:grid;grid-template-columns:minmax(0,1fr) 76px auto;gap:6px}
@@ -210,6 +210,8 @@ body.mov nav.tabs,body.mov #status{display:none!important}
 /* ===== Menú lateral (supervisor). En celular se abre con ☰. Los operarios no lo ven (body.op/.mov/.puesto/.locked). ===== */
 .shell{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start}
 nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;position:sticky;top:var(--hdrH,64px);width:232px;height:calc(100vh - var(--hdrH,64px));padding:14px 10px 24px;background:var(--hdr);border-right:1px solid var(--line)}
+nav.tabs .navGrp{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 4px 4px;padding:10px 8px 2px;border-top:1px solid var(--line)}
+nav.tabs .navGrp[hidden]{display:none}
 nav.tabs .navHd{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:2px 12px 8px}
 nav.tabs button{flex:0 0 auto;display:flex;align-items:center;gap:10px;text-align:left;white-space:normal;border:0;border-left:3px solid transparent;border-radius:0 8px 8px 0;padding:10px 12px;font:600 14px var(--font);color:var(--muted)}
 nav.tabs button[hidden]{display:none}
@@ -266,12 +268,14 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="navHd">Secciones</div>
   <button role="tab" data-v="erp" aria-selected="true"><span class="num">1</span>Panel</button>
   <button role="tab" data-v="contar" aria-selected="false" hidden><span class="num">·</span>Contar<span class="n" id="nScans">0</span></button>
-  <button role="tab" data-v="mp" aria-selected="false"><span class="num">2</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
+  <button role="tab" data-v="permisos" aria-selected="false"><span class="num">2</span>Permisos</button>
+  <div class="navGrp">Logística</div>
   <button role="tab" data-v="resultado" aria-selected="false"><span class="num">3</span>Inventario</button>
-  <button role="tab" data-v="pt" aria-selected="false"><span class="num">4</span>Recepción PT</button>
-  <button role="tab" data-v="devol" aria-selected="false"><span class="num">5</span>Logística inversa</button>
-  <button role="tab" data-v="permisos" aria-selected="false"><span class="num">6</span>Permisos</button>
-  <button role="tab" data-v="prov" aria-selected="false"><span class="num">7</span>Recepción proveedores</button>
+  <button role="tab" data-v="devol" aria-selected="false"><span class="num">4</span>Logística inversa<span class="n alert" id="nDev" hidden>0</span></button>
+  <button role="tab" data-v="prov" aria-selected="false"><span class="num">5</span>Recepción proveedores</button>
+  <div class="navGrp">Producción</div>
+  <button role="tab" data-v="mp" aria-selected="false"><span class="num">6</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
+  <button role="tab" data-v="pt" aria-selected="false"><span class="num">7</span>Recepción PT</button>
 </nav>
 <div class="navScrim" id="navScrim" hidden></div>
 
@@ -785,7 +789,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
   <div class="ptMain">
   <div class="card">
-    <div class="eyebrow">4 · Recepción PT</div>
+    <div class="eyebrow">7 · Recepción PT</div>
     <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción (bodega y retail)</h2><span class="sep"></span>
       <select id="ptDesde" style="flex:0 1 190px"><option value="d0" selected>Hoy</option></select>
       <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button><button class="btn" id="ptAddTog">＋ Agregar registro</button></div>
@@ -812,9 +816,9 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
 <!-- ============ 5 LOGÍSTICA INVERSA ============ -->
 <section class="view" id="v-devol" hidden>
   <div class="card">
-    <div class="row"><div class="eyebrow">5 · Logística inversa</div><span class="sep"></span><span class="small muted" id="dvAt"></span><button class="btn sm" id="dvRef">Actualizar</button></div>
+    <div class="row"><div class="eyebrow">4 · Logística inversa</div><span class="sep"></span><span class="small muted" id="dvAt"></span><button class="btn sm" id="dvRef">Actualizar</button></div>
     <h2>Devoluciones a bodega</h2>
-    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>6 · Permisos</b>.</p>
+    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>2 · Permisos</b>.</p>
     <div class="notice" id="dvNote" hidden></div>
     <div class="row" style="margin-top:4px"><div class="chips" id="dvChips"></div><span class="sep"></span>
       <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option></select></label>
@@ -853,7 +857,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
 <!-- ============ 6 PERMISOS ============ -->
 <section class="view" id="v-permisos" hidden>
   <div class="card">
-    <div class="eyebrow">6 · Permisos</div>
+    <div class="eyebrow">2 · Permisos</div>
     <h2>Accesos, claves y celulares</h2>
     <p class="small" style="margin:0">Todo lo que da acceso a la app, en un solo lugar: los <b>usuarios</b> (PC y celulares, con sus permisos), <b>liberar o bloquear</b> cualquier acceso entregado (usuarios, links de conteo y de entrega de MP), la conexión con Supabase y tu clave de supervisor, y el acceso del jefe de producción.</p>
   </div>
@@ -4033,7 +4037,7 @@ end $$;
 <!-- ============ 7 RECEPCIÓN DE PROVEEDORES ============ -->
 <section class="view" id="v-prov" hidden>
   <div class="card">
-    <div class="row"><div class="eyebrow">7 · Recepción de proveedores</div><span class="sep"></span><span class="small muted" id="pvAt"></span></div>
+    <div class="row"><div class="eyebrow">5 · Recepción de proveedores</div><span class="sep"></span><span class="small muted" id="pvAt"></span></div>
     <div class="row"><h2 style="margin:0">Packing list vs recibido en bodega</h2><span class="sep"></span>
       <select id="pvDia" style="flex:0 1 210px"></select><button class="btn primary" id="pvRef">Actualizar</button><button class="btn" id="pvXlsAll">Excel</button><button class="btn" id="pvNewTog">＋ Nueva recepción</button></div>
     <div class="notice" id="pvNote" hidden></div>
@@ -4779,7 +4783,7 @@ $("#btnReconteo").onclick=async()=>{
     if(puR){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puR});c.puesto=puR}catch(e){toast("El reconteo se creó, pero no se pudo asignar a "+uNombre(puR))}}
     conteos.unshift(c);store.set("inv_conteos",conteos);renderConteos();
     $("#reRes").innerHTML=`<div class="pending" style="gap:8px"><div class="d">${esc(nombre)} · ${fmt(its.length)} productos</div><div class="small muted">Vence ${fmtDT(vence)}</div>
-      <div class="small">${c.puesto?`📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso.`:'<span style="color:var(--bad)">No quedó asignado: asígnalo en 6 · Permisos → Conteos en curso.</span>'}</div></div>`;
+      <div class="small">${c.puesto?`📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso.`:'<span style="color:var(--bad)">No quedó asignado: asígnalo en 2 · Permisos → Conteos en curso.</span>'}</div></div>`;
     toast("Reconteo creado");renderResult();
   }catch(e){toast(sbMsg(e))}finally{$("#btnReconteo").disabled=false}
 };
@@ -5024,7 +5028,7 @@ function showCreated(c){
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
-    ${c.puesto?`<div>📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso. No tienes que hacer nada más.</div></div>`:`<div class="small" style="color:var(--bad)">No quedó asignado a nadie: asígnalo en 6 · Permisos → Liberar o bloquear accesos → Conteos en curso.</div></div>`}`;return}
+    ${c.puesto?`<div>📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso. No tienes que hacer nada más.</div></div>`:`<div class="small" style="color:var(--bad)">No quedó asignado a nadie: asígnalo en 2 · Permisos → Liberar o bloquear accesos → Conteos en curso.</div></div>`}`;return}
   box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
     <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
@@ -5056,7 +5060,7 @@ function edRender(){const card=$("#edCard");if(!card)return;const L=nubeOn()?edC
 function cPuSync(){const w=$("#cPuWrap");if(!w)return;w.hidden=!nubeOn();if(w.hidden)return;const n=typeof usersCon==="function"?usersCon("conteo").length:0;
   const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— Elige a quién —");
   const rs=$("#rePuesto");if(rs){const rv=rs.value;rs.innerHTML=uOpts("conteo",rv,"— Elige a quién —")}
-  $("#cPuHint").innerHTML=n?"Le llega a su app en unos segundos, con aviso.":'<span style="color:var(--bad)">Ningún usuario tiene permiso de conteo: créalo o dale el permiso en 6 · Permisos.</span>'}
+  $("#cPuHint").innerHTML=n?"Le llega a su app en unos segundos, con aviso.":'<span style="color:var(--bad)">Ningún usuario tiene permiso de conteo: créalo o dale el permiso en 2 · Permisos.</span>'}
 function renderConteosOnly(){
   if(!$("#conteosTbl")){
     cPuSync();edRender();
@@ -5115,7 +5119,7 @@ async function rpc(conf,fn,args){
   return j;
 }
 const SBMSG={acceso_produccion:"La clave no es válida o fue cambiada. Pide un link nuevo al supervisor.",clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
-  bloqueado:"El supervisor bloqueó este link. Habla con él para que lo desbloquee.",usado:"Este link ya se abrió en otro celular. Pide al supervisor que libere el celular (6 · Permisos) y vuelve a abrir el mismo link.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
+  bloqueado:"El supervisor bloqueó este link. Habla con él para que lo desbloquee.",usado:"Este link ya se abrió en otro celular. Pide al supervisor que libere el celular (2 · Permisos) y vuelve a abrir el mismo link.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
   no_existe:"El link no es válido o el conteo fue eliminado. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para enviar este conteo.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_conexion:"Sin conexión a internet.",sin_productos:"El conteo no tiene productos."};
 const sbMsg=e=>SBMSG[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script SQL en Supabase (paso 2 de las instrucciones).":/Invalid API key|401|JWT|apikey/i.test(e.message)?"La clave pública (anon / publishable) no es válida.":e.message);
 const rndKey=n=>{const a=new Uint8Array(n);crypto.getRandomValues(a);return [...a].map(b=>"abcdefghjkmnpqrstuvwxyz23456789"[b%31]).join("")};
@@ -5477,7 +5481,7 @@ setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>
 var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
     movLect={}, movSeen={}, mpFilter="todos", movHide=store.get("inv_movhide",[]);
 const ROL={E:"Entrega",R:"Recepción"};
-const movMsg=e=>({bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (6 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
+const movMsg=e=>({bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (2 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
 
 /* ---------- ¿Quién usa esta pestaña? supervisor (clave de Supabase) o jefe de producción (link propio) ---------- */
 // PRD = {url,key,tok,ses} en el PC del jefe de producción: tok viene en su link, ses es la llave que recibe ESE equipo al vincularse.
@@ -5493,6 +5497,8 @@ if(PRD&&PRD.sup){   // sesión creada con la versión anterior (v14): se pasa al
 const supOn=()=>!!(SUPI&&SUPI.ses&&SB.ok&&SB.admin===SUPI.ses);
 const PROD_PERM=["mp_ver","mp_solicitar","pt_ver"];   // acceso antiguo de producción
 const pvCan=p=>p==="mp_cerrar"?(supOn()?pvCan("mp_operar"):true):supOn()?(SUPI.permisos||[]).includes(p):prodMode()?PROD_PERM.includes(p):true;
+/* Títulos de grupo del menú (LOGÍSTICA, PRODUCCIÓN): se ven solo si el grupo tiene alguna sección visible para quien entra. */
+function navGrupos(){for(const g of $$("nav.tabs .navGrp")){let ok=false;for(let e=g.nextElementSibling;e&&!e.classList.contains("navGrp");e=e.nextElementSibling)if(e.tagName==="BUTTON"&&!e.hidden&&e.classList.contains("pvOk"))ok=true;g.classList.toggle("pvOk",ok)}}
 const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["devol","dev_ver"],["permisos","usr_admin"],["prov","prov_ver"]];
 const pvViews=()=>supOn()?SUP_VISTAS.filter(x=>pvCan(x[1])).map(x=>x[0]):prodMode()?["mp","pt"]:null;   // null = sin límite (administrador)
 const mpLim=()=>prodMode()||(supOn()&&!pvCan("mp_operar"));       // solo solicita: no activa, asigna ni cierra
@@ -5509,8 +5515,8 @@ function supApply(){
   chip.hidden=!on;
   if(!on){st.textContent="";$$("nav.tabs button").forEach(b=>b.classList.remove("pvOk"));return false}
   chip.textContent="👤 "+(SUPI.nombre||"Supervisor");
-  const V=pvViews();$$("nav.tabs button").forEach(b=>b.classList.toggle("pvOk",V.includes(b.dataset.v)));
-  st.textContent="body.supv nav.tabs button:not(.pvOk),"+SUP_SIEMPRE+"{display:none!important}"+Object.entries(SUP_HIDE).filter(([k])=>!pvCan(k)).map(([,sel])=>sel+"{display:none!important}").join("")
+  const V=pvViews();$$("nav.tabs button").forEach(b=>b.classList.toggle("pvOk",V.includes(b.dataset.v)));navGrupos();
+  st.textContent="body.supv nav.tabs button:not(.pvOk),body.supv nav.tabs .navGrp:not(.pvOk),"+SUP_SIEMPRE+"{display:none!important}"+Object.entries(SUP_HIDE).filter(([k])=>!pvCan(k)).map(([,sel])=>sel+"{display:none!important}").join("")
     +(pvCan("inv_operar")?"":"#v-resultado .card:has(#btnReset){display:none!important}");   // regla aparte: si el navegador no entiende :has, no arrastra a las demás
   if(!V.length)lockScreen("Tu acceso todavía no tiene módulos habilitados. Habla con el administrador.","Sin módulos habilitados","🔒",true);
   return true;
@@ -5609,7 +5615,7 @@ const movById=id=>movList().find(m=>m.id===id)||null;
 /* ---------- Avisos ---------- */
 function mpNote(){
   const n=$("#mpNote");
-  if(!movOk()){n.hidden=false;n.innerHTML="Para usar entregas, conecta primero el envío automático (Supabase) en <b>6 · Permisos</b>.";return false}
+  if(!movOk()){n.hidden=false;n.innerHTML="Para usar entregas, conecta primero el envío automático (Supabase) en <b>2 · Permisos</b>.";return false}
   if(!movCatalog()){n.hidden=false;n.innerHTML=catRemoto()?"Todavía no hay lista de productos. Pide al supervisor que cargue el informe del ERP.":"Carga el informe del ERP en <b>1 · Panel</b>: de ahí salen las descripciones, unidades, equivalencias y el stock que ve quien entrega.";return false}
   n.hidden=true;return true;
 }
@@ -5847,7 +5853,7 @@ function equipoDesc(){const u=navigator.userAgent;const os=/Windows/.test(u)?"Wi
 function prodApply(){
   if(!prodMode())return false;
   document.body.classList.add("prodv");document.body.classList.remove("op","locked","mov");$("#lockBox").innerHTML="";
-  const V=pvViews();$$("nav.tabs button").forEach(b=>b.classList.toggle("pvOk",V.includes(b.dataset.v)));
+  const V=pvViews();$$("nav.tabs button").forEach(b=>b.classList.toggle("pvOk",V.includes(b.dataset.v)));navGrupos();
   $("#status").textContent="";
   return true;
 }
@@ -6942,16 +6948,32 @@ const devSt=d=>d.finalizado?"cerr":d.recibido?"rec":d.rec_inicio?"enrec":d.envia
 const DEVST={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],norec:["No llegó","p-bad"],nodecl:["No declarado","p-warn"],porrec:["Por recibir","p-info"]};
 function devEnter(){
   const on=movOk();$("#dvNote").hidden=on;if(typeof dpEnter==="function")dpEnter();
-  if(!on){$("#dvNote").innerHTML='Para ver las devoluciones, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.';$("#dvTbl").innerHTML="";$("#dvDet").hidden=true;$("#dvChips").innerHTML="";return}
+  if(!on){$("#dvNote").innerHTML='Para ver las devoluciones, conecta el envío automático (Supabase) en <b>2 · Permisos</b>.';$("#dvTbl").innerHTML="";$("#dvDet").hidden=true;$("#dvChips").innerHTML="";return}
   devRender();devRefresh(true);
 }
 async function devRefresh(silent){
   if(!movOk()||!pvCan("dev_ver")||devBusy)return;devBusy=true;
-  try{const r=await mrpc("cb_dev_listar");devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;devRender()}
+  try{const r=await mrpc("cb_dev_listar");devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;avisoDev();if(!$("#v-devol").hidden)devRender()}
   catch(e){const m=dvMsg(e);if(!silent)toast(m);if(/actualización 07/.test(m)){$("#dvNote").hidden=false;$("#dvNote").textContent=m}}
   finally{devBusy=false}
 }
 setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-devol").hidden)devRefresh(true)},20000);
+/* Aviso de devoluciones nuevas en el panel (antes no había ninguno): número en «4 · Logística inversa», sonido y mensaje.
+   Se revisa cada 30 s aunque estés en otra sección. La primera vez en este equipo solo marca las existentes como vistas. */
+var devVistas=store.get("inv_devvistas",null);
+function avisoDev(){
+  const pend=devList.filter(d=>d.enviado&&!d.recibido&&!d.finalizado);
+  const n=$("#nDev");if(n){n.hidden=!pend.length;n.textContent=pend.length}
+  const env=devList.filter(d=>d.enviado&&!d.finalizado);
+  if(devVistas==null){devVistas=env.map(d=>d.id);store.set("inv_devvistas",devVistas);return}
+  const nuevas=env.filter(d=>!devVistas.includes(d.id));if(!nuevas.length)return;
+  devVistas=devVistas.concat(nuevas.map(d=>d.id)).slice(-300);store.set("inv_devvistas",devVistas);
+  const d=nuevas[0],de=d.area||({produccion:"Producción",retail:"Retail",distribucion:"Distribución"}[d.origen])||"un usuario";
+  audio.beep(true);setTimeout(()=>audio.beep(true),220);
+  toast(`↩️ Nueva devolución de ${de}${d.persona?" ("+d.persona+")":""}${d.guia?" · guía "+d.guia:d.factura?" · factura "+d.factura:""}${nuevas.length>1?` y ${nuevas.length-1} más`:""}`);
+}
+setInterval(()=>{if(nubeOn()&&movOk()&&pvCan("dev_ver")&&!prodMode()&&!document.hidden&&$("#v-devol").hidden)devRefresh(true)},30000);
+setTimeout(()=>{if(nubeOn()&&movOk()&&pvCan("dev_ver")&&!prodMode())devRefresh(true)},4000);
 function devCuadre(d){
   const m=new Map(),add=(arr,side)=>{for(const l of arr||[]){convFix(l);const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{cod:l.k||l.code,desc:"",um:"",ce:"",f:1,D:null,R:null};
     r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}r[side]=(r[side]||0)+(+l.qty||0)*(+l.f||1);m.set(k,r)}};
@@ -7040,7 +7062,7 @@ async function dpEnviar(){
   if(!dpLect.length){toast("Agrega al menos un producto");return focusSel($("#dpScan"))}
   const area=norm($("#dpArea").value)||"Panel";
   confirmBox(`Enviar a bodega la devolución guía ${esc(doc.guia||"—")} · factura ${esc(doc.factura||"—")} (${esc(area)}) con ${fmt(dpLect.length)} líneas.`,async()=>{
-    try{await mrpc("cb_dev_crear_panel",{p_area:area,p_doc:doc,p_lect:dpLect});
+    try{const rr=await mrpc("cb_dev_crear_panel",{p_area:area,p_doc:doc,p_lect:dpLect});const nid=rr&&(rr.id||rr);if(nid&&Array.isArray(devVistas)){devVistas.push(String(nid));store.set("inv_devvistas",devVistas)}
       dpLect=[];["#dpGuia","#dpFact","#dpNota"].forEach(s=>$(s).value="");dpRender();toast("✓ Devolución enviada a bodega");devF="pend";await devRefresh(false)}
     catch(e){toast(dvMsg(e))}},"#dpConfirm");
 }
@@ -7090,7 +7112,7 @@ async function ptRefresh(force){
   }catch(e){if(force){$("#ptNote").hidden=false;$("#ptNote").textContent=/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script actualizacion_04_puestos.sql.":movMsg(e)}}
   finally{ptBusy=false}
 }
-function ptEnter(){ptDias();$("#ptAddTog").hidden=!pvCan("pt_corregir");if(!pvCan("pt_corregir"))$("#ptAddPanel").hidden=true;if(!movOk()){$("#ptNote").hidden=false;$("#ptNote").innerHTML="Para ver el producto terminado, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.";return}renderPtPanel();ptRefresh(true)}
+function ptEnter(){ptDias();$("#ptAddTog").hidden=!pvCan("pt_corregir");if(!pvCan("pt_corregir"))$("#ptAddPanel").hidden=true;if(!movOk()){$("#ptNote").hidden=false;$("#ptNote").innerHTML="Para ver el producto terminado, conecta el envío automático (Supabase) en <b>2 · Permisos</b>.";return}renderPtPanel();ptRefresh(true)}
 setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-pt").hidden)ptRefresh(false)},20000);
 $("#ptTraer").onclick=()=>ptRefresh(true);
 $("#ptDesde").onchange=()=>{ptRefresh(true);if(!$("#ptAddPanel").hidden)ptAdInfo()};
@@ -7448,7 +7470,7 @@ function pvDias(){const sel=$("#pvDia"),v=store.get("inv_pvdia","all"),h=new Dat
 const pvDiaOk=d=>{const v=$("#pvDia").value||"all";return v==="all"||String(d.fecha||"").slice(0,10)===v||(!d.fecha&&ymd(new Date(d.creado))===v)};
 function pvEnter(){
   const on=movOk();$("#pvNote").hidden=on;
-  if(!on){$("#pvNote").innerHTML='Para ver las recepciones, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.';$("#pvTbl").innerHTML="";$("#pvDet").hidden=true;$("#pvChips").innerHTML="";return}
+  if(!on){$("#pvNote").innerHTML='Para ver las recepciones, conecta el envío automático (Supabase) en <b>2 · Permisos</b>.';$("#pvTbl").innerHTML="";$("#pvDet").hidden=true;$("#pvChips").innerHTML="";return}
   pvDias();pvCatalogo().then(()=>{if(!$("#pvForm").hidden)pvFormRender()});pvRender();pvRefresh(true);
 }
 async function pvRefresh(silent){
