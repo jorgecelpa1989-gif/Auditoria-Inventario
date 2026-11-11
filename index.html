@@ -5572,7 +5572,7 @@ async function catSync(force){        // supervisor: sube catálogo + stock si c
   const items=its.map(catRow), stock={};
   for(const i of its)stock[i.cod]=[i.disp!=null?+i.disp:(i.stock!=null?+i.stock:null),i.stock!=null?+i.stock:null];
   const sig=JSON.stringify(items).length+"|"+JSON.stringify(stock).length+"|"+items.length+"|"+(erp&&erp.at||"");
-  if(!force&&store.get("inv_catsig","")===sig)return;
+  if(!force&&store.get("inv_catsig","")===sig)return factNube(false);
   catBusy=true;
   try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:(erp&&erp.file)||"ERP"});
     store.set("inv_catsig",sig);store.set("inv_catat",new Date().toISOString());renderAcc();if(force)toast("Catálogo y stock enviados")}
@@ -7323,8 +7323,11 @@ function pcWork(){
   if(pc.propia&&!D.proveedor)setTimeout(()=>{try{$("#pcProv").focus()}catch(e){}},60);else if(!pcCamI)setTimeout(()=>$("#pcScan").focus(),60);
 }
 function pcLimpiar(){$("#pcScan").value="";$("#pcQty").value="";$("#pcPending").hidden=true;$("#pcSugg").hidden=true;$("#pcQtyEb").textContent="3 · Cantidad";pcHold=false;pcChk=""}
+/* Producto con la conversión del packing list cuando la lista de productos no la tiene (p. ej. 140201: KG en el maestro, CAJA de 25 en el packing). */
+function pcItem(v){const it=ptFind(v);if(conv(it)||!pc)return it;const k=key(it?it.cod:v),dl=(pc.decl||[]).find(l=>key(l.k||l.code)===k&&l.ce&&+l.f>0&&+l.f!==1);
+  return dl?Object.assign({cod:it?it.cod:v,desc:(it&&it.desc)||dl.desc||"",um:(it&&it.um)||dl.um||""},it||{},{ce:dl.ce,f:+dl.f}):it}
 function pcPend(v){
-  const it=ptFind(v),p=$("#pcPending");p.hidden=false;p.className="pending"+(it?"":" bad");
+  const it=pcItem(v),p=$("#pcPending");p.hidden=false;p.className="pending"+(it?"":" bad");
   const tot=pc.lect.filter(l=>key(l.k||l.code)===key(it?it.cod:v)).reduce((a,l)=>a+(+l.qty||0),0);
   p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}${tot?` · ya registrado: ${fmt2(tot)}`:""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza.");
   $("#pcQtyEb").textContent=qtyLabel(it,3);return it;
@@ -7352,7 +7355,7 @@ function pcAdd(){
   if(!pc)return;
   const code=codeStr($("#pcScan").value);if(!code){toast("Primero escanea o digita un producto");return focusSel($("#pcScan"))}
   const q=num($("#pcQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#pcQty"))}
-  const it=ptFind(code);
+  const it=pcItem(code);
   if(!it&&ptItems().length&&pcOkUnknown!==code){pcPend(code);codeAlert(code,()=>focusSel($("#pcScan")),()=>{pcOkUnknown=code;pcAdd()});return}
   const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString()};
   if(conv(it)){l.f=+it.f;l.ce=it.ce}
@@ -7487,7 +7490,9 @@ function pvCuadre(d){
   const m=new Map(),row=l=>{convFix(l);const k=key(l.k||l.code);if(!k)return null;const r=m.get(k)||{k,cod:l.k||l.code,desc:"",um:"",ce:"",f:1,E:null,R:null,regs:[],abc:"",bxp:0,PE:null};
     r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}if(!r.abc&&abcOk(l.abc))r.abc=abcOk(l.abc);if(!r.bxp&&+l.bxp>0)r.bxp=+l.bxp;m.set(k,r);return r};
   for(const l of d.esperado||[]){const r=row(l);if(!r)continue;r.E=(r.E||0)+(+l.qty||0)*(+l.f||1);if(+l.bxp>0)r.PE=(r.PE||0)+(+l.qty||0)/+l.bxp}
-  for(const l of pvRegs(d)){const r=row(l);if(!r)continue;r.regs.push(l);if(+l.qty>0)r.R=(r.R||0)+(+l.qty||0)*(+l.f||1)}
+  for(const l of pvRegs(d)){convFix(l);const e=m.get(key(l.k||l.code));
+    if(e&&e.ce&&e.f>0&&e.f!==1&&!(l.ce&&+l.f>0&&+l.f!==1)){l.ce=e.ce;l.f=e.f;l.convAp=true}   // misma regla en todos los equipos, aunque este PC no tenga la equivalencia
+    const r=row(l);if(!r)continue;r.regs.push(l);if(+l.qty>0)r.R=(r.R||0)+(+l.qty||0)*(+l.f||1)}
   const fin=!!d.recibido;
   return [...m.values()].map(r=>{if(!r.desc){const it=pvFind(r.cod);if(it){r.desc=it.desc;r.um=r.um||umTxt(it.um)}}
     r.dif=r.E!=null&&r.R!=null?r.R-r.E:null;r.PR=r.R!=null&&r.bxp?r.R/(r.f||1)/r.bxp:null;

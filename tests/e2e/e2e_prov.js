@@ -125,6 +125,9 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  const csv=require('fs').readFileSync(require('path').join(__dirname,'../datos/packing_ONEU9196570.csv'),'utf8');
  const csR=await s.evaluate(t=>{const o=pvFilas(csvFilas(t,","));return o.out.length+"|"+o.cont+"|"+o.out.filter(x=>x.code==="221203").map(x=>[x.qty,x.fpl,x.bxp,x.abc].join("/"))+"|"+o.out.map(x=>x.abc).join("")},csv);
  check(csR==='16|ONEU9196570|145/30/34/NSO|CCNSOBBNSONSONSONSONSONSOCBBBOU','CSV del proveedor: 16 filas, 221203 = 145 bultos, 30 m, 34 x pallet, NSO → '+csR);
+ // Recibido sin conversión (el maestro no la tiene: 110107 en KG) → usa la del packing list (CAJA de 25), en cualquier PC
+ const cv=await s.evaluate(()=>{const r=pvCuadre({recibido:"x",esperado:[{code:"110107",k:"110107",qty:60,ce:"CAJA",f:25,um:"kg"}],rec:[{lid:"a1",code:"110107",k:"110107",qty:60,um:"kg"}],man:[]})[0];return r.E+"|"+r.R+"|"+r.st+"|"+r.ce});
+ check(cv==='1500|1500|ok|CAJA','Celular registró 60 (sin conversión en el maestro): se lee 60 CAJAS = 1.500 kg y cuadra → '+cv);
  // Validaciones del servidor
  check(/falta_documento/.test(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{fecha:'2026-11-11'},p_esperado:[]}).body),'Sin guía ni referencia: rechazado');
  check(!rpc('cb_prov_listar',{p_clave:'clave-mala-xxxx'}).ok,'Sin clave: rechazado');
