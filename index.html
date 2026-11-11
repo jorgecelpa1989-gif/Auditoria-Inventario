@@ -4843,7 +4843,17 @@ function maestroSync(){const c=$("#maestroCard");if(!c)return;c.hidden=!erpBase(
 function convFix(d){if(!d||(d.ce&&+d.f>0&&+d.f!==1))return d;const k=key(d.k||d.code||"");let c=null;
   if(typeof catRemoto==="function"&&catRemoto()){const cat=(typeof movCat!=="undefined"&&movCat)||[];c=cat.find(i=>key(i.cod)===k&&conv(i))||null}
   else{const x=FACT[k];if(x&&x.ce&&+x.f>0&&+x.f!==1)c={ce:x.ce,f:+x.f,um:(MASTER[k]||{}).um||""}}
+  if(!c&&typeof catNube!=="undefined"&&catNube)c=catNube.get(k)||null;
   if(c){d.ce=c.ce;d.f=+c.f;if(!d.um||UMN(d.um)==="un")d.um=c.um||d.um;d.convAp=true}return d}
+/* Conversiones del catálogo de Supabase para el administrador: así su panel convierte igual en cualquier PC o dirección,
+   aunque ese navegador no tenga guardadas las equivalencias. */
+var catNube=null,catNubeAt=0;
+async function catNubeLoad(force){
+  if(catRemoto()||!nubeOn()||(!force&&catNube&&Date.now()-catNubeAt<300000))return;
+  try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(!r||!Array.isArray(r.items))return;const m=new Map();
+    for(const [cod,ean,desc,um,ce,f] of r.items)if(cod&&ce&&+f>0&&+f!==1)m.set(key(cod),{ce:String(ce).toUpperCase(),f:+f,um:um||""});
+    catNube=m;catNubeAt=Date.now()}catch(e){}
+}
 function factItems(){return erpDraft&&erpDraft.items&&erpDraft.items.length?erpDraft.items:(erp&&!erp.maestro?erp.items:[])}
 let factFilter="pend";
 var factT=null;
@@ -5881,7 +5891,7 @@ function movEstado(x){
 }
 async function refreshMov(force){
   if(!movOk()||movBusy||!pvCan("mp_ver"))return;movBusy=true;
-  try{
+  try{await catNubeLoad(false);
     const arr=await mrpc("cb_mov_listar");
     movLive=new Map((arr||[]).map(x=>[x.id,x]));movAt=new Date();
     for(const x of movLive.values()){const L=x.lados||{};if(L.E&&L.E.terminado&&L.R&&L.R.terminado&&!x.finalizado){x.finalizado=new Date().toISOString();mrpc("cb_mov_finalizar",{p_id:x.id}).catch(()=>{})}}
@@ -6953,7 +6963,7 @@ function devEnter(){
 }
 async function devRefresh(silent){
   if(!movOk()||!pvCan("dev_ver")||devBusy)return;devBusy=true;
-  try{const r=await mrpc("cb_dev_listar");devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;avisoDev();if(!$("#v-devol").hidden)devRender()}
+  try{await catNubeLoad(false);const r=await mrpc("cb_dev_listar");devList=Array.isArray(r)?r:[];devAt=new Date();$("#dvNote").hidden=true;avisoDev();if(!$("#v-devol").hidden)devRender()}
   catch(e){const m=dvMsg(e);if(!silent)toast(m);if(/actualización 07/.test(m)){$("#dvNote").hidden=false;$("#dvNote").textContent=m}}
   finally{devBusy=false}
 }
@@ -7106,6 +7116,7 @@ async function ptRefresh(force){
   try{
     // Supervisor de área: las conversiones (bultos) salen del catálogo de Supabase, igual que en el panel del administrador
     if(catRemoto()&&(!movCat||force))await catLoad(true).catch(()=>{});
+    else await catNubeLoad(force);
     const r=ptRango(), desde=new Date(((r||new Date(Date.now()-2*864e5)).getTime())-2*864e5);   // 2 días antes, para encontrar la producción de pallets recibidos después
     ptData=await mrpc("cb_pt_listar",{p_desde:desde.toISOString()})||ptData;ptAt=new Date();
     $("#ptNote").hidden=true;renderPtPanel();
@@ -7142,7 +7153,9 @@ function ptRows(){
   if(!ini){const c=ptData.cierres.filter(x=>x.puesto==="produccion").map(x=>x.t).sort().at(-1);ini=c?new Date(c):new Date(new Date().setHours(0,0,0,0))}
   const E=new Map(),R=new Map();
   const SN=new Map();
-  for(const d of ptData.pallets){convFix(d);
+  const cvSku=new Map();for(const d of ptData.pallets){convFix(d);if(d.ce&&+d.f>0&&+d.f!==1){const k=key(d.k||d.code);if(!cvSku.has(k))cvSku.set(k,{ce:d.ce,f:+d.f,um:d.um})}}
+  for(const d of ptData.pallets){const cv=!(d.ce&&+d.f>0&&+d.f!==1)&&cvSku.get(key(d.k||d.code));
+    if(cv){d.ce=cv.ce;d.f=cv.f;if(!d.um||UMN(d.um)==="un")d.um=cv.um||d.um;d.convAp=true}   // registro antiguo sin conversión (p. ej. "10 un"): se lee como 10 ROLLOS
     if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
       if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);SN.set(k,o);if(!(+d.qty>0))continue;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
