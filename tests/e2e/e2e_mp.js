@@ -1,0 +1,23 @@
+const {chromium,devices}=require('playwright');const {execFileSync}=require('child_process');
+const PG=['-h','/var/lib/postgresql/cctest/sock','-p','55432','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'];
+function rpc(fn,args){const sql=`set role anon; select rpc_test($$${fn}$$, $j$${JSON.stringify(args)}$j$::jsonb)::text;`;
+  try{return {ok:true,body:execFileSync('psql',[...PG,'-c',sql],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()||'null'}}catch(e){const m=(e.stderr||'').match(/ERROR:\s+(.*)/);return {ok:false,body:JSON.stringify({message:m?m[1].trim():'error'})}}}
+const BASE='http://localhost:8811/index.html',SBU='https://test.supabase.co';let fail=0;const check=(c,m)=>{console.log((c?'✅ ':'❌ ')+m);if(!c)fail++};
+(async()=>{const b=await chromium.launch();const c=await b.newContext({...devices['iPhone 13']});
+ await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
+ const p=await c.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));
+ const m=JSON.parse(rpc('cb_mov_crear',{p_clave:'clave-supervisor-123',p_nombre:'MP prueba',p_vence:new Date(Date.now()+3*3600e3).toISOString(),p_items:[["110107","","Harina","KG","",1]],p_meta:null}).body);
+ await p.goto(`${BASE}?mov=${m.id}.${m.token}&u=${encodeURIComponent(SBU)}&k=anon`);await p.waitForTimeout(1500);
+ await p.tap('#omPick [data-rol="E"]');await p.waitForTimeout(1500);
+ await p.fill('#omUser','ANA');await p.dispatchEvent('#omUser','change');
+ await p.fill('#omScan','77777');await p.tap('#omQty');await p.waitForTimeout(400);
+ check(await p.isVisible('#calert'),'D1 MP: código malo + tocar cantidad → alerta');
+ await p.tap('#caFix');await p.fill('#omScan','110107');await p.tap('#omQty');await p.waitForTimeout(400);
+ check(!(await p.isVisible('#calert')),'D1 MP: código bueno → sin alerta');
+ await p.fill('#omQty','2');await p.tap('#omOk');await p.waitForTimeout(300);
+ await p.fill('#omScan','88888');await p.fill('#omQty','1');await p.tap('#omOk');await p.waitForTimeout(400);
+ check(await p.isVisible('#calert'),'D1 MP: código malo + OK directo → alerta antes de registrar');
+ await p.tap('#caKeep');await p.waitForTimeout(2200);
+ const n=+execFileSync('psql',[...PG,'-c',`select count(*) from cb_mov_lect where mov='${m.id}'`],{encoding:'utf8'}).trim();
+ check(n===2,'D1 MP: "Registrar igual" registra y se envía (servidor: '+n+' lecturas)');
+ check(errs.length===0,'D1 MP: sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

@@ -1,0 +1,42 @@
+const {chromium,devices}=require('playwright');const {execFileSync}=require('child_process');
+const PG=['-h','/var/lib/postgresql/cctest/sock','-p','55432','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'];
+function rpc(fn,args){const s=`set role anon; select rpc_test($$${fn}$$, $j$${JSON.stringify(args)}$j$::jsonb)::text;`;
+  try{return {ok:true,body:execFileSync('psql',[...PG,'-c',s],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()||'null'}}catch(e){const m=(e.stderr||'').match(/ERROR:\s+(.*)/);return {ok:false,body:JSON.stringify({message:m?m[1].trim():'error'})}}}
+const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN='clave-supervisor-123';let fail=0;const check=(c,m)=>{console.log((c?'✅ ':'❌ ')+m);if(!c)fail++};
+async function ctx(b,dev){const c=await b.newContext(dev||{...devices['iPhone 13']});await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});const p=await c.newPage();p.errs=[];p.on('pageerror',e=>p.errs.push(e.message));return [c,p]}
+const PC={viewport:{width:1366,height:900},deviceScaleFactor:2};
+(async()=>{const b=await chromium.launch();
+ const cr=JSON.parse(rpc('cb_crear',{p_clave:ADMIN,p_nombre:'Conteo sacos',p_vence:new Date(Date.now()+3*3600e3).toISOString(),p_items:[["140101","","SACO HARINA 25KG","KG","SACO",25],["110107","","ROLLO ALAMBRE","KG","",1]],p_meta:null}).body);
+ const [c1,p1]=await ctx(b);await p1.goto(`${B}?nube=${cr.id}.${cr.token}&u=${encodeURIComponent(SBU)}&k=anon`);await p1.waitForTimeout(1500);
+ await p1.fill('#scan','140101');await p1.fill('#qty','2');await p1.tap('#btnAdd');await p1.waitForTimeout(300);
+ await p1.fill('#scan','110107');await p1.fill('#qty','7');await p1.tap('#btnAdd');await p1.waitForTimeout(2500);
+ const [cS,pS]=await ctx(b,PC);await pS.goto(B+'#panel');
+ await pS.evaluate(([u,a,id])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));localStorage.setItem('inv_conteos',JSON.stringify([{id,nube:true,nombre:'Conteo sacos',creado:new Date().toISOString(),productos:2,link:'x'}]));localStorage.setItem('inv_rsel',JSON.stringify(id))},[SBU,ADMIN,cr.id]);
+ await pS.goto(B+'#erp');await pS.reload();await pS.waitForTimeout(1200);
+ await pS.click('#btnDemo');await pS.waitForTimeout(800);
+ check(!(await pS.$('#v-erp #maestroCard')),'Panel: ya no tiene el cuadro "Paso 3 · Crear conteo"');
+ await pS.click('#sideNav [data-v="resultado"]');await pS.waitForTimeout(2500);
+ const ord=await pS.evaluate(()=>[...document.querySelectorAll('#v-resultado .resMain > .card')].filter(e=>!e.hidden).map(e=>e.id||(e.querySelector('#kpis')?'kpis':(e.querySelector('#det')?'detalle':'?'))).join(' > '));
+ check(ord==='kpis > maestroCard > resT1 > detalle','Inventario: indicadores > crear conteo > resumen por producto > detalle de lecturas ('+ord+')');
+ check(await pS.isVisible('#resT1'),'Inventario: se muestra el "Resumen por producto" (se restauró a pedido)');
+ const r=await pS.evaluate(()=>{const s=document.querySelector('#rSel').closest('.card').getBoundingClientRect(),m=document.querySelector('.resMain').getBoundingClientRect();return s.left>m.right-5});
+ check(r,'Inventario: "Ver resultados de" quedó a la derecha');
+ const k=await pS.$$eval('#kpis .kpi',x=>x.map(e=>e.innerText.replace(/\s+/g,' ')));
+ check(k.length===3&&/\d+ \/ \d+ SKU contados \/ total/.test(k[0])&&/Cuadran \/ con diferencia/.test(k[1])&&/IRA/.test(k[2]),'Inventario: 3 indicadores unificados → '+k.join(' | '));
+ const th=await pS.$$eval('#det thead th',x=>x.map(e=>e.textContent).join('|'));const fila=(await pS.$$eval('#det tbody tr',r=>r.map(x=>x.innerText.replace(/\s+/g,' ')))).find(x=>/140101/.test(x))||'';
+ check(/Unidades\|Conversión/.test(th)&&/2 SACOS/.test(fila)&&/50 kg/.test(fila)&&/1 SACO = 25/.test(fila),'Inventario: el detalle muestra unidades y conversión (2 SACOS · 50 kg · 1 SACO = 25) → '+fila.slice(0,110));
+ await pS.screenshot({path:S+'/inv.png'});
+ // Entrega MP con solicitud
+ const mv=JSON.parse(rpc('cb_mov_crear',{p_clave:ADMIN,p_nombre:'Entrega OT-7',p_vence:new Date(Date.now()+3*3600e3).toISOString(),p_items:[["140101","","SACO HARINA 25KG","KG","SACO",25]],p_meta:{sol:[["140101",100]],ref:"OT-7"}}).body);
+ const e=JSON.parse(rpc('cb_mov_abrir',{p_id:mv.id,p_token:mv.token,p_device:'dE',p_rol:'E'}).body);
+ rpc('cb_mov_enviar',{p_id:mv.id,p_rol:'E',p_secret:e.secret,p_persona:'JUAN',p_lecturas:[{lid:'m1',code:'140101',k:'140101',qty:3,f:25,ce:'SACO',um:'kg',desc:'SACO HARINA 25KG',t:new Date().toISOString()}]});
+ await pS.evaluate(id=>{localStorage.setItem('inv_movsel',JSON.stringify(id))},mv.id);
+ await pS.goto(B+'#mp');await pS.reload();await pS.waitForTimeout(3000);
+ const mk=await pS.$$eval('#mpKpis .kpi',x=>x.map(e=>e.innerText.replace(/\s+/g,' ')));
+ check(mk.length===3&&/SKU solicitados \/ entregados \/ recibidos/.test(mk[0])&&/Cuadran \/ con diferencia/.test(mk[1]),'Entrega MP: 3 indicadores unificados → '+mk.join(' | '));
+ const mr=await pS.textContent('#mpRes');check(/4\s*SACOS/.test(mr)&&/= 100 kg/.test(mr)&&/3\s*SACOS/.test(mr)&&/= 75 kg/.test(mr),'Entrega MP: solicitado y entregado con unidades y conversión (4 SACOS = 100 kg · 3 SACOS = 75 kg)');
+ await pS.evaluate(()=>{const d=document.getElementById('mpDetBox');if(d)d.open=true});
+ const md=await pS.textContent('#mpDet');check(/3\s*SACOS/.test(md)&&/75 kg/.test(md)&&/1 SACO = 25/.test(md),'Entrega MP: detalle de lecturas con unidades y conversión');
+ await pS.screenshot({path:S+'/mp.png'});console.log('MPOVF',await pS.evaluate(()=>{const t=document.querySelector('#mpRes').closest('.tbl');return t.scrollWidth+'/'+t.clientWidth}));
+ const errs=[p1,pS].flatMap(p=>p.errs);check(errs.length===0,'Sin errores JS '+errs.join(' | '));
+ console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();
