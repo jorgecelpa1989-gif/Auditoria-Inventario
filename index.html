@@ -7531,6 +7531,13 @@ function pvLinea(code,qty,enBase,desc,x){
 /* Clase ABC: solo letras (A, B, C, NSO…). Nunca un número (pallets) ni una unidad de medida (KG, ML, M…). */
 const ABC_NO=new Set(["KG","KGS","KL","ML","M","MT","MTS","UN","UND","U","LT","L","GR","G","CJ","CAJ","ROL","SC","PZ","PZA","MM","CM","TON","TN"]);
 function abcOk(v){v=String(v==null?"":v).trim().toUpperCase();return /^[A-Z]{1,3}$/.test(v)&&!ABC_NO.has(v)?v:""}
+/* CSV con comillas: "2,000" o "Harn (0,6x30)" son UNA celda aunque tengan coma (antes se partían y la fila quedaba corrida). */
+function csvFilas(txt,sep){const rows=[];let row=[],c="",q=false;
+  for(let i=0;i<txt.length;i++){const ch=txt[i];
+    if(q){if(ch==='"'){if(txt[i+1]==='"'){c+='"';i++}else q=false}else c+=ch}
+    else if(ch==='"'&&c==="")q=true;else if(ch===sep){row.push(c);c=""}
+    else if(ch==="\n"||ch==="\r"){if(ch==="\r"&&txt[i+1]==="\n")i++;row.push(c);rows.push(row);row=[];c=""}else c+=ch}
+  if(c!==""||row.length){row.push(c);rows.push(row)}return rows}
 function pvFilas(rows){
   const R=rows.map(r=>r.map(c=>String(c==null?"":c).replace(/[▼▾⏷]/g,"").trim())).filter(r=>r.some(c=>c));let h=-1,C={};
   const col=(r,...res)=>{for(const re of res){const i=r.findIndex(x=>re.test(x));if(i>=0)return i}return -1};
@@ -7563,7 +7570,7 @@ function pvAgregarFilas(res,origen){
 }
 $("#pvFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f||!pvEd)return;
   try{const buf=await f.arrayBuffer();let rows;
-    if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf);const sep=txt.includes("\t")?"\t":txt.split("\n")[0].includes(";")?";":",";rows=txt.split(/\r?\n/).map(l=>l.split(sep))}
+    if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf).replace(/^\uFEFF/,"");const l0=txt.split("\n")[0];rows=csvFilas(txt,l0.includes("\t")?"\t":l0.includes(";")?";":",")}
     else{const wb=XLSX.read(buf,{type:"array"});const ws=wb.Sheets[wb.SheetNames[0]];rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""})}
     pvAgregarFilas(pvFilas(rows),"Packing list "+f.name)}
   catch(er){toast("No se pudo leer el archivo. Prueba guardarlo como .xlsx o copia y pega las filas.")}});
