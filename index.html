@@ -3862,6 +3862,83 @@ begin
   end if;
   return v_id;
 end $$;
+
+-- =====================================================================
+--  Actualización 20 · Recepción de proveedores: N° de contenedor
+--  Agrega el campo "contenedor" (después del N° de referencia). Las líneas del packing list
+--  ya guardan ABC, bultos por pallet y conversión del proveedor (no cambia la tabla).
+--  Solo agrega: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+alter table public.cb_prov add column if not exists contenedor text;
+
+create or replace function public.cb_prov_guardar(p_clave text, p_id uuid, p_doc jsonb, p_esperado jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'prov_operar'); v_id uuid := p_id; v_fecha date; p cb_prov;
+begin
+  perform cb_prov_lineas_ok(coalesce(p_esperado, '[]'::jsonb));
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if v_fecha is null then raise exception 'fecha_invalida'; end if;
+  if coalesce(trim(p_doc->>'guia'),'') = '' and coalesce(trim(p_doc->>'referencia'),'') = '' then raise exception 'falta_documento'; end if;
+  if v_id is not null then
+    select * into p from cb_prov where id = v_id for update;
+    if not found then v_id := null; elsif p.finalizado is not null then raise exception 'finalizado'; end if;
+  end if;
+  if v_id is null then
+    insert into cb_prov(id, origen, persona) values (coalesce(p_id, gen_random_uuid()), 'panel', left(coalesce(cb_sup_nombre(p_clave), nullif(p_doc->>'persona',''), 'Supervisor'), 80))
+    returning id into v_id;
+  end if;
+  update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+         proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+         referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), contenedor = left(trim(coalesce(p_doc->>'contenedor','')), 40), fecha = v_fecha, nota = left(p_doc->>'nota', 300),
+         esperado = coalesce(p_esperado, '[]'::jsonb), actualizado = now()
+   where id = v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+
+create or replace function public.cb_prov_recibir(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; v_fecha date; v_pers text := left(p_doc->>'persona', 80);
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then raise exception 'sin_permiso'; end if;
+  if p_id is null then raise exception 'datos_invalidos'; end if;
+  perform cb_prov_lineas_ok(p_rec);
+  select * into p from cb_prov where id = p_id for update;
+  if not found then
+    insert into cb_prov(id, origen, persona, fecha) values (p_id, p_puesto, v_pers, (now() at time zone 'America/Santiago')::date)
+    returning * into p;
+  end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if p.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p.origen = p_puesto then
+    begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then v_fecha := null; end;
+    update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+           proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+           referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), contenedor = left(trim(coalesce(p_doc->>'contenedor','')), 40), fecha = coalesce(v_fecha, fecha), nota = left(p_doc->>'nota', 300)
+     where id = p_id
+    returning * into p;
+  end if;
+  if p_terminar then
+    if jsonb_array_length(p_rec) = 0 then raise exception 'sin_productos'; end if;
+    if coalesce(p.guia, '') = '' and coalesce(p.referencia, '') = '' then raise exception 'falta_documento'; end if;
+  end if;
+  update cb_prov set rec = p_rec, rec_persona = v_pers, rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end);
+end $$;
+
+create or replace function public.cb_prov_mis(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'tipo', p.tipo, 'proveedor', p.proveedor, 'guia', p.guia, 'referencia', p.referencia, 'contenedor', p.contenedor,
+      'fecha', p.fecha, 'nota', p.nota, 'origen', p.origen, 'persona', p.persona, 'esperado', p.esperado, 'rec', p.rec,
+      'rec_persona', p.rec_persona, 'rec_inicio', p.rec_inicio, 'recibido', p.recibido) order by p.creado)
+    from cb_prov p where p.finalizado is null and (p.recibido is null or p.recibido > now() - interval '18 hours')), '[]'::jsonb);
+end $$;
 </script>
   </div>
 
@@ -3919,7 +3996,8 @@ end $$;
         <label class="f">Tipo<select id="pvTipo"><option value="nacional">Nacional</option><option value="importacion">Importación</option></select></label>
         <label class="f">Proveedor<input id="pvProv" autocomplete="off" autocapitalize="characters" placeholder="Nombre del proveedor"></label>
         <label class="f">N° de guía<input id="pvGuia" autocomplete="off" autocapitalize="characters"></label>
-        <label class="f">N° de referencia<input id="pvRefe" autocomplete="off" autocapitalize="characters" placeholder="OC, factura, contenedor o carpeta"></label>
+        <label class="f">N° de referencia<input id="pvRefe" autocomplete="off" autocapitalize="characters" placeholder="OC, factura o carpeta"></label>
+        <label class="f">N° de contenedor<input id="pvCont" autocomplete="off" autocapitalize="characters" placeholder="Ej: ONEU9329903"></label>
         <label class="f">Fecha<input id="pvFecha" type="date"></label>
       </div>
       <div class="small muted">N° de guía o N° de referencia: basta con uno.</div>
@@ -3929,7 +4007,8 @@ end $$;
         <label class="btn sm" style="cursor:pointer">📄 Cargar Excel o CSV<input id="pvFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden></label>
         <span class="small muted">o pega las filas copiadas desde Excel:</span>
       </div>
-      <textarea id="pvPaste" rows="3" placeholder="Código[tab]Cantidad (con o sin encabezado; también reconoce columnas de descripción)" style="width:100%;font:13px var(--mono)"></textarea>
+      <div class="small muted">Formato del proveedor: REF. · Contenedor · SKU · Producto · Met./Kil. · Bultos x Pallet · un. En Cont. · ML/KG · Pallets · ABC. Toma la cantidad de <b>un. En Cont.</b> (bultos), calcula los pallets y guarda la clase ABC; si el formulario está vacío, llena la referencia y el contenedor.</div>
+      <textarea id="pvPaste" rows="3" placeholder="Pega aquí las filas copiadas desde Excel, con su fila de encabezado" style="width:100%;font:13px var(--mono)"></textarea>
       <div class="row small" style="gap:10px;flex-wrap:wrap"><span class="muted">Las cantidades vienen en:</span>
         <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="pvU" value="ce" checked> bultos (rollos, cajas, sacos…)</label>
         <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="pvU" value="base"> unidad del ERP (m, kg, un…)</label>
@@ -3944,7 +4023,7 @@ end $$;
       <div class="row" style="gap:8px"><button class="btn primary" id="pvSave" type="button">Crear y enviar a bodega</button><button class="btn" id="pvCancel" type="button">Cancelar</button><span class="small muted" id="pvFormInfo"></span></div>
     </div>
     <div class="kpis" id="pvKpis"></div>
-    <div class="row"><div class="chips" id="pvChips"></div><span class="sep"></span><input id="pvQ" placeholder="Buscar proveedor, guía, referencia o SKU" style="flex:0 1 280px"></div>
+    <div class="row"><div class="chips" id="pvChips"></div><span class="sep"></span><input id="pvQ" placeholder="Buscar proveedor, guía, referencia, contenedor o SKU" style="flex:0 1 280px"></div>
     <div class="tbl" style="max-height:460px"><table id="pvTbl"></table></div>
   </div>
   <div class="card" id="pvDet" hidden>
@@ -7089,7 +7168,7 @@ async function pcAbrir(){
 }
 function pcRowHtml(d,ro){
   const n=(d.esperado||[]).length;
-  return `<button class="dvRow" data-pc="${esc(d.id)}" ${ro?"disabled":""}><span class="dd"><b>${esc(d.proveedor||"Proveedor sin nombre")}</b><span>${esc(PCTIPO[d.tipo]||"")} · Guía ${esc(d.guia||"—")} · Ref. ${esc(d.referencia||"—")} · ${fechaCL(d.fecha)}${n?" · "+fmt(n)+" líneas":" · sin packing list"}</span></span><span class="pill ${d.recibido?"p-ok":d.rec_inicio?"p-info":"p-warn"}">${d.recibido?"Recibida":d.rec_inicio?"En recepción":"Por recibir"}</span></button>`;
+  return `<button class="dvRow" data-pc="${esc(d.id)}" ${ro?"disabled":""}><span class="dd"><b>${esc(d.proveedor||"Proveedor sin nombre")}</b><span>${esc(PCTIPO[d.tipo]||"")} · Guía ${esc(d.guia||"—")} · Ref. ${esc(d.referencia||"—")}${d.contenedor?" · Cont. "+esc(d.contenedor):""} · ${fechaCL(d.fecha)}${n?" · "+fmt(n)+" líneas":" · sin packing list"}</span></span><span class="pill ${d.recibido?"p-ok":d.rec_inicio?"p-info":"p-warn"}">${d.recibido?"Recibida":d.rec_inicio?"En recepción":"Por recibir"}</span></button>`;
 }
 function pcHomeRender(){
   if(pc&&pc.fin){pc=null;pcSave()}
@@ -7105,13 +7184,13 @@ function pcHomeRender(){
 }
 function pcNueva(){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
-  pc={id:uuid4(),puesto:PST.puesto,propia:true,doc:{tipo:"nacional",proveedor:"",guia:"",referencia:"",fecha:hoyISO(),nota:""},decl:[],lect:[],dirty:false,ver:0};pcSave();pcWork();
+  pc={id:uuid4(),puesto:PST.puesto,propia:true,doc:{tipo:"nacional",proveedor:"",guia:"",referencia:"",contenedor:"",fecha:hoyISO(),nota:""},decl:[],lect:[],dirty:false,ver:0};pcSave();pcWork();
 }
 function pcElegir(id){
   const d=pcList.find(x=>x.id===id);if(!d)return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(d.recibido)return toast("Esta recepción ya se terminó");
-  pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
+  pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",contenedor:d.contenedor||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
       decl:Array.isArray(d.esperado)?d.esperado:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};pcSave();pcWork();
 }
 function pcWork(){
@@ -7121,15 +7200,16 @@ function pcWork(){
     $("#pcDoc").innerHTML=`<div class="dvGrid"><label class="f">Tipo<select id="pcTipo"><option value="nacional">Nacional</option><option value="importacion">Importación</option></select></label>
       <label class="f">Proveedor<input id="pcProv" autocomplete="off" autocapitalize="characters" value="${esc(D.proveedor)}"></label>
       <label class="f">N° de guía<input id="pcGuia" autocomplete="off" autocapitalize="characters" value="${esc(D.guia)}"></label>
-      <label class="f">N° de referencia<input id="pcRefe" autocomplete="off" autocapitalize="characters" value="${esc(D.referencia)}" placeholder="OC, factura o contenedor"></label>
+      <label class="f">N° de referencia<input id="pcRefe" autocomplete="off" autocapitalize="characters" value="${esc(D.referencia)}" placeholder="OC, factura o carpeta"></label>
+      <label class="f">N° de contenedor<input id="pcCont" autocomplete="off" autocapitalize="characters" value="${esc(D.contenedor||"")}"></label>
       <label class="f">Fecha<input id="pcFecha" type="date" value="${esc(D.fecha||hoyISO())}"></label></div>
       <div class="small muted" style="margin-top:4px">N° de guía o N° de referencia: basta con uno.</div>`;
     $("#pcTipo").value=D.tipo||"nacional";
     const bind=(id,k,up)=>$("#"+id).addEventListener("change",e=>{pc.doc[k]=up?norm(e.target.value).toUpperCase():e.target.value;if(up)e.target.value=pc.doc[k];pcDirty()});
-    bind("pcTipo","tipo");bind("pcProv","proveedor",1);bind("pcGuia","guia",1);bind("pcRefe","referencia",1);bind("pcFecha","fecha");
+    bind("pcTipo","tipo");bind("pcProv","proveedor",1);bind("pcGuia","guia",1);bind("pcRefe","referencia",1);bind("pcCont","contenedor",1);bind("pcFecha","fecha");
   }else{
     $("#pcDocEb").textContent="Recepción que recibes";
-    $("#pcDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(D.proveedor||"Proveedor sin nombre")}</b></span><span>${esc(PCTIPO[D.tipo]||"")}</span><span>Guía <b>${esc(D.guia||"—")}</b></span><span>Ref. <b>${esc(D.referencia||"—")}</b></span><span>Fecha <b>${fechaCL(D.fecha)}</b></span></div>${D.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(D.nota)}</div>`:""}<div id="pcDecl"></div>`;
+    $("#pcDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(D.proveedor||"Proveedor sin nombre")}</b></span><span>${esc(PCTIPO[D.tipo]||"")}</span><span>Guía <b>${esc(D.guia||"—")}</b></span><span>Ref. <b>${esc(D.referencia||"—")}</b></span>${D.contenedor?`<span>Cont. <b>${esc(D.contenedor)}</b></span>`:""}<span>Fecha <b>${fechaCL(D.fecha)}</b></span></div>${D.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(D.nota)}</div>`:""}<div id="pcDecl"></div>`;
   }
   $("#pcConfirm").innerHTML="";pcLimpiar();pcRender();pcRenderSync();
   if(pc.propia&&!D.proveedor)setTimeout(()=>{try{$("#pcProv").focus()}catch(e){}},60);else if(!pcCamI)setTimeout(()=>$("#pcScan").focus(),60);
@@ -7174,28 +7254,30 @@ function pcAdd(){
   pcHold=false;pcRender();
   if(pcCamI)$("#pcCamMsg").textContent="Listo. Apunta al siguiente producto.";else focusSel($("#pcScan"));
 }
-/* lo esperado (packing list) con lo recibido hasta ahora y botones para aceptar */
-function pcDeclRows(){
-  const m=new Map();
-  for(const l of pc.decl||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{k,cod:l.k||l.code,desc:l.desc||"",um:l.um||"",ce:l.ce||"",f:+l.f||1,D:0,R:0};r.D+=(+l.qty||0)*(+l.f||1);m.set(k,r)}
-  for(const l of pc.lect||[]){const r=m.get(key(l.k||l.code));if(r)r.R+=(+l.qty||0)*(+l.f||1)}
-  return [...m.values()];
-}
+/* Productos del packing list, con el mismo formato que la lista del inventario: código, descripción
+   y lo recibido hasta ahora ("Pendiente" si falta). No muestra cuánto se espera (recepción a ciegas). */
+var pcFiltro="pend", pcListOpen=store.get("inv_pclist",true);
 function pcDeclRender(){
   const box=$("#pcDecl");if(!box||pc.propia)return;
-  const rows=pcDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D);
-  if(!rows.length){box.innerHTML='<p class="small muted" style="margin:8px 0 0">Esta recepción no trae packing list: registra cada producto que llega.</p>';return}
-  box.innerHTML=`<div class="row" style="margin-top:10px"><b>Packing list (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pend.length?`<button class="btn sm primary" id="pcAccAll">✓ Aceptar todo tal como viene</button>`:'<span class="pill p-ok">Todo aceptado</span>'}</div>
-    <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR"><div><div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · esperado: <b>${dvEnU(r,r.D)}</b></div>
-      <div class="small">${r.R?`Recibido: <b>${dvEnU(r,r.R)}</b> ${ok?'<span class="pill p-ok">✓</span>':`<span class="pill ${dif<0?"p-bad":"p-warn"}">${dif<0?"faltan":"sobran"} ${dvEnU(r,Math.abs(dif))}</span>`}`:'<span class="muted">Sin recibir</span>'}</div></div>
-      <div class="row" style="gap:6px">${r.R+1e-9<r.D?`<button class="btn sm primary" data-pcacc="${esc(r.k)}">✓ Aceptar</button>`:""}<button class="btn sm" data-pcedt="${esc(r.k)}">Otra cantidad</button></div></div>`}).join("")}</div>
-    <p class="small muted" style="margin:6px 0 0">Si llegó algo que no está en el packing list o una cantidad distinta, regístralo abajo con el producto y la cantidad real.</p>`;
-  const acc=r=>{const falta=r.D-r.R;if(falta<=1e-9)return false;const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc,um:r.um,qty:+(falta/r.f).toFixed(6),user:PST.persona||"",t:new Date().toISOString(),acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}pc.lect.push(l);return true};
-  $$("#pcDecl [data-pcacc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.pcacc);if(r&&acc(r)){pcDirty();audio.beep(true);pcRender();toast("✓ Aceptado: "+(r.desc||r.cod))}});
-  const all=$("#pcAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pend.length)} producto${pend.length===1?"":"s"} con la cantidad del packing list.`,()=>{let n=0;for(const r of pend)if(acc(r))n++;if(n){pcDirty();audio.beep(true);pcRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#pcConfirm");
-  $$("#pcDecl [data-pcedt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.pcedt);if(!r)return;
-    if(pc.lect.some(l=>key(l.k||l.code)===r.k)){pc.lect=pc.lect.filter(l=>key(l.k||l.code)!==r.k);pcDirty();pcRender()}
-    $("#pcScan").value=r.cod;pcChk=r.cod;pcPend(r.cod);$("#pcQty").value="";focusSel($("#pcQty"));$("#pcQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
+  const m=new Map();for(const l of pc.decl||[]){const k=key(l.k||l.code);if(!k||m.has(k))continue;const it=ptFind(l.k||l.code);m.set(k,{k,cod:l.k||l.code,desc:l.desc||(it&&it.desc)||"",abc:l.abc||"",ce:l.ce||"",f:+l.f||1,um:l.um||""})}
+  const items=[...m.values()];
+  if(!items.length){box.innerHTML='<p class="small muted" style="margin:8px 0 0">Esta recepción no trae packing list: registra cada producto que llega.</p>';return}
+  const rec=new Map();for(const l of pc.lect||[]){if(!(+l.qty>0))continue;const k=key(l.k||l.code);rec.set(k,(rec.get(k)||0)+(+l.qty||0))}
+  const tot=items.length,done=items.filter(i=>rec.has(i.k)).length,pct=Math.round(done*100/tot),open=pcListOpen;
+  let h=`<div class="cbox" style="margin-top:10px;max-width:none"><div class="row" style="gap:8px"><div style="flex:1;min-width:0"><b>Packing list</b><div class="small muted">${fmt(done)} de ${fmt(tot)} productos recibidos</div></div>
+    <button class="btn sm" id="pcLT" aria-expanded="${open}">${open?"Ocultar lista ▴":"Ver productos ▾"}</button></div><div class="bar"><span style="width:${pct}%"></span></div>`;
+  if(open){const qv=$("#pcLQ")?$("#pcLQ").value:"",q=deacc(qv);
+    let list=items.filter(i=>pcFiltro==="todos"||(pcFiltro==="pend"?!rec.has(i.k):rec.has(i.k)));
+    if(q)list=items.filter(i=>deacc(i.cod+" "+i.desc).includes(q));
+    h+=`<div class="row" style="gap:6px"><div class="chips">${[["pend","Pendientes",tot-done],["ok","Recibidos",done],["todos","Todos",tot]].map(([v,l,c])=>`<button class="chip" data-pcf="${v}" aria-pressed="${pcFiltro===v}">${l} · ${fmt(c)}</button>`).join("")}</div></div>
+      <input id="pcLQ" placeholder="Buscar código o descripción" value="${esc(qv)}" autocomplete="off">
+      <div class="clist">${list.length?list.map(i=>{const r=rec.get(i.k);return `<button class="clrow${r?" done":""}" data-pcc="${esc(i.cod)}"><span class="code">${esc(i.cod)}</span><span class="cd">${esc(i.desc)}${i.abc?` <span class="small muted">· ${esc(i.abc)}</span>`:""}</span><span class="cs">${r?`✓ ${fmt2(r)} ${esc(i.ce&&i.f!==1?plural(i.ce).toLowerCase():umTxt(i.um))}`:"Pendiente"}</span></button>`}).join(""):`<div class="small muted" style="padding:10px">${pcFiltro==="pend"&&!q?"¡Todos los productos del packing list tienen al menos un registro!":"Sin resultados."}</div>`}</div>
+      <div class="small muted">Toca un producto para registrarlo (sirve para los que no tienen código de barras). Si llega algo que no está en la lista, escanéalo igual.</div>`}
+  box.innerHTML=h+`</div>`;
+  $("#pcLT").onclick=()=>{pcListOpen=!open;store.set("inv_pclist",pcListOpen);pcDeclRender()};
+  if(open){$$("#pcDecl [data-pcf]").forEach(b=>b.onclick=()=>{pcFiltro=b.dataset.pcf;pcDeclRender()});
+    const qi=$("#pcLQ");qi.oninput=()=>{const pos=qi.selectionStart;pcDeclRender();const n=$("#pcLQ");n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}};
+    $$("#pcDecl [data-pcc]").forEach(b=>b.onclick=()=>{pcRead(b.dataset.pcc);$("#pcScan").scrollIntoView({block:"center",behavior:"smooth"})})}
 }
 function pcRender(){
   if(!pc)return;pcDeclRender();const ls=[...pc.lect].reverse();
@@ -7291,13 +7373,13 @@ setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-prov").hidden&&$("#pvForm"
 /* ---------- cuadre por SKU: esperado (packing list) vs recibido (celular + agregado a mano) ---------- */
 function pvRegs(d){return [...(d.rec||[]).map(l=>Object.assign({src:"cel"},l)),...(d.man||[]).map(l=>Object.assign({src:"man"},l))]}
 function pvCuadre(d){
-  const m=new Map(),row=l=>{convFix(l);const k=key(l.k||l.code);if(!k)return null;const r=m.get(k)||{k,cod:l.k||l.code,desc:"",um:"",ce:"",f:1,E:null,R:null,regs:[]};
-    r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}m.set(k,r);return r};
-  for(const l of d.esperado||[]){const r=row(l);if(r)r.E=(r.E||0)+(+l.qty||0)*(+l.f||1)}
+  const m=new Map(),row=l=>{convFix(l);const k=key(l.k||l.code);if(!k)return null;const r=m.get(k)||{k,cod:l.k||l.code,desc:"",um:"",ce:"",f:1,E:null,R:null,regs:[],abc:"",bxp:0,PE:null};
+    r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}if(!r.abc&&l.abc)r.abc=l.abc;if(!r.bxp&&+l.bxp>0)r.bxp=+l.bxp;m.set(k,r);return r};
+  for(const l of d.esperado||[]){const r=row(l);if(!r)continue;r.E=(r.E||0)+(+l.qty||0)*(+l.f||1);if(+l.bxp>0)r.PE=(r.PE||0)+(+l.qty||0)/+l.bxp}
   for(const l of pvRegs(d)){const r=row(l);if(!r)continue;r.regs.push(l);if(+l.qty>0)r.R=(r.R||0)+(+l.qty||0)*(+l.f||1)}
   const fin=!!d.recibido;
   return [...m.values()].map(r=>{if(!r.desc){const it=pvFind(r.cod);if(it){r.desc=it.desc;r.um=r.um||umTxt(it.um)}}
-    r.dif=r.E!=null&&r.R!=null?r.R-r.E:null;
+    r.dif=r.E!=null&&r.R!=null?r.R-r.E:null;r.PR=r.R!=null&&r.bxp?r.R/(r.f||1)/r.bxp:null;
     r.st=r.E==null?"noesp":r.R==null?(fin?"norec":"porrec"):Math.abs(r.dif)<1e-9?"ok":r.dif<0?"falta":"sobra";return r});
 }
 const pvConDif=d=>d.recibido&&pvCuadre(d).some(r=>r.st!=="ok");
@@ -7306,38 +7388,39 @@ function pvRender(){
   const F=[["pend","Por recibir",d=>["pend","enrec"].includes(pvSt(d))],["rec","Recibidas",d=>pvSt(d)==="rec"],["dif","Con diferencia",pvConDif],["cerr","Cerradas",d=>pvSt(d)==="cerr"],["todas","Todas",()=>true]];
   if(!F.some(f=>f[0]===pvF))pvF="pend";
   const q=deacc($("#pvQ").value||"");
-  const base=pvList.filter(d=>pvDiaOk(d)&&(!q||deacc([d.proveedor,d.guia,d.referencia,d.persona,d.rec_persona,...(d.esperado||[]).map(l=>l.code+" "+(l.desc||"")),...pvRegs(d).map(l=>l.code)].join(" ")).includes(q)));
+  const base=pvList.filter(d=>pvDiaOk(d)&&(!q||deacc([d.proveedor,d.guia,d.referencia,d.contenedor,d.persona,d.rec_persona,...(d.esperado||[]).map(l=>l.code+" "+(l.desc||"")),...pvRegs(d).map(l=>l.code)].join(" ")).includes(q)));
   $("#pvChips").innerHTML=F.map(([k,l,fn])=>`<button class="chip" data-f="${k}" aria-pressed="${pvF===k}">${l} · ${fmt(base.filter(fn).length)}</button>`).join("");
   $$("#pvChips .chip").forEach(b=>b.onclick=()=>{pvF=b.dataset.f;store.set("inv_pvf",pvF);pvRender()});
   const nEsp=base.reduce((a,d)=>a+(d.esperado||[]).length,0),nRec=base.filter(d=>d.recibido).length;
   $("#pvKpis").innerHTML=[[fmt(base.length),"Recepciones"],[`${fmt(nRec)} / ${fmt(base.length)}`,"Recibidas por bodega"],[fmt(base.filter(pvConDif).length),"Con diferencia"],[fmt(nEsp),"Líneas en packing list"]].map(([v,l])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
   $("#pvAt").textContent=pvAt?"actualizado "+hhmm(pvAt)+" · cada 20 s":"";
   const fn=F.find(f=>f[0]===pvF)[2],L=base.filter(fn);
-  $("#pvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Tipo</th><th>Proveedor</th><th>Guía</th><th>Referencia</th><th class="num">Packing list</th><th>Recibe</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
+  $("#pvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Tipo</th><th>Proveedor</th><th>Guía</th><th>Referencia</th><th>Contenedor</th><th class="num">Packing list</th><th>Recibe</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
     (L.length?L.map(d=>{const s=pvSt(d),[t,c]=PVST[s],cu=d.recibido?pvCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
-      return `<tr data-pv="${esc(d.id)}" class="${d.id===pvSel?"sel":""}" style="cursor:pointer"><td>${fechaCL(d.fecha)}</td><td>${esc(PCTIPO[d.tipo]||"")}</td><td>${esc(d.proveedor||"—")}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.referencia||"—")}</td><td class="num">${(d.esperado||[]).length?fmt(d.esperado.length)+" líneas":'<span class="muted">sin packing list</span>'}</td><td>${esc(d.rec_persona||"—")}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
-     :`<tr><td colspan="9" class="muted">${pvList.length?"No hay recepciones con este filtro.":"Todavía no hay recepciones. Crea la primera con ＋ Nueva recepción, o bodega la crea desde su celular."}</td></tr>`)+"</tbody>";
+      return `<tr data-pv="${esc(d.id)}" class="${d.id===pvSel?"sel":""}" style="cursor:pointer"><td>${fechaCL(d.fecha)}</td><td>${esc(PCTIPO[d.tipo]||"")}</td><td>${esc(d.proveedor||"—")}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.referencia||"—")}</td><td class="code">${esc(d.contenedor||"—")}</td><td class="num">${(d.esperado||[]).length?fmt(d.esperado.length)+" líneas":'<span class="muted">sin packing list</span>'}</td><td>${esc(d.rec_persona||"—")}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
+     :`<tr><td colspan="10" class="muted">${pvList.length?"No hay recepciones con este filtro.":"Todavía no hay recepciones. Crea la primera con ＋ Nueva recepción, o bodega la crea desde su celular."}</td></tr>`)+"</tbody>";
   $$("#pvTbl [data-pv]").forEach(tr=>tr.onclick=()=>{pvSel=tr.dataset.pv;store.set("inv_pvsel",pvSel);pvOpen.clear();pvRender();$("#pvDet").scrollIntoView({behavior:"smooth",block:"start"})});
   pvDetRender();
 }
 function pvDetRender(){
   const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;if(!d)return;
   const rows=pvCuadre(d),cnt=s=>rows.filter(r=>r.st===s).length,[t]=PVST[pvSt(d)];
-  $("#pvDetT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}`;
+  $("#pvDetT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}${d.contenedor?" · Cont. "+d.contenedor:""}`;
   $("#pvDetS").innerHTML=`${esc(PCTIPO[d.tipo]||"")} · Fecha ${fechaCL(d.fecha)} · ${t}${d.persona?" · creó "+esc(d.persona):d.origen&&d.origen!=="panel"?" · creada desde el celular":""}${d.rec_persona?" · recibe "+esc(d.rec_persona):""}${d.recibido?" · terminada "+fmtDT(d.recibido):""}${d.nota?`<br>Observación: ${esc(d.nota)}`:""}`;
-  $("#pvDetK").innerHTML=[["En packing list",rows.filter(r=>r.E!=null).length],["Recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt("ok")],["Faltantes",cnt("falta")+cnt("norec")],["Sobrantes / no esperados",cnt("sobra")+cnt("noesp")]].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  const pe=rows.reduce((a,r)=>a+(r.PE||0),0),pr=rows.reduce((a,r)=>a+(r.PR||0),0),hayP=rows.some(r=>r.bxp);
+  $("#pvDetK").innerHTML=[["En packing list",fmt(rows.filter(r=>r.E!=null).length)],["Recibidos",fmt(rows.filter(r=>r.R!=null).length)],["Cuadran",fmt(cnt("ok"))],["Faltantes",fmt(cnt("falta")+cnt("norec"))],["Sobrantes / no esperados",fmt(cnt("sobra")+cnt("noesp"))],...(hayP?[["Pallets esperados / recibidos",fmt2(pe)+" / "+fmt2(pr)]]:[])].map(([l,v])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
   const cerr=!!d.finalizado;
   $("#pvAddTog").hidden=cerr;$("#pvEdTog").hidden=cerr;$("#pvCerrar").hidden=cerr;if(cerr)$("#pvAdd").hidden=true;
   const ord={falta:0,norec:1,noesp:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
   const corr=l=>{if(cerr||!pvPuede("prov_operar"))return "";if(l.src==="cel"&&!d.recibido)return "";const ed=Array.isArray(l.ed)&&l.ed.length;
     return `${ed?`<span class="small" title="${esc(l.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pvc="${esc(l.lid)}">✎ corregir</button>`};
-  $("#pvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Packing list</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
-    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}${r.regs.length?`<span class="sub"><button class="linkBtn" data-pvo="${esc(r.k)}">${pvOpen.has(r.k)?"▲ ocultar registros":"✎ ver y corregir registros ("+fmt(r.regs.length)+")"}</button></span>`:""}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td>
-      <td class="num">${r.E==null?"—":qBC(r.E,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${PVC[r.st][1]}">${PVC[r.st][0]}</span></td></tr>`+
-      (pvOpen.has(r.k)?`<tr class="ptSnDet"><td colspan="7" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
+  $("#pvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>ABC</th><th>Unidad</th><th class="num">Packing list</th><th class="num">Recibido</th><th class="num">Diferencia</th><th class="num">Pallets</th><th>Estado</th></tr></thead><tbody>`+
+    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}${r.regs.length?`<span class="sub"><button class="linkBtn" data-pvo="${esc(r.k)}">${pvOpen.has(r.k)?"▲ ocultar registros":"✎ ver y corregir registros ("+fmt(r.regs.length)+")"}</button></span>`:""}</td><td>${r.abc?`<span class="pill p-mut">${esc(r.abc)}</span>`:""}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td>
+      <td class="num">${r.E==null?"—":qBC(r.E,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td class="num">${r.bxp?`${r.PE!=null?fmt2(r.PE):"—"}<span class="sub">${r.PR!=null?"recibidos "+fmt2(r.PR):""}${r.bxp?" · "+fmt(r.bxp)+" x pallet":""}</span>`:'<span class="muted">—</span>'}</td><td><span class="pill ${PVC[r.st][1]}">${PVC[r.st][0]}</span></td></tr>`+
+      (pvOpen.has(r.k)?`<tr class="ptSnDet"><td colspan="9" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
         r.regs.sort((a,b)=>String(a.t).localeCompare(String(b.t))).map(l=>{const f=+l.f||1,cv=l.ce&&f!==1;return `<span>${l.src==="man"?"✍ Agregado a mano":"📱 Celular"}</span><span class="muted">${l.t?hm24(l.t):""}</span><span>${esc(l.user||"")}</span><span style="white-space:nowrap">${+l.qty>0?"":'<s class="muted">'}<b>${fmt2(+l.qty||0)}</b> ${esc(cv?plural(l.ce):umTxt(l.um))}${cv?` <span class="muted">= ${fmt2((+l.qty||0)*f)} ${esc(umTxt(l.um))}</span>`:""}${+l.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span>${corr(l)}</span>`}).join("")+
         `</div>${!d.recibido&&r.regs.some(l=>l.src==="cel")?'<div class="small muted" style="margin-top:4px">Lo registrado por el celular se corrige cuando bodega termine la recepción.</div>':""}</td></tr>`:"")).join("")
-     :'<tr><td colspan="7" class="muted">Sin productos todavía: carga el packing list o espera lo que registre bodega.</td></tr>')+"</tbody>";
+     :'<tr><td colspan="9" class="muted">Sin productos todavía: carga el packing list o espera lo que registre bodega.</td></tr>')+"</tbody>";
   $$("#pvCmp [data-pvo]").forEach(b=>b.onclick=()=>{const k=b.dataset.pvo;pvOpen.has(k)?pvOpen.delete(k):pvOpen.add(k);pvDetRender()});
   $$("#pvCmp [data-pvc]").forEach(b=>b.onclick=async()=>{const l=pvRegs(d).find(x=>x.lid===b.dataset.pvc);if(!l)return;
     const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),v=prompt(`${l.desc||l.code}\nNueva cantidad (en ${u}). Escribe 0 para anular un registro equivocado:`,fmt2(l.qty));if(v==null)return;
@@ -7351,39 +7434,52 @@ function pvFormAbrir(d){
   pvEd={id:d?d.id:null,lines:d?(d.esperado||[]).map(l=>Object.assign({},l)):[]};
   $("#pvFormT").textContent=d?"Editar recepción: datos y packing list":"Nueva recepción";
   $("#pvSave").textContent=d?"Guardar cambios":"Crear y enviar a bodega";
-  $("#pvTipo").value=d?d.tipo||"nacional":"nacional";$("#pvProv").value=d?d.proveedor||"":"";$("#pvGuia").value=d?d.guia||"":"";$("#pvRefe").value=d?d.referencia||"":"";
+  $("#pvTipo").value=d?d.tipo||"nacional":"nacional";$("#pvProv").value=d?d.proveedor||"":"";$("#pvGuia").value=d?d.guia||"":"";$("#pvRefe").value=d?d.referencia||"":"";$("#pvCont").value=d?d.contenedor||"":"";
   $("#pvFecha").value=d?d.fecha||hoyISO():hoyISO();$("#pvNota").value=d?d.nota||"":"";$("#pvPaste").value="";$("#pvCod").value="";$("#pvCant").value="";$("#pvParseInfo").textContent="";$("#pvFormInfo").textContent="";
   $("#pvForm").hidden=false;pvFormRender();$("#pvForm").scrollIntoView({behavior:"smooth",block:"start"});setTimeout(()=>$("#pvProv").focus(),250);
 }
 function pvFormRender(){
   if(!pvEd)return;const L=pvEd.lines;
-  $("#pvLines").innerHTML=L.length?`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th></th></tr></thead><tbody>`+L.map((l,i)=>`<tr><td class="code">${esc(l.code)}</td><td>${esc(l.desc||"")}${l.desc?"":'<span class="small" style="color:var(--warn)"> no está en la lista de productos</span>'}</td><td class="num">${qBC((+l.qty||0)*(+l.f||1),l.ce,+l.f||1,l.um)}</td><td><button class="btn sm" data-pvx="${i}" aria-label="Quitar">✕</button></td></tr>`).join("")+"</tbody>"
+  const tPal=L.reduce((a,l)=>a+(+l.bxp>0?(+l.qty||0)/+l.bxp:0),0);
+  $("#pvLines").innerHTML=L.length?`<thead><tr><th>Código</th><th>Descripción</th><th>ABC</th><th class="num">Bultos</th><th class="num">Conversión</th><th class="num">Pallets</th><th></th></tr></thead><tbody>`+L.map((l,i)=>{const it=pvFind(l.code);
+      return `<tr><td class="code">${esc(l.code)}</td><td>${esc(l.desc||"")}${it?"":'<span class="small" style="color:var(--warn)"> · no está en la lista de productos</span>'}${l.fdif?`<span class="sub" style="color:var(--warn)">El proveedor dice ${fmt2(l.fpl)} por bulto; el maestro, ${fmt2(l.f)}. Se usa el del maestro.</span>`:""}</td><td>${esc(l.abc||"")}</td><td class="num">${fmt2(+l.qty||0)}${l.ce?` <span class="small muted">${esc(plural(l.ce))}</span>`:""}</td><td class="num">${fmt2((+l.qty||0)*(+l.f||1))} <span class="small muted">${esc(umTxt(l.um))}</span></td><td class="num">${+l.bxp>0?fmt2((+l.qty||0)/+l.bxp):'<span class="muted">—</span>'}</td><td><button class="btn sm" data-pvx="${i}" aria-label="Quitar">✕</button></td></tr>`}).join("")+`</tbody><tfoot><tr><td colspan="5" class="num"><b>Total pallets</b></td><td class="num"><b>${fmt2(tPal)}</b></td><td></td></tr></tfoot>`
     :'<tbody><tr><td class="muted">Sin productos. Carga el packing list (Excel o pegar) o agrégalos uno por uno. También puedes crear la recepción sin packing list.</td></tr></tbody>';
   $$("#pvLines [data-pvx]").forEach(b=>b.onclick=()=>{pvEd.lines.splice(+b.dataset.pvx,1);pvFormRender()});
   $("#pvFormInfo").textContent=L.length?`${fmt(L.length)} líneas · ${fmt(new Set(L.map(l=>key(l.k||l.code))).size)} productos`:"";
 }
-function pvLinea(code,qty,enBase,desc){
-  const it=pvFind(code),cv=it&&conv(it),l={lid:newLid(),code:codeStr(code),k:it?it.cod:codeStr(code),desc:it?it.desc:(desc||""),um:it?umTxt(it.um):"",qty:qty};
+function pvLinea(code,qty,enBase,desc,x){
+  x=x||{};const it=pvFind(code),cv=it&&conv(it),l={lid:newLid(),code:codeStr(code),k:it?it.cod:codeStr(code),desc:it?it.desc:(desc||""),um:it?umTxt(it.um):"",qty:qty};
   if(cv){l.ce=it.ce;l.f=+it.f;if(enBase)l.qty=+(qty/l.f).toFixed(6)}
+  else if(+x.fpl>0&&+x.fpl!==1){l.ce="BULTO";l.f=+x.fpl}                 // sin conversión en el maestro: la del proveedor
+  if(+x.fpl>0){l.fpl=+x.fpl;if(cv&&Math.abs(+x.fpl-+it.f)>1e-9)l.fdif=true}
+  if(+x.bxp>0)l.bxp=+x.bxp;if(x.abc)l.abc=String(x.abc).toUpperCase().slice(0,6);
   return l;
 }
-/* Detecta columnas (código, cantidad, descripción) en filas copiadas o leídas de un Excel. */
+/* Detecta columnas en filas copiadas o leídas de un Excel. Reconoce el formato del proveedor
+   (REF. · Contenedor · SKU · Producto · Met./Kil. · Bultos x Pallet · un. En Cont. · ML/KG · Pallets · ABC)
+   y también un archivo simple de código y cantidad. */
 function pvFilas(rows){
-  const R=rows.map(r=>r.map(c=>String(c==null?"":c).trim())).filter(r=>r.some(c=>c));let h=-1,ic=-1,iq=-1,id=-1;
-  for(let i=0;i<Math.min(R.length,15)&&h<0;i++){const r=R[i].map(c=>deacc(c));
-    const c=r.findIndex(x=>/^(cod|codigo|sku|item|articulo|material|ref|part|n de parte)/.test(x)),q=r.findIndex(x=>/(cant|qty|quant|pcs|pzs|bultos|unidades|piezas)/.test(x));
-    if(c>=0&&q>=0){h=i;ic=c;iq=q;id=r.findIndex(x=>/(desc|nombre|detalle|producto)/.test(x))}}
-  const datos=h>=0?R.slice(h+1):R;if(h<0){ic=0;iq=1;id=-1;
-    const s=datos.find(r=>r.length>=2);if(s&&num(s[1])==null&&num(s[2])!=null){id=1;iq=2}}
-  const out=[],malas=[];
-  for(const r of datos){const code=codeStr(r[ic]||""),q=num(r[iq]);if(!code)continue;if(q==null||q<=0){malas.push(code);continue}out.push({code,qty:q,desc:id>=0?r[id]:""})}
-  return {out,malas,hdr:h>=0};
+  const R=rows.map(r=>r.map(c=>String(c==null?"":c).replace(/[▼▾⏷]/g,"").trim())).filter(r=>r.some(c=>c));let h=-1,C={};
+  const col=(r,...res)=>{for(const re of res){const i=r.findIndex(x=>re.test(x));if(i>=0)return i}return -1};
+  for(let i=0;i<Math.min(R.length,20)&&h<0;i++){const r=R[i].map(c=>deacc(c).replace(/\s+/g," "));
+    const code=col(r,/^sku\b/,/^cod(igo)?\b/,/^(item|articulo|material|n de parte|part)/);
+    const qty=col(r,/^un\.? ?en cont/,/^(unidades|cantidad|cant\b|cant\.|qty|quantity|pcs|pzs|piezas)/,/^bultos$/);
+    if(code>=0&&qty>=0){h=i;C={code,qty,desc:col(r,/^(producto|desc|nombre|detalle)/),fpl:col(r,/^met\.?\/? ?kil/,/^(mts?|metros|kilos|kg) ?(x|por)? ?bulto/,/^factor/),
+      bxp:col(r,/(bultos|un|unidades) ?(x|por) ?pall/,/x ?pallet/),abc:col(r,/^abc/),ref:col(r,/^ref\b/,/^referencia/,/^oc\b/),cont:col(r,/^contenedor/,/^container/)}}}
+  if(h<0){C={code:0,qty:1,desc:-1,fpl:-1,bxp:-1,abc:-1,ref:-1,cont:-1};const s=R.find(r=>r.length>=2);if(s&&num(s[1])==null&&num(s[2])!=null){C.desc=1;C.qty=2}}
+  const datos=h>=0?R.slice(h+1):R,out=[],malas=[],cel=(r,k)=>C[k]>=0?(r[C[k]]||""):"";let ref="",cont="";
+  for(const r of datos){const code=codeStr(cel(r,"code"));const q=num(cel(r,"qty"));if(!code||/^total/i.test(code))continue;if(q==null||q<=0){malas.push(code);continue}
+    if(!ref)ref=cel(r,"ref");if(!cont)cont=cel(r,"cont");
+    out.push({code,qty:q,desc:cel(r,"desc"),fpl:num(cel(r,"fpl")),bxp:num(cel(r,"bxp")),abc:cel(r,"abc")})}
+  return {out,malas,hdr:h>=0,ref,cont};
 }
 function pvAgregarFilas(res,origen){
   const enBase=(document.querySelector('input[name="pvU"]:checked')||{}).value==="base";
-  for(const x of res.out)pvEd.lines.push(pvLinea(x.code,x.qty,enBase,x.desc));
+  for(const x of res.out)pvEd.lines.push(pvLinea(x.code,x.qty,res.hdr&&x.fpl!=null?false:enBase,x.desc,x));
+  if(res.ref&&!$("#pvRefe").value.trim())$("#pvRefe").value=norm(res.ref).toUpperCase();
+  if(res.cont&&!$("#pvCont").value.trim())$("#pvCont").value=norm(res.cont).toUpperCase();
   const sin=res.out.filter(x=>!pvFind(x.code)).length;
-  $("#pvParseInfo").innerHTML=`${origen}: <b>${fmt(res.out.length)}</b> líneas agregadas${res.hdr?"":" (sin encabezado: columna 1 = código, siguiente número = cantidad)"}${sin?` · <span style="color:var(--warn)">${fmt(sin)} código${sin===1?"":"s"} no está${sin===1?"":"n"} en la lista de productos</span>`:""}${res.malas.length?` · <span style="color:var(--bad)">${fmt(res.malas.length)} fila${res.malas.length===1?"":"s"} sin cantidad válida (no se agregaron)</span>`:""}`;
+  $("#pvParseInfo").innerHTML=`${origen}: <b>${fmt(res.out.length)}</b> líneas agregadas${res.hdr?"":" (sin encabezado: columna 1 = código, siguiente número = cantidad)"}${res.cont?` · contenedor <b>${esc(res.cont)}</b>`:""}${res.ref?` · ref. <b>${esc(res.ref)}</b>`:""}${sin?` · <span style="color:var(--warn)">${fmt(sin)} código${sin===1?"":"s"} no está${sin===1?"":"n"} en la lista de productos</span>`:""}${res.malas.length?` · <span style="color:var(--bad)">${fmt(res.malas.length)} fila${res.malas.length===1?"":"s"} sin cantidad válida (no se agregaron)</span>`:""}`;
   pvFormRender();
 }
 $("#pvFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f||!pvEd)return;
@@ -7404,7 +7500,7 @@ $("#pvCant").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault
 $("#pvNewTog").onclick=()=>{if(!$("#pvForm").hidden&&pvEd&&!pvEd.id){$("#pvForm").hidden=true;pvEd=null;return}pvFormAbrir(null)};
 $("#pvCancel").onclick=()=>{$("#pvForm").hidden=true;pvEd=null};
 $("#pvSave").onclick=async()=>{if(!pvEd)return;
-  const doc={tipo:$("#pvTipo").value,proveedor:norm($("#pvProv").value).toUpperCase(),guia:norm($("#pvGuia").value).toUpperCase(),referencia:norm($("#pvRefe").value).toUpperCase(),fecha:$("#pvFecha").value,nota:norm($("#pvNota").value)};
+  const doc={tipo:$("#pvTipo").value,proveedor:norm($("#pvProv").value).toUpperCase(),guia:norm($("#pvGuia").value).toUpperCase(),referencia:norm($("#pvRefe").value).toUpperCase(),contenedor:norm($("#pvCont").value).toUpperCase(),fecha:$("#pvFecha").value,nota:norm($("#pvNota").value)};
   if(!doc.guia&&!doc.referencia){toast("Ingresa el N° de guía o el N° de referencia (basta con uno)");return $("#pvGuia").focus()}
   if(!doc.fecha){toast("Falta la fecha");return $("#pvFecha").focus()}
   const b=$("#pvSave");b.disabled=true;
@@ -7428,12 +7524,12 @@ $("#pvX").onclick=()=>{pvSel=null;store.set("inv_pvsel",null);pvRender()};
 $("#pvCerrar").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Cerrar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}): queda como histórico y bodega ya no la ve.`,async()=>{try{await mrpc("cb_prov_cerrar",{p_id:d.id});toast("Recepción cerrada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
 $("#pvDel").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Eliminar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}) con todo su detalle. No se puede deshacer.`,async()=>{try{await mrpc("cb_prov_eliminar",{p_id:d.id});pvSel=null;store.set("inv_pvsel",null);toast("Recepción eliminada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
 $("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const rows=pvCuadre(d),wb=XLSX.utils.book_new(),cv=r=>r.ce&&r.f!==1;
-  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"Bulto":cv(r)?r.ce:umTxt(r.um),"Packing list (bultos)":r.E==null?"":cv(r)?r.E/r.f:r.E,"Recibido (bultos)":r.R==null?"":cv(r)?r.R/r.f:r.R,
-    "Diferencia (bultos)":r.dif==null?"":cv(r)?r.dif/r.f:r.dif,"Packing list":r.E??"","Recibido":r.R??"","Diferencia":r.dif??"","Unidad ERP":umTxt(r.um),"Estado":PVC[r.st][0]}))),"Cuadre");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"ABC":r.abc||"","Bulto":cv(r)?r.ce:umTxt(r.um),"Packing list (bultos)":r.E==null?"":cv(r)?r.E/r.f:r.E,"Recibido (bultos)":r.R==null?"":cv(r)?r.R/r.f:r.R,
+    "Diferencia (bultos)":r.dif==null?"":cv(r)?r.dif/r.f:r.dif,"Packing list":r.E??"","Recibido":r.R??"","Diferencia":r.dif??"","Unidad ERP":umTxt(r.um),"Bultos x pallet":r.bxp||"","Pallets esperados":r.PE??"","Pallets recibidos":r.PR??"","Estado":PVC[r.st][0]}))),"Cuadre");
   XLSX.utils.book_append_sheet(wb,sheetFrom(pvRegs(d).map(l=>({"Origen":l.src==="man"?"Agregado a mano":"Celular","Hora":l.t?fmtDT(l.t):"","Persona":l.user||"","Código":l.code,"Descripción":l.desc||"","Cantidad":+l.qty||0,"Bulto":l.ce||umTxt(l.um),"Conversión":(+l.qty||0)*(+l.f||1)}))),"Registros");
   saveWb(wb,`Recepcion_${(d.proveedor||"proveedor").replace(/[^\w-]+/g,"_")}_${d.guia||d.referencia||""}.xlsx`)};
 $("#pvXlsAll").onclick=()=>{const L=pvList.filter(pvDiaOk),wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,sheetFrom(L.map(d=>{const cu=pvCuadre(d);return {"Fecha":fechaCL(d.fecha),"Tipo":PCTIPO[d.tipo]||"","Proveedor":d.proveedor||"","Guía":d.guia||"","Referencia":d.referencia||"","Estado":PVST[pvSt(d)][0],
+  XLSX.utils.book_append_sheet(wb,sheetFrom(L.map(d=>{const cu=pvCuadre(d);return {"Fecha":fechaCL(d.fecha),"Tipo":PCTIPO[d.tipo]||"","Proveedor":d.proveedor||"","Guía":d.guia||"","Referencia":d.referencia||"","Contenedor":d.contenedor||"","Estado":PVST[pvSt(d)][0],
     "Líneas packing list":(d.esperado||[]).length,"Productos con diferencia":d.recibido?cu.filter(r=>r.st!=="ok").length:"","Recibe":d.rec_persona||"","Terminada":d.recibido?fmtDT(d.recibido):""}})),"Recepciones");
   saveWb(wb,"Recepciones_proveedores_"+new Date().toISOString().slice(0,10)+".xlsx")};
 $("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;

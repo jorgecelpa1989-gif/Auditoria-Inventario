@@ -20,20 +20,24 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(/Todavía no hay recepciones/.test(await s.textContent('#pvTbl')),'Sin recepciones: lo explica');
  // Nueva recepción con packing list desde Excel
  await s.click('#pvNewTog');await s.waitForTimeout(300);
- await s.selectOption('#pvTipo','importacion');await s.fill('#pvProv','Aceros del Sur');await s.fill('#pvGuia','G-901');await s.fill('#pvRefe','OC-4512');
- const xls=await s.evaluate(()=>{const ws=XLSX.utils.aoa_to_sheet([["PACKING LIST"],[],["SKU","Descripción proveedor","Cantidad"],["221317","Malla 14",10],["140101","Harina",4],["999999","Producto nuevo",2],["110107","Alambre","x"]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"PL");return XLSX.write(wb,{type:"base64",bookType:"xlsx"})});
+ await s.selectOption('#pvTipo','importacion');await s.fill('#pvProv','Aceros del Sur');await s.fill('#pvGuia','G-901');
+ const xls=await s.evaluate(()=>{const ws=XLSX.utils.aoa_to_sheet([["PACKING LIST ACEROS"],[],["REF.","Contenedor ▼","SKU","Producto","Met./Kil.","Bultos x Palle","un. En Cont.","ML/KG Co","Pallet","ABC"],
+   ["36-26","ONEU9329903","221317","MALLA 14",90,5,10,900,2,"A"],["36-26","ONEU9329903","140101","HARINA SACO",25,2,4,100,2,"B"],["36-26","ONEU9329903","999999","Producto nuevo",1,1,2,2,2,"NSO"],["36-26","ONEU9329903","110107","Alambre",1,10,"x","",""]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"PL");return XLSX.write(wb,{type:"base64",bookType:"xlsx"})});
  require('fs').writeFileSync(S+'/pl.xlsx',Buffer.from(xls,'base64'));
  await s.setInputFiles('#pvFile',S+'/pl.xlsx');await s.waitForTimeout(800);
  const pi=await s.textContent('#pvParseInfo');
- check(/3 líneas agregadas/.test(pi)&&/1 código no está/.test(pi)&&/1 fila sin cantidad/.test(pi),'Excel: detecta encabezado, agrega 3 líneas, avisa del código nuevo y de la fila sin cantidad → '+pi);
- check(/10\s*ROLLOS/.test(await s.textContent('#pvLines'))&&/= 900 m/.test(await s.textContent('#pvLines')),'Packing list en bultos: 10 rollos = 900 m');
+ check(/3 líneas agregadas/.test(pi)&&/1 código no está/.test(pi)&&/1 fila sin cantidad/.test(pi)&&/ONEU9329903/.test(pi),'Excel del proveedor: detecta encabezado, toma "un. En Cont.", agrega 3 líneas, avisa del código nuevo y de la fila sin cantidad → '+pi);
+ check((await s.inputValue('#pvRefe'))==='36-26'&&(await s.inputValue('#pvCont'))==='ONEU9329903','Llena solo el N° de referencia (36-26) y el N° de contenedor (ONEU9329903)');
+ const lt=await s.textContent('#pvLines');
+ check(/Mos\.Gal 14\s*A\s*10/.test(lt)&&/NSO/.test(lt)&&/Total pallets\s*6/.test(lt),'Vista previa con ABC y pallets calculados (10/5 + 4/2 + 2/1 = 6)');
+ check(/10\s*ROLLOS\s*900 m/.test(await s.textContent('#pvLines')),'Packing list en bultos con su conversión: 10 rollos → 900 m');
  await s.fill('#pvPaste','110107\t30');await s.check('input[name="pvU"][value="base"]');await s.click('#pvPasteOk');await s.waitForTimeout(300);
  check((await s.$$('#pvLines [data-pvx]')).length===4,'Pegar desde Excel agrega otra línea (4 en total)');
  await s.click('#pvLines [data-pvx="2"]');await s.waitForTimeout(200);
  check((await s.$$('#pvLines [data-pvx]')).length===3&&!/999999/.test(await s.textContent('#pvLines')),'Quitar un producto del packing list');
  await s.click('#pvSave');await s.waitForTimeout(2500);
  const g=JSON.parse(sql("select json_build_object('tipo',tipo,'prov',proveedor,'guia',guia,'ref',referencia,'n',jsonb_array_length(esperado),'orig',origen)::text from cb_prov"));
- check(g.tipo==='importacion'&&g.prov==='ACEROS DEL SUR'&&g.guia==='G-901'&&g.ref==='OC-4512'&&g.n===3&&g.orig==='panel','Guardada en Supabase: importación, Aceros del Sur, guía G-901, ref. OC-4512, 3 líneas');
+ check(g.tipo==='importacion'&&g.prov==='ACEROS DEL SUR'&&g.guia==='G-901'&&g.ref==='36-26'&&g.n===3&&g.orig==='panel'&&sql("select contenedor from cb_prov")==='ONEU9329903'&&sql("select esperado->0->>'abc'||'|'||(esperado->0->>'bxp') from cb_prov")==='A|5','Guardada en Supabase: importación, guía G-901, ref. 36-26, contenedor, 3 líneas con ABC y bultos por pallet');
  check(/ACEROS DEL SUR/.test(await s.textContent('#pvTbl'))&&/Por recibir/.test(await s.textContent('#pvTbl'))&&await s.isVisible('#pvDet'),'Aparece en la lista "Por recibir" y se abre su cuadre');
  // Celular de bodega
  const cm=await b.newContext({...devices['iPhone 13'],timezoneId:'America/Santiago'});await route(cm);const m=await cm.newPage();m.on('pageerror',e=>errs.push('cel: '+e.message));
@@ -42,18 +46,23 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await m.tap('#puMenu [data-pk="prov"]');await m.waitForTimeout(2000);
  check(/ACEROS DEL SUR/.test(await m.textContent('#pcHome'))&&/3 líneas/.test(await m.textContent('#pcHome')),'Ve la recepción por recibir, con su packing list');
  await m.tap('#pcHome [data-pc]');await m.waitForTimeout(800);
- check(/Packing list \(3 productos\)/.test(await m.textContent('#pcDecl')),'Al abrirla ve el packing list (3 productos)');
- await m.tap('#pcDecl [data-pcacc="221317"]');await m.waitForTimeout(300);
+ const lc=await m.textContent('#pcDecl');
+ check(/0 de 3 productos recibidos/.test(lc)&&/221317/.test(lc)&&/MALLA|Mos/.test(lc)&&/Pendiente/.test(lc)&&!/esperado|10\s*rollos/i.test(lc)&&/Cont\. ONEU9329903/.test(await m.textContent('#pcDoc')),'Celular: ve los códigos del packing list como en el inventario (código, descripción, "Pendiente"), sin las cantidades esperadas; y el contenedor');
+ await m.tap('#pcDecl [data-pcc="221317"]');await m.waitForTimeout(300);
+ check((await m.inputValue('#pcScan'))==='221317','Tocar un producto de la lista lo carga para registrarlo');
+ await m.fill('#pcQty','10');await m.tap('#pcOk');await m.waitForTimeout(300);
+ check(/1 de 3 productos recibidos/.test(await m.textContent('#pcDecl'))&&/✓ 10 rollos/.test(await m.textContent('#pcDecl').catch(()=>''))||/1 de 3/.test(await m.textContent('#pcDecl')),'La lista marca el producto recibido (1 de 3)');
  await m.fill('#pcScan','140101');await m.press('#pcScan','Enter');await m.waitForTimeout(300);await m.fill('#pcQty','3');await m.tap('#pcOk');await m.waitForTimeout(300);
  await m.fill('#pcScan','7800000000017');await m.press('#pcScan','Enter');await m.waitForTimeout(300);
  check(/Mos\.Gal 14/.test(await m.textContent('#pcPending')),'Lee el código de barras y reconoce el producto');
  await m.fill('#pcQty','1');await m.tap('#pcOk');await m.waitForTimeout(2500);
- check(sql("select jsonb_array_length(rec)||'|'||(rec_inicio is not null)||'|'||rec_persona from cb_prov")==='3|true|FELIPE','Se guarda solo en Supabase mientras recibe (3 líneas, "En recepción")');
+ check(sql("select jsonb_array_length(rec)||'|'||(rec_inicio is not null)||'|'||rec_persona from cb_prov where guia='G-901'")==='3|true|FELIPE','Se guarda solo en Supabase mientras recibe (3 líneas, "En recepción")');
  await m.tap('#pcFin');await m.waitForTimeout(300);await m.tap('#pcConfirm #cYes');await m.waitForTimeout(2500);
- check(sql("select recibido is not null from cb_prov")==='t','Termina la recepción');
+ check(sql("select recibido is not null from cb_prov where guia='G-901'")==='t','Termina la recepción');
  // Panel: cuadre
  await s.click('#pvRef');await s.waitForTimeout(2000);await s.click('#pvChips [data-f="todas"]');await s.waitForTimeout(300);
  const det=await s.textContent('#pvCmp');
+ check(/Pallets esperados \/ recibidos/.test(await s.textContent('#pvDetK'))&&/recibidos 2,2 · 5 x pallet/.test(det)&&/Mos\.Gal 14.*\bA\s*ROLLOS/.test(det),'Cuadre con ABC y pallets (221317: 2 esperados, 2,2 recibidos, 5 por pallet)');
  check(/Sobrante/.test(det)&&/Faltante/.test(det)&&/No llegó/.test(det),'Cuadre: 221317 sobrante (11 vs 10), harina faltante (3 vs 4), alambre no llegó');
  check(/con diferencia/.test(await s.textContent('#pvTbl')),'La lista marca la recepción "con diferencia"');
  // Agregar registro (alambre) y corregir el rollo extra a 0
