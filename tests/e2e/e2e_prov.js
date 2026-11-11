@@ -74,6 +74,12 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  s.on('dialog',async dl=>{await dl.accept()});
  await s.fill(`#pvCmp [data-pvq="${lid}"]`,'0');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
  check(sql(`select e->>'qty' from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`)==='0','Corregir a 0 el rollo leído de más (queda en el historial)');
+ // Corregir dos veces seguidas el mismo registro (0 → 3 → 0), como al probar y volver atrás
+ await s.fill(`#pvCmp [data-pvq="${lid}"]`,'3');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
+ const q2=sql(`select e->>'qty' from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`);
+ await s.fill(`#pvCmp [data-pvq="${lid}"]`,'0');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
+ const q3=sql(`select e->>'qty'||'|'||jsonb_array_length(e->'ed') from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`);
+ check(q2==='3'&&q3==='0|3','Se puede volver a corregir el mismo registro (0 → 3 → 0), con historial de 3 cambios → '+q2+' / '+q3);
  const det2=await s.textContent('#pvCmp');
  check(!/Sobrante/.test(det2)&&!/No llegó/.test(det2)&&/Faltante/.test(det2),'El cuadre se recalcula: solo queda la harina faltante');
  // Editar packing list (agregar o quitar productos) y Excel
