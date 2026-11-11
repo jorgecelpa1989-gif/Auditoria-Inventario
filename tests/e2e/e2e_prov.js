@@ -94,6 +94,21 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(pr==='PLASTICOS NORTE|G-77|true|0|2|true','Recepción propia del celular: proveedor, guía, sin packing list, 2 líneas, terminada → '+pr);
  await s.click('#pvRef');await s.waitForTimeout(2000);
  check(/PLASTICOS NORTE/.test(await s.textContent('#pvTbl')),'El panel la ve al instante');
+ // Recepción cargada en el panel SIN guía (solo referencia): bodega completa la guía; la referencia no se cambia
+ const idR0=JSON.parse(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{tipo:'importacion',proveedor:'Telas Oriente',referencia:'OC-555',fecha:'2026-11-11'},p_esperado:[]}).body),idR=idR0.id||idR0;
+ await m.tap('#v-provcel [data-menu]');await m.waitForTimeout(500);await m.tap('#puMenu [data-pk="prov"]');await m.waitForTimeout(1500);
+ await m.tap(`#pcHome [data-pc="${idR}"]`);await m.waitForTimeout(400);
+ check(await m.isVisible('#pcGuia')&&!(await m.$('#pcRefe'))&&!(await m.$('#pcTipo'))&&/Importación/.test(await m.textContent('#pcDoc')),'Recepción del panel sin guía: el celular deja completar la guía; referencia y tipo quedan fijos');
+ await m.fill('#pcGuia','g-555');await m.dispatchEvent('#pcGuia','change');
+ await m.fill('#pcScan','110107');await m.press('#pcScan','Enter');await m.waitForTimeout(300);await m.fill('#pcQty','5');await m.tap('#pcOk');await m.waitForTimeout(500);
+ await m.tap('#pcFin');await m.waitForTimeout(300);await m.tap('#pcConfirm #cYes');await m.waitForTimeout(2500);
+ const r2=sql(`select tipo||'|'||guia||'|'||referencia||'|'||(recibido is not null) from cb_prov where id='${idR}'`);
+ check(r2==='importacion|G-555|OC-555|true','Guía completada por bodega, referencia y tipo del supervisor intactos → '+r2);
+ const [b2Id,b2T]=usr('Bodega 2','Bodega',['prov_recibir']);const bs=JSON.parse(rpc('cb_puesto_vincular',{p_puesto:b2Id,p_token:b2T,p_equipo:'y'}).body);
+ const idS0=JSON.parse(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{proveedor:'X',guia:'G-1',referencia:'R-1',fecha:'2026-11-11'},p_esperado:[]}).body),idS=idS0.id||idS0;
+ rpc('cb_prov_recibir',{p_puesto:b2Id,p_ses:bs,p_id:idS,p_doc:{tipo:'importacion',proveedor:'OTRO',guia:'CAMBIO',referencia:'CAMBIO',contenedor:'C-9'},p_rec:[]});
+ const r3=sql(`select tipo||'|'||proveedor||'|'||guia||'|'||referencia||'|'||contenedor from cb_prov where id='${idS}'`);
+ check(r3==='nacional|X|G-1|R-1|C-9','Servidor: el celular no cambia lo que escribió el supervisor, solo llena lo vacío (contenedor) → '+r3);
  // Validaciones del servidor
  check(/falta_documento/.test(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{fecha:'2026-11-11'},p_esperado:[]}).body),'Sin guía ni referencia: rechazado');
  check(!rpc('cb_prov_listar',{p_clave:'clave-mala-xxxx'}).ok,'Sin clave: rechazado');

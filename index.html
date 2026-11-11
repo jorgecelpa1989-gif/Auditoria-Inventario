@@ -3939,6 +3939,52 @@ begin
       'rec_persona', p.rec_persona, 'rec_inicio', p.rec_inicio, 'recibido', p.recibido) order by p.creado)
     from cb_prov p where p.finalizado is null and (p.recibido is null or p.recibido > now() - interval '18 hours')), '[]'::jsonb);
 end $$;
+
+-- =====================================================================
+--  Actualización 21 · Recepción de proveedores: bodega completa datos vacíos
+--  En una recepción cargada desde el panel, el celular de bodega puede llenar el N° de guía,
+--  el N° de referencia y el N° de contenedor SOLO si quedaron vacíos. Lo que ya escribió el
+--  supervisor no cambia. Solo reemplaza una función: la app anterior sigue funcionando igual.
+-- =====================================================================
+create or replace function public.cb_prov_recibir(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; v_fecha date; v_pers text := left(p_doc->>'persona', 80);
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then raise exception 'sin_permiso'; end if;
+  if p_id is null then raise exception 'datos_invalidos'; end if;
+  perform cb_prov_lineas_ok(p_rec);
+  select * into p from cb_prov where id = p_id for update;
+  if not found then
+    insert into cb_prov(id, origen, persona, fecha) values (p_id, p_puesto, v_pers, (now() at time zone 'America/Santiago')::date)
+    returning * into p;
+  end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if p.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p.origen = p_puesto then
+    begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then v_fecha := null; end;
+    update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+           proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+           referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), contenedor = left(trim(coalesce(p_doc->>'contenedor','')), 40), fecha = coalesce(v_fecha, fecha), nota = left(p_doc->>'nota', 300)
+     where id = p_id
+    returning * into p;
+  else
+    -- Recepción cargada en el panel: bodega solo completa lo que quedó vacío (no cambia lo que escribió el supervisor).
+    update cb_prov set guia = case when coalesce(guia, '') = '' then left(trim(coalesce(p_doc->>'guia','')), 40) else guia end,
+           referencia = case when coalesce(referencia, '') = '' then left(trim(coalesce(p_doc->>'referencia','')), 60) else referencia end,
+           contenedor = case when coalesce(contenedor, '') = '' then left(trim(coalesce(p_doc->>'contenedor','')), 40) else contenedor end
+     where id = p_id
+    returning * into p;
+  end if;
+  if p_terminar then
+    if jsonb_array_length(p_rec) = 0 then raise exception 'sin_productos'; end if;
+    if coalesce(p.guia, '') = '' and coalesce(p.referencia, '') = '' then raise exception 'falta_documento'; end if;
+  end if;
+  update cb_prov set rec = p_rec, rec_persona = v_pers, rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end);
+end $$;
 </script>
   </div>
 
@@ -6312,7 +6358,7 @@ function puMpLista(lista,keep){const ref=keep!=null?keep:($("#puMpRef")?$("#puMp
     <div class="cbox" style="max-width:none;gap:8px"><b>＋ Nueva entrega directa</b><span class="small muted">Para cuando producción te pide algo en el momento. Le llega a quien recibe en producción y al panel, como cualquier entrega.</span>
       <label class="f">¿Quién la pide? / OT (opcional)<input id="puMpRef" maxlength="60" autocomplete="off" autocapitalize="characters" placeholder="Ej: OT 4512 o nombre"></label>
       <button class="btn primary" id="puMpNew" style="justify-content:center">Crear y empezar a entregar</button></div>`+
-    (lista.length?`<div class="small muted" style="margin-top:6px">Entregas abiertas</div>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":t.productos?fmt(t.productos)+" productos":"directa"}</span></button>`).join(""):"")+`</div>`;
+    (lista.length?`<div class="small muted" style="margin-top:6px">Entregas abiertas</div>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada · esperando a producción":t.productos?fmt(t.productos)+" productos":"directa"}</span></button>`).join(""):"")+`</div>`;
   if(ref)$("#puMpRef").value=ref;
   $$("#puList [data-pi]").forEach(b=>b.onclick=()=>puAbrirMov(lista[+b.dataset.pi]));
   $("#puMpNew").onclick=async()=>{const b=$("#puMpNew");b.disabled=true;
@@ -6324,6 +6370,8 @@ function puMpLista(lista,keep){const ref=keep!=null?keep:($("#puMpRef")?$("#puMp
 }
 async function puAbrirMov(t){
   const rol=can("mp_entregar")?"E":"R";
+  // Su parte ya está terminada: no se reabre (antes volvía a mostrar "Terminar en este celular" y parecía que no se había terminado).
+  if(t.terminado&&!(om&&om.id===t.id&&om.rol===rol&&!om.fin))return toast(rol==="E"?"✓ Ya terminaste esta entrega. Falta que producción la reciba.":"✓ Ya terminaste esta recepción.");
   cfg.user=PST.persona;store.set("inv_cfg",cfg);
   $("#omBarT").textContent=rol==="E"?"Entrega de materia prima":"Recepción de materia prima";
   puVista="mp";puestoApply();
@@ -7191,7 +7239,8 @@ function pcElegir(id){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(d.recibido)return toast("Esta recepción ya se terminó");
   pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",contenedor:d.contenedor||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
-      decl:Array.isArray(d.esperado)?d.esperado:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};pcSave();pcWork();
+      decl:Array.isArray(d.esperado)?d.esperado:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0,
+      vacios:["guia","referencia","contenedor"].filter(k=>!String(d[k]||"").trim())};pcSave();pcWork();
 }
 function pcWork(){
   $("#pcHome").hidden=true;$("#pcWork").hidden=false;const D=pc.doc;
@@ -7209,7 +7258,11 @@ function pcWork(){
     bind("pcTipo","tipo");bind("pcProv","proveedor",1);bind("pcGuia","guia",1);bind("pcRefe","referencia",1);bind("pcCont","contenedor",1);bind("pcFecha","fecha");
   }else{
     $("#pcDocEb").textContent="Recepción que recibes";
-    $("#pcDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(D.proveedor||"Proveedor sin nombre")}</b></span><span>${esc(PCTIPO[D.tipo]||"")}</span><span>Guía <b>${esc(D.guia||"—")}</b></span><span>Ref. <b>${esc(D.referencia||"—")}</b></span>${D.contenedor?`<span>Cont. <b>${esc(D.contenedor)}</b></span>`:""}<span>Fecha <b>${fechaCL(D.fecha)}</b></span></div>${D.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(D.nota)}</div>`:""}<div id="pcDecl"></div>`;
+    // Lo que cargó el supervisor queda fijo; bodega solo completa guía, referencia o contenedor si quedaron vacíos.
+    const vac=pc.vacios||[],PCF={guia:["pcGuia","N° de guía",""],referencia:["pcRefe","N° de referencia","OC, factura o carpeta"],contenedor:["pcCont","N° de contenedor",""]};
+    $("#pcDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(D.proveedor||"Proveedor sin nombre")}</b></span><span>${esc(PCTIPO[D.tipo]||"")}</span>${vac.includes("guia")?"":`<span>Guía <b>${esc(D.guia||"—")}</b></span>`}${vac.includes("referencia")?"":`<span>Ref. <b>${esc(D.referencia||"—")}</b></span>`}${D.contenedor&&!vac.includes("contenedor")?`<span>Cont. <b>${esc(D.contenedor)}</b></span>`:""}<span>Fecha <b>${fechaCL(D.fecha)}</b></span></div>${D.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(D.nota)}</div>`:""}`+
+      (vac.length?`<div class="dvGrid" style="margin-top:6px">${vac.map(k=>`<label class="f">${PCF[k][1]}<input id="${PCF[k][0]}" autocomplete="off" autocapitalize="characters" value="${esc(D[k]||"")}" placeholder="${PCF[k][2]||"Complétalo si lo tienes"}"></label>`).join("")}</div><div class="small muted" style="margin-top:4px">Completa lo que falta del documento${vac.includes("guia")&&vac.includes("referencia")?" (guía o referencia: basta con uno)":""}.</div>`:"")+`<div id="pcDecl"></div>`;
+    vac.forEach(k=>$("#"+PCF[k][0]).addEventListener("change",e=>{pc.doc[k]=norm(e.target.value).toUpperCase();e.target.value=pc.doc[k];pcDirty()}));
   }
   $("#pcConfirm").innerHTML="";pcLimpiar();pcRender();pcRenderSync();
   if(pc.propia&&!D.proveedor)setTimeout(()=>{try{$("#pcProv").focus()}catch(e){}},60);else if(!pcCamI)setTimeout(()=>$("#pcScan").focus(),60);
@@ -7308,6 +7361,8 @@ function pcFinalizar(){
   if(!pc)return;
   if(pc.propia){const g=$("#pcGuia"),r=$("#pcRefe"),p=$("#pcProv");if(g)pc.doc.guia=norm(g.value).toUpperCase();if(r)pc.doc.referencia=norm(r.value).toUpperCase();if(p)pc.doc.proveedor=norm(p.value).toUpperCase();
     if(!pc.doc.guia&&!pc.doc.referencia){toast("Ingresa el N° de guía o el N° de referencia (basta con uno)");return $("#pcGuia").focus()}}
+  else{const vac=pc.vacios||[],ids={guia:"pcGuia",referencia:"pcRefe",contenedor:"pcCont"};vac.forEach(k=>{const el=$("#"+ids[k]);if(el)pc.doc[k]=norm(el.value).toUpperCase()});
+    if(!pc.doc.guia&&!pc.doc.referencia){toast("Ingresa el N° de guía o el N° de referencia (basta con uno)");const el=$("#pcGuia")||$("#pcRefe");return el&&el.focus()}}
   if(!pc.lect.length){toast("Registra al menos un producto");return focusSel($("#pcScan"))}
   confirmBox(`Terminar la recepción${pc.doc.proveedor?" de "+esc(pc.doc.proveedor):""} con ${fmt(pc.lect.length)} líneas. Después ya no se puede modificar desde el celular.`,async()=>{
     if(navigator.onLine===false)return toast("Sin señal: busca conexión y vuelve a intentar.");
