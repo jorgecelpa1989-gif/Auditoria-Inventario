@@ -109,6 +109,21 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  rpc('cb_prov_recibir',{p_puesto:b2Id,p_ses:bs,p_id:idS,p_doc:{tipo:'importacion',proveedor:'OTRO',guia:'CAMBIO',referencia:'CAMBIO',contenedor:'C-9'},p_rec:[]});
  const r3=sql(`select tipo||'|'||proveedor||'|'||guia||'|'||referencia||'|'||contenedor from cb_prov where id='${idS}'`);
  check(r3==='nacional|X|G-1|R-1|C-9','Servidor: el celular no cambia lo que escribió el supervisor, solo llena lo vacío (contenedor) → '+r3);
+ // Packing list eliminado por el supervisor: el celular no queda pegado en él y ve el nuevo
+ const idD0=JSON.parse(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{proveedor:'Viejo',referencia:'OC-VIEJA',fecha:'2026-11-11'},p_esperado:[]}).body),idD=idD0.id||idD0;
+ await m.tap('#v-provcel [data-menu]');await m.waitForTimeout(500);await m.tap('#puMenu [data-pk="prov"]');await m.waitForTimeout(1500);
+ await m.tap(`#pcHome [data-pc="${idD}"]`);await m.waitForTimeout(400);
+ rpc('cb_prov_eliminar',{p_clave:ADMIN,p_id:idD});
+ const idN0=JSON.parse(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{proveedor:'Nuevo',referencia:'OC-NUEVA',fecha:'2026-11-11'},p_esperado:[]}).body),idN=idN0.id||idN0;
+ await m.tap('#v-provcel [data-menu]');await m.waitForTimeout(500);await m.tap('#puMenu [data-pk="prov"]');await m.waitForTimeout(1500);
+ check(!(await m.isVisible('#pcWork'))&&!!(await m.$(`#pcHome [data-pc="${idN}"]`))&&!(await m.$(`#pcHome [data-pc="${idD}"]`)),'Recepción eliminada: el celular la suelta y muestra el packing list nuevo');
+ // ABC: solo clases válidas (nunca pallets ni unidades)
+ const abc=await s.evaluate(()=>pvFilas([["SKU","Producto","un. En Cont.","ML/KG","Pallets","ABC"],["110213","X","40","KG","2","C"],["140105","Y","80","KG","2,0","2,0"],["221203","Z","34","ML","B","1,1"],["221602","W","250","ML","3,9","KG"]]).out.map(x=>x.abc).join(","));
+ check(abc==='C,,B,','ABC: toma la clase (C, B) y descarta números y unidades → '+abc);
+ // CSV real del proveedor (comillas con coma: "2,000", "(0,6x30)"): las 16 filas sin correrse
+ const csv=require('fs').readFileSync(require('path').join(__dirname,'../datos/packing_ONEU9196570.csv'),'utf8');
+ const csR=await s.evaluate(t=>{const o=pvFilas(csvFilas(t,","));return o.out.length+"|"+o.cont+"|"+o.out.filter(x=>x.code==="221203").map(x=>[x.qty,x.fpl,x.bxp,x.abc].join("/"))+"|"+o.out.map(x=>x.abc).join("")},csv);
+ check(csR==='16|ONEU9196570|145/30/34/NSO|CCNSOBBNSONSONSONSONSONSOCBBBOU','CSV del proveedor: 16 filas, 221203 = 145 bultos, 30 m, 34 x pallet, NSO → '+csR);
  // Validaciones del servidor
  check(/falta_documento/.test(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{fecha:'2026-11-11'},p_esperado:[]}).body),'Sin guía ni referencia: rechazado');
  check(!rpc('cb_prov_listar',{p_clave:'clave-mala-xxxx'}).ok,'Sin clave: rechazado');

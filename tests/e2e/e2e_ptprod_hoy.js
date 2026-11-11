@@ -9,7 +9,7 @@ const usr=(nom,area,perm)=>{const id=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMI
  const [pId,pT]=usr('David PT','Producción',['pt_entregar']);
  const ins=(lid,pal,qty,h)=>sql(`with x as (select (date_trunc('day', now() at time zone 'America/Santiago') + interval '${h} minute') at time zone 'America/Santiago' t)
    insert into cb_pt(lid,puesto,pallet,data,t,lado) select '${lid}','${pId}','${pal}',jsonb_build_object('lid','${lid}','k','110107','code','110107','desc','ROLLO ALAMBRE','qty',${qty},'um','kg','pallet','${pal}','user','DAVID','t',to_char(t at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')),t,'E' from x`);
- ins('h1','PAL-1',10,1);ins('h2','PAL-2',20,2);
+ ins('h1','PAL-1',10,1);ins('h2','PAL-2',20,2);ins('y1','PAL-AYER',5,-60);
  const b=await chromium.launch();
  const c=await b.newContext({...devices['Pixel 7'],timezoneId:'America/Santiago'});await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
  const p=await c.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));p.on('dialog',d=>d.accept());
@@ -18,6 +18,8 @@ const usr=(nom,area,perm)=>{const id=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMI
  check(await p.isVisible('#ptPrevCard')&&/Mis pallets por día/.test(await p.textContent('#ptPrevCard')),'Producción: aparece "Mis pallets por día"');
  check(/^Hoy · /.test(await p.$eval('#ptPrevDia',s=>s.selectedOptions[0].textContent)),'Viene elegido "Hoy"');
  let L=await p.textContent('#ptPrevList');check(/PAL-1/.test(L)&&/PAL-2/.test(L),'Muestra los pallets de hoy');
+ check(!/PAL-AYER/.test(L),'"Hoy" no muestra el pallet de ayer a las 23:00 (día calendario)');
+ check(!(await p.isVisible('#ptList')),'Ya no aparece el cuadro "Pallets de este turno" (juntaba ayer y hoy)');
  await p.tap('#ptFin');await p.waitForTimeout(500);const cb=await p.$('#ptConfirm button.danger, #ptConfirm .btn.primary, #ptConfirm button');
  check(/quedan guardados/.test(await p.textContent('#ptConfirm')),'Al cerrar turno avisa que los pallets quedan guardados');
  const bs=await p.$$('#ptConfirm button');for(const x of bs){if(/cerrar|sí|confirm/i.test(await x.textContent())){await x.tap();break}}
