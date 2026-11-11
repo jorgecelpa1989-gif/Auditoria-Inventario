@@ -91,10 +91,11 @@ const FN={cb_listar:'inv_ver',cb_lecturas_de:'inv_ver',cb_conteo_codigos:'inv_ve
   cb_pt_listar:'pt_ver',cb_pt_editar_panel:'pt_corregir',cb_pt_agregar_panel:'pt_corregir',
   cb_dev_listar:'dev_ver',cb_dev_crear_panel:'dev_crear',cb_dev_cerrar:'dev_cerrar',cb_dev_eliminar:'dev_eliminar',
   cb_u_listar:'usr_admin|inv_operar|mp_operar',cb_puesto_estado:'usr_admin|inv_operar|mp_operar',cb_u_guardar:'usr_admin',cb_u_liberar:'usr_admin',cb_u_eliminar:'usr_admin',cb_puesto_link:'usr_admin',
+  cb_prov_listar:'prov_ver',cb_prov_guardar:'prov_operar',cb_prov_agregar_panel:'prov_operar',cb_prov_corregir:'prov_operar',cb_prov_cerrar:'prov_operar',cb_prov_eliminar:'prov_eliminar',
   cb_catalogo_ver:'*',cb_sup_yo:'*',cb_mov_finalizar:'mp_operar'};   // finalizar una entrega cualquiera exige "operar" (sin él, solo el cierre automático)
 const FIJOS={cb_conteo_asignar:{p_puesto:''}};   // argumentos que evitan errores de negocio ajenos a los permisos
 const SOLO_ADMIN=['cb_eliminar','cb_configurar','cb_prod_clave','cb_prod_estado','cb_prod_eliminar','cb_sup_listar','cb_sup_guardar','cb_sup_link','cb_sup_eliminar'];
-const PERMS=['inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar','pt_ver','pt_corregir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','usr_admin'];
+const PERMS=['inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar','pt_ver','pt_corregir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','prov_ver','prov_operar','prov_eliminar','usr_admin'];
 const fns2=sql(`select string_agg(p.proname||'|'||(select string_agg(n||':'||format_type(t,null), ',') from unnest(p.proargnames, p.proargtypes::oid[]) x(n,t)), ';' order by p.proname)
   from pg_proc p where p.pronamespace='public'::regnamespace and 'p_clave' = any(p.proargnames) and has_function_privilege('anon', p.oid, 'execute')`).split(';').map(f=>{const [name,ar]=f.split('|');return {name,ar:ar.split(',').map(a=>a.split(':'))}});
 const sinMapa=fns2.map(f=>f.name).filter(n=>!FN[n]&&!SOLO_ADMIN.includes(n));

@@ -19,7 +19,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(await s.isVisible('#supAdm')&&/Todavía no hay supervisores/.test(await s.textContent('#supBox')),'Permisos: aparece la tarjeta "Supervisores de área"');
  await s.click('#supNew');await s.fill('#supNom','Supervisor Prod. 1');
  const marc=()=>s.$$eval('#supEd [data-sp]',c=>c.filter(x=>x.checked).map(x=>x.dataset.sp).sort().join(','));
- check((await s.$$('#supEd [data-sp]')).length===14&&(await marc())==='','Nuevo supervisor: 14 permisos en 5 módulos, ninguno marcado (tú eliges)');
+ check((await s.$$('#supEd [data-sp]')).length===17&&(await marc())==='','Nuevo supervisor: 17 permisos en 6 módulos, ninguno marcado (tú eliges)');
  await s.check('#supEd [data-sp="mp_operar"]');check((await marc())==='mp_operar,mp_solicitar,mp_ver','Marcar "operar" marca también "ver" y "solicitar" → '+(await marc()));
  await s.uncheck('#supEd [data-sp="mp_ver"]');check((await marc())==='','Quitar "ver" quita todo lo que dependía de él');
  for(const q of ['mp_solicitar','pt_ver','dev_crear'])await s.check(`#supEd [data-sp="${q}"]`);

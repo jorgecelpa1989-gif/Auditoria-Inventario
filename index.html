@@ -271,7 +271,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <button role="tab" data-v="pt" aria-selected="false"><span class="num">4</span>Recepción PT</button>
   <button role="tab" data-v="devol" aria-selected="false"><span class="num">5</span>Logística inversa</button>
   <button role="tab" data-v="permisos" aria-selected="false"><span class="num">6</span>Permisos</button>
-  <button role="tab" data-v="prov" aria-selected="false"><span class="num">7</span>Recepción proveedores<span class="soon">Pronto</span></button>
+  <button role="tab" data-v="prov" aria-selected="false"><span class="num">7</span>Recepción proveedores</button>
 </nav>
 <div class="navScrim" id="navScrim" hidden></div>
 
@@ -726,6 +726,51 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <p class="small" id="dvFinTxt"></p>
       <button class="btn primary" id="dvFin" style="justify-content:center;font-size:16px;padding:12px"></button>
       <div id="dvConfirm"></div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="v-provcel" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b>Recepción de proveedores</b></div>
+  <div id="pcHome"></div>
+  <div id="pcWork" hidden>
+    <div class="card contarCard">
+      <div class="row"><div class="eyebrow" id="pcDocEb">1 · Documento</div><span class="sep"></span><button class="btn sm" id="pcBack">← Lista</button></div>
+      <div id="pcDoc"></div>
+    </div>
+    <div class="card contarCard">
+      <div id="pcCamWrap" class="camWrap" hidden>
+        <div class="row" style="justify-content:space-between"><span class="camTarget">Leyendo producto</span><button class="btn sm" id="pcCamStop">Cerrar cámara</button></div>
+        <div id="pcReader"></div>
+        <div class="small muted" id="pcCamMsg"></div>
+      </div>
+      <div class="step">
+        <div class="eyebrow">2 · Producto (SKU)</div>
+        <div class="scanbox">
+          <input id="pcScan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea, digita el código o el nombre">
+          <button class="btn accent" id="pcCam">Cámara</button>
+        </div>
+        <div class="pending" id="pcPending" hidden></div>
+        <div class="sugg" id="pcSugg" hidden></div>
+      </div>
+      <div class="step">
+        <div class="eyebrow" id="pcQtyEb">3 · Cantidad</div>
+        <div class="scanbox">
+          <input id="pcQty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off">
+          <button class="btn primary" id="pcOk" style="padding-inline:26px;font-size:18px;min-width:84px;justify-content:center">OK</button>
+        </div>
+      </div>
+    </div>
+    <div class="card contarCard">
+      <div class="row"><h2 style="margin:0">Recibido</h2><span class="sep"></span><span class="small muted" id="pcInfo"></span></div>
+      <div class="tbl"><table id="pcList"></table></div>
+      <div id="pcSync"></div>
+    </div>
+    <div class="card contarCard">
+      <div class="eyebrow">Al terminar de recibir</div>
+      <p class="small">Revisa lo recibido y termina la recepción. El supervisor ve el cuadre al instante. Después de terminar ya no se puede modificar desde el celular.</p>
+      <button class="btn primary" id="pcFin" style="justify-content:center;font-size:16px;padding:12px">Terminar recepción…</button>
+      <div id="pcConfirm"></div>
     </div>
   </div>
 </section>
@@ -3563,6 +3608,260 @@ begin
           'manual', jsonb_build_object('por', left(coalesce(cb_sup_nombre(p_clave), p_data->>'user', 'Supervisor'), 80), 'at', now(), 'via', 'panel')));
   return jsonb_build_object('lid', v_lid, 't', v_t);
 end $$;
+
+-- =====================================================================
+--  Actualización 19 · Recepción de proveedores (módulo 7)
+--  El panel crea la recepción (tipo nacional o importación, proveedor, N° de guía, N° de referencia,
+--  fecha) con su packing list (lo esperado). Bodega la recibe desde el celular (permiso de usuario
+--  "prov_recibir"): acepta o corrige lo que llega, o crea una recepción propia sin packing list.
+--  El panel ve el cuadre esperado vs recibido, agrega o corrige registros y cierra.
+--  Permisos de supervisor: prov_ver · prov_operar · prov_eliminar.
+--  Solo agrega cosas: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create table if not exists public.cb_prov (
+  id           uuid primary key default gen_random_uuid(),
+  tipo         text not null default 'nacional' check (tipo in ('nacional','importacion')),
+  proveedor    text,
+  guia         text,
+  referencia   text,                               -- orden de compra, factura, contenedor o carpeta
+  fecha        date,
+  nota         text,
+  origen       text not null default 'panel',      -- 'panel' o el usuario (celular) que la creó
+  persona      text,
+  creado       timestamptz not null default now(),
+  actualizado  timestamptz not null default now(),
+  esperado     jsonb not null default '[]'::jsonb, -- packing list
+  rec          jsonb not null default '[]'::jsonb, -- lo que bodega registró desde el celular
+  man          jsonb not null default '[]'::jsonb, -- registros agregados a mano desde el panel
+  rec_persona  text,
+  rec_inicio   timestamptz,
+  recibido     timestamptz,                        -- bodega terminó la recepción
+  finalizado   timestamptz                         -- el supervisor la cerró
+);
+create index if not exists cb_prov_creado_idx on public.cb_prov (creado desc);
+alter table public.cb_prov enable row level security;
+revoke all on public.cb_prov from public, anon, authenticated;
+
+-- Líneas válidas: arreglo de objetos con código y cantidad (número entre 0 y 1.000.000).
+create or replace function public.cb_prov_lineas_ok(p jsonb, p_max int default 5000) returns void
+language plpgsql immutable set search_path = public, extensions as $$
+begin
+  if p is null or jsonb_typeof(p) <> 'array' or jsonb_array_length(p) > p_max then raise exception 'datos_invalidos'; end if;
+  if exists (select 1 from jsonb_array_elements(p) e
+              where jsonb_typeof(e) <> 'object' or coalesce(e->>'code', e->>'k', '') = ''
+                 or coalesce(jsonb_typeof(e->'qty'), '') <> 'number') then
+    raise exception 'datos_invalidos';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p) e where (e->>'qty')::numeric < 0 or (e->>'qty')::numeric > 1000000) then
+    raise exception 'datos_invalidos';
+  end if;
+end $$;
+revoke execute on function public.cb_prov_lineas_ok(jsonb, int) from public, anon, authenticated;
+
+-- ---------- Panel ----------
+create or replace function public.cb_prov_listar(p_clave text, p_desde timestamptz default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'prov_ver');
+begin
+  return coalesce((select jsonb_agg(to_jsonb(p) order by p.creado desc) from cb_prov p
+    where p.creado > coalesce(p_desde, now() - interval '120 days')), '[]'::jsonb);
+end $$;
+
+-- Crea o edita la recepción: datos del documento y packing list (agregar o quitar productos esperados).
+create or replace function public.cb_prov_guardar(p_clave text, p_id uuid, p_doc jsonb, p_esperado jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'prov_operar'); v_id uuid := p_id; v_fecha date; p cb_prov;
+begin
+  perform cb_prov_lineas_ok(coalesce(p_esperado, '[]'::jsonb));
+  begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then raise exception 'fecha_invalida'; end;
+  if v_fecha is null then raise exception 'fecha_invalida'; end if;
+  if coalesce(trim(p_doc->>'guia'),'') = '' and coalesce(trim(p_doc->>'referencia'),'') = '' then raise exception 'falta_documento'; end if;
+  if v_id is not null then
+    select * into p from cb_prov where id = v_id for update;
+    if not found then v_id := null; elsif p.finalizado is not null then raise exception 'finalizado'; end if;
+  end if;
+  if v_id is null then
+    insert into cb_prov(id, origen, persona) values (coalesce(p_id, gen_random_uuid()), 'panel', left(coalesce(cb_sup_nombre(p_clave), nullif(p_doc->>'persona',''), 'Supervisor'), 80))
+    returning id into v_id;
+  end if;
+  update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+         proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+         referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), fecha = v_fecha, nota = left(p_doc->>'nota', 300),
+         esperado = coalesce(p_esperado, '[]'::jsonb), actualizado = now()
+   where id = v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+
+-- Agregar un registro recibido que faltó (queda aparte de lo que envía el celular, que no lo borra).
+create or replace function public.cb_prov_agregar_panel(p_clave text, p_id uuid, p_hora text, p_linea jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'prov_operar'); p cb_prov; v_t timestamptz; v_lid text; v_dia date;
+begin
+  perform cb_prov_lineas_ok(jsonb_build_array(p_linea), 1);
+  if (p_linea->>'qty')::numeric <= 0 then raise exception 'datos_invalidos'; end if;
+  select * into p from cb_prov where id = p_id for update;
+  if not found then raise exception 'no_existe'; end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  v_dia := coalesce(p.fecha, (p.creado at time zone 'America/Santiago')::date);
+  begin v_t := (v_dia + coalesce(nullif(p_hora,'')::time, time '12:00')) at time zone 'America/Santiago';
+  exception when others then raise exception 'datos_invalidos'; end;
+  if v_t > now() then v_t := now(); end if;
+  v_lid := 'man-' || encode(extensions.gen_random_bytes(8), 'hex');
+  update cb_prov set man = man || jsonb_build_array(p_linea || jsonb_build_object('lid', v_lid, 't', v_t,
+           'user', coalesce(cb_sup_nombre(p_clave), 'Supervisor'), 'manual', true)), actualizado = now()
+   where id = p_id;
+  return jsonb_build_object('lid', v_lid, 't', v_t);
+end $$;
+
+-- Corregir la cantidad de un registro (0 = anular; queda el historial). Lo que registró el celular se
+-- corrige recién cuando bodega terminó, para que su próximo envío no lo pise.
+create or replace function public.cb_prov_corregir(p_clave text, p_id uuid, p_lid text, p_qty numeric) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'prov_operar'); p cb_prov; v_por text := left(coalesce(cb_sup_nombre(p_clave), 'Supervisor'), 80);
+begin
+  if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  select * into p from cb_prov where id = p_id for update;
+  if not found then raise exception 'no_existe'; end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if exists (select 1 from jsonb_array_elements(p.man) e where e->>'lid' = p_lid) then
+    update cb_prov set man = (select jsonb_agg(case when x.e->>'lid' = p_lid then x.e || jsonb_build_object('qty', p_qty, 'ed', coalesce(x.e->'ed', '[]'::jsonb)
+             || jsonb_build_array(jsonb_build_object('de', x.e->'qty', 'a', p_qty, 'por', v_por, 't', now()))) else x.e end order by x.o)
+             from jsonb_array_elements(p.man) with ordinality x(e, o)), actualizado = now()
+     where id = p_id;
+  elsif exists (select 1 from jsonb_array_elements(p.rec) e where e->>'lid' = p_lid) then
+    if p.recibido is null then raise exception 'en_recepcion'; end if;
+    update cb_prov set rec = (select jsonb_agg(case when x.e->>'lid' = p_lid then x.e || jsonb_build_object('qty', p_qty, 'ed', coalesce(x.e->'ed', '[]'::jsonb)
+             || jsonb_build_array(jsonb_build_object('de', x.e->'qty', 'a', p_qty, 'por', v_por, 't', now()))) else x.e end order by x.o)
+             from jsonb_array_elements(p.rec) with ordinality x(e, o)), actualizado = now()
+     where id = p_id;
+  else
+    raise exception 'no_existe';
+  end if;
+  return jsonb_build_object('id', p_id, 'lid', p_lid, 'qty', p_qty);
+end $$;
+
+create or replace function public.cb_prov_cerrar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'prov_operar');
+  update cb_prov set finalizado = coalesce(finalizado, now()), actualizado = now() where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+create or replace function public.cb_prov_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'prov_eliminar');
+  delete from cb_prov where id = p_id;
+end $$;
+
+-- ---------- Celular de bodega (permiso de usuario "prov_recibir") ----------
+create or replace function public.cb_prov_mis(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'tipo', p.tipo, 'proveedor', p.proveedor, 'guia', p.guia, 'referencia', p.referencia,
+      'fecha', p.fecha, 'nota', p.nota, 'origen', p.origen, 'persona', p.persona, 'esperado', p.esperado, 'rec', p.rec,
+      'rec_persona', p.rec_persona, 'rec_inicio', p.rec_inicio, 'recibido', p.recibido) order by p.creado)
+    from cb_prov p where p.finalizado is null and (p.recibido is null or p.recibido > now() - interval '18 hours')), '[]'::jsonb);
+end $$;
+
+-- Guarda lo recibido (y termina, si p_terminar). Si la recepción no existe, la crea este celular
+-- (sin packing list) y puede editar sus datos mientras no la termine.
+create or replace function public.cb_prov_recibir(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; v_fecha date; v_pers text := left(p_doc->>'persona', 80);
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then raise exception 'sin_permiso'; end if;
+  if p_id is null then raise exception 'datos_invalidos'; end if;
+  perform cb_prov_lineas_ok(p_rec);
+  select * into p from cb_prov where id = p_id for update;
+  if not found then
+    insert into cb_prov(id, origen, persona, fecha) values (p_id, p_puesto, v_pers, (now() at time zone 'America/Santiago')::date)
+    returning * into p;
+  end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if p.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p.origen = p_puesto then
+    begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then v_fecha := null; end;
+    update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+           proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+           referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), fecha = coalesce(v_fecha, fecha), nota = left(p_doc->>'nota', 300)
+     where id = p_id
+    returning * into p;
+  end if;
+  if p_terminar then
+    if jsonb_array_length(p_rec) = 0 then raise exception 'sin_productos'; end if;
+    if coalesce(p.guia, '') = '' and coalesce(p.referencia, '') = '' then raise exception 'falta_documento'; end if;
+  end if;
+  update cb_prov set rec = p_rec, rec_persona = v_pers, rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end);
+end $$;
+
+revoke all on function public.cb_prov_listar(text, timestamptz), public.cb_prov_guardar(text, uuid, jsonb, jsonb),
+  public.cb_prov_agregar_panel(text, uuid, text, jsonb), public.cb_prov_corregir(text, uuid, text, numeric),
+  public.cb_prov_cerrar(text, uuid), public.cb_prov_eliminar(text, uuid),
+  public.cb_prov_mis(text, text), public.cb_prov_recibir(text, text, uuid, jsonb, jsonb, boolean) from public;
+grant execute on function public.cb_prov_listar(text, timestamptz), public.cb_prov_guardar(text, uuid, jsonb, jsonb),
+  public.cb_prov_agregar_panel(text, uuid, text, jsonb), public.cb_prov_corregir(text, uuid, text, numeric),
+  public.cb_prov_cerrar(text, uuid), public.cb_prov_eliminar(text, uuid),
+  public.cb_prov_mis(text, text), public.cb_prov_recibir(text, text, uuid, jsonb, jsonb, boolean) to anon, authenticated;
+
+-- Permisos nuevos: supervisores (prov_ver, prov_operar, prov_eliminar) y usuarios de celular (prov_recibir).
+create or replace function public.cb_sup_guardar(p_clave text, p_id text, p_nombre text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[]; par record;
+begin
+  perform cb_check(p_clave);
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar',
+      'pt_ver','pt_corregir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','usr_admin',
+      'prov_ver','prov_operar','prov_eliminar')) then raise exception 'datos_invalidos'; end if;
+  -- para operar o eliminar hay que poder ver el módulo
+  for par in select * from (values ('inv_operar','inv_ver'),('mp_solicitar','mp_ver'),('mp_operar','mp_ver'),('mp_operar','mp_solicitar'),('mp_eliminar','mp_ver'),
+      ('pt_corregir','pt_ver'),('dev_crear','dev_ver'),('dev_todas','dev_ver'),('dev_cerrar','dev_ver'),('dev_eliminar','dev_ver'),
+      ('prov_operar','prov_ver'),('prov_eliminar','prov_ver')) v(hijo, padre) loop
+    if par.hijo = any(v_perm) and not (par.padre = any(v_perm)) then v_perm := v_perm || par.padre; end if;
+  end loop;
+  if v_id is null then
+    if (select count(*) from cb_sup) >= 50 then raise exception 'datos_invalidos'; end if;
+    v_id := 's_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_sup(id, nombre, permisos, activo) values (v_id, left(trim(p_nombre), 80), v_perm, coalesce(p_activo, true));
+  else
+    update cb_sup set nombre = left(trim(p_nombre), 80), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
+
+create or replace function public.cb_u_guardar(p_clave text, p_id text, p_nombre text, p_area text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[];
+begin
+  perform cb_puede(p_clave, 'usr_admin');
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('conteo','mp_entregar','mp_recibir','pt_entregar','pt_recibir','pt_retirar','dev_cargar','dev_recibir','prov_recibir')) then raise exception 'datos_invalidos'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'mp\_%') > 1 then raise exception 'mp_uno'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'pt\_%') > 1 then raise exception 'pt_uno'; end if;
+  if v_id is null then
+    v_id := 'u_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_puesto(id, hash, nombre, area, permisos, activo)
+    values (v_id, extensions.crypt(encode(extensions.gen_random_bytes(16), 'hex'), extensions.gen_salt('bf')), left(trim(p_nombre), 80), left(trim(coalesce(p_area,'')), 60), v_perm, coalesce(p_activo, true));
+  else
+    update cb_puesto set nombre = left(trim(p_nombre), 80), area = left(trim(coalesce(p_area,'')), 60), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
 </script>
   </div>
 
@@ -3609,10 +3908,62 @@ end $$;
 
 <!-- ============ 7 RECEPCIÓN DE PROVEEDORES ============ -->
 <section class="view" id="v-prov" hidden>
-  <div class="card soonCard">
-    <div class="row"><div class="eyebrow">7 · Recepción proveedores</div><span class="sep"></span><span class="pill p-warn">En construcción</span></div>
-    <h2>Recepción de PT de proveedores nacionales e importaciones</h2>
-    <p class="small">Datos de cada recepción: <b>proveedor</b>, <b>N° de guía</b> y <b>N° de factura</b>, <b>orden de compra</b> (para comparar lo pedido con lo recibido) y, en importaciones, <b>N° de DIN o carpeta</b> y <b>N° de contenedor</b>. Por cada producto: <b>SKU</b> y <b>cantidad</b>, con la misma lectura por pistola o cámara de las otras secciones.</p>
+  <div class="card">
+    <div class="row"><div class="eyebrow">7 · Recepción de proveedores</div><span class="sep"></span><span class="small muted" id="pvAt"></span></div>
+    <div class="row"><h2 style="margin:0">Packing list vs recibido en bodega</h2><span class="sep"></span>
+      <select id="pvDia" style="flex:0 1 210px"></select><button class="btn primary" id="pvRef">Actualizar</button><button class="btn" id="pvXlsAll">Excel</button><button class="btn" id="pvNewTog">＋ Nueva recepción</button></div>
+    <div class="notice" id="pvNote" hidden></div>
+    <div class="cbox" id="pvForm" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b id="pvFormT">Nueva recepción</b>
+      <div class="dvGrid">
+        <label class="f">Tipo<select id="pvTipo"><option value="nacional">Nacional</option><option value="importacion">Importación</option></select></label>
+        <label class="f">Proveedor<input id="pvProv" autocomplete="off" autocapitalize="characters" placeholder="Nombre del proveedor"></label>
+        <label class="f">N° de guía<input id="pvGuia" autocomplete="off" autocapitalize="characters"></label>
+        <label class="f">N° de referencia<input id="pvRefe" autocomplete="off" autocapitalize="characters" placeholder="OC, factura, contenedor o carpeta"></label>
+        <label class="f">Fecha<input id="pvFecha" type="date"></label>
+      </div>
+      <div class="small muted">N° de guía o N° de referencia: basta con uno.</div>
+      <label class="f">Observación (opcional)<input id="pvNota" maxlength="300" autocomplete="off"></label>
+      <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:4px">
+        <b style="font-size:14px">Packing list</b>
+        <label class="btn sm" style="cursor:pointer">📄 Cargar Excel o CSV<input id="pvFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden></label>
+        <span class="small muted">o pega las filas copiadas desde Excel:</span>
+      </div>
+      <textarea id="pvPaste" rows="3" placeholder="Código[tab]Cantidad (con o sin encabezado; también reconoce columnas de descripción)" style="width:100%;font:13px var(--mono)"></textarea>
+      <div class="row small" style="gap:10px;flex-wrap:wrap"><span class="muted">Las cantidades vienen en:</span>
+        <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="pvU" value="ce" checked> bultos (rollos, cajas, sacos…)</label>
+        <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="pvU" value="base"> unidad del ERP (m, kg, un…)</label>
+        <button class="btn sm" id="pvPasteOk" type="button">Agregar filas pegadas</button></div>
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <label class="f" style="flex:1 1 200px">Producto (código)<input id="pvCod" autocomplete="off" autocapitalize="characters" placeholder="Código o código de barras"></label>
+        <label class="f" style="flex:0 1 130px"><span id="pvCantL">Cantidad</span><input id="pvCant" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+        <button class="btn" id="pvLinAdd" type="button">Agregar</button></div>
+      <div class="small" id="pvCodInfo"></div>
+      <div class="small" id="pvParseInfo"></div>
+      <div class="tbl" style="max-height:300px"><table id="pvLines"></table></div>
+      <div class="row" style="gap:8px"><button class="btn primary" id="pvSave" type="button">Crear y enviar a bodega</button><button class="btn" id="pvCancel" type="button">Cancelar</button><span class="small muted" id="pvFormInfo"></span></div>
+    </div>
+    <div class="kpis" id="pvKpis"></div>
+    <div class="row"><div class="chips" id="pvChips"></div><span class="sep"></span><input id="pvQ" placeholder="Buscar proveedor, guía, referencia o SKU" style="flex:0 1 280px"></div>
+    <div class="tbl" style="max-height:460px"><table id="pvTbl"></table></div>
+  </div>
+  <div class="card" id="pvDet" hidden>
+    <div class="row"><div class="eyebrow">Cuadre packing list vs recibido</div><span class="sep"></span><button class="btn sm" id="pvX">Cerrar vista</button></div>
+    <h2 id="pvDetT" style="margin:0"></h2>
+    <div class="small muted" id="pvDetS"></div>
+    <div class="kpis" id="pvDetK"></div>
+    <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Eliminar…</button></div>
+    <div class="cbox" id="pvAdd" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b>Agregar un registro recibido que faltó</b>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:1 1 200px">Código<input id="pvAdCod" autocomplete="off" autocapitalize="characters" placeholder="Código del producto"></label>
+        <label class="f" style="flex:0 1 120px"><span id="pvAdQL">Cantidad</span><input id="pvAdQty" inputmode="decimal" placeholder="0" autocomplete="off"></label>
+        <label class="f" style="flex:0 1 110px">Hora<input id="pvAdHora" type="time"></label>
+        <button class="btn primary" id="pvAdOk" type="button">Agregar</button></div>
+      <div class="small" id="pvAdInfo">Queda como recibido, marcado como agregado a mano. Lo que envía el celular no lo borra.</div>
+    </div>
+    <div class="tbl" style="max-height:560px"><table id="pvCmp"></table></div>
+    <div id="pvConfirm"></div>
   </div>
 </section>
 </main>
@@ -3748,6 +4099,8 @@ function show(v){
   menuOpen(false);
   if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm();if(typeof renderSup==="function")renderSup();if(typeof lbEnter==="function")lbEnter()}
   if(v==="devol"&&typeof devEnter==="function")devEnter();
+  if(v==="prov"&&typeof pvEnter==="function")pvEnter();
+  if(v!=="provcel"&&typeof pcStopCam==="function")pcStopCam();
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
@@ -4620,6 +4973,7 @@ const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"in
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",
   cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
+  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
 async function rpc(conf,fn,args){
   if(SUP_FN[fn]&&args&&args.p_clave){let s=false;try{s=supOn()&&args.p_clave===SUPI.ses}catch(e){}
@@ -5012,7 +5366,7 @@ if(PRD&&PRD.sup){   // sesión creada con la versión anterior (v14): se pasa al
 const supOn=()=>!!(SUPI&&SUPI.ses&&SB.ok&&SB.admin===SUPI.ses);
 const PROD_PERM=["mp_ver","mp_solicitar","pt_ver"];   // acceso antiguo de producción
 const pvCan=p=>p==="mp_cerrar"?(supOn()?pvCan("mp_operar"):true):supOn()?(SUPI.permisos||[]).includes(p):prodMode()?PROD_PERM.includes(p):true;
-const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["devol","dev_ver"],["permisos","usr_admin"]];
+const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["devol","dev_ver"],["permisos","usr_admin"],["prov","prov_ver"]];
 const pvViews=()=>supOn()?SUP_VISTAS.filter(x=>pvCan(x[1])).map(x=>x[0]):prodMode()?["mp","pt"]:null;   // null = sin límite (administrador)
 const mpLim=()=>prodMode()||(supOn()&&!pvCan("mp_operar"));       // solo solicita: no activa, asigna ni cierra
 const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la lista de productos de la nube, no un ERP cargado aquí
@@ -5020,7 +5374,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 const SUP_SIEMPRE="#sbCard,#ghCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
-  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
+  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,[data-pvc]",prov_eliminar:"#pvDel",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
   let st=$("#supStyle");if(!st){st=document.createElement("style");st.id="supStyle";document.head.appendChild(st)}
@@ -5272,11 +5626,12 @@ const SUP_PERM=[["inv_ver","Inventario","Ver el panel, conteos y resultados"],["
   ["mp_ver","Entrega MP","Ver el panel y el detalle"],["mp_solicitar","Entrega MP","Crear solicitudes de MP"],["mp_operar","Entrega MP","Crear entregas, asignar, extender, cerrar, liberar y bloquear"],["mp_eliminar","Entrega MP","Eliminar entregas"],
   ["pt_ver","Recepción PT","Ver cuadraturas y bajar Excel"],["pt_corregir","Recepción PT","Corregir, anular y agregar registros"],
   ["dev_ver","Devoluciones","Ver devoluciones y su avance"],["dev_crear","Devoluciones","Crear devoluciones"],["dev_todas","Devoluciones","Todas las áreas (sin esto, solo Producción)"],["dev_cerrar","Devoluciones","Cerrar devoluciones"],["dev_eliminar","Devoluciones","Eliminar devoluciones"],
+  ["prov_ver","Recepción proveedores","Ver recepciones, cuadre y bajar Excel"],["prov_operar","Recepción proveedores","Crear recepciones, packing list, agregar, corregir y cerrar"],["prov_eliminar","Recepción proveedores","Eliminar recepciones"],
   ["usr_admin","Usuarios de celulares","Crear, editar, liberar, bloquear y eliminar usuarios"]];
 const SUP_TXT={inv_ver:"Inventario · ver",inv_operar:"Inventario · operar",mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",mp_operar:"MP · operar",mp_eliminar:"MP · eliminar",pt_ver:"PT · ver",pt_corregir:"PT · corregir",
-  dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · eliminar",usr_admin:"Usuarios"};
+  dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · eliminar",prov_ver:"Proveedores · ver",prov_operar:"Proveedores · operar",prov_eliminar:"Proveedores · eliminar",usr_admin:"Usuarios"};
 /* Para operar o eliminar hay que poder ver el módulo (el servidor lo exige igual). */
-const SUP_PADRES={inv_operar:["inv_ver"],mp_solicitar:["mp_ver"],mp_operar:["mp_ver","mp_solicitar"],mp_eliminar:["mp_ver"],pt_corregir:["pt_ver"],dev_crear:["dev_ver"],dev_todas:["dev_ver"],dev_cerrar:["dev_ver"],dev_eliminar:["dev_ver"]};
+const SUP_PADRES={inv_operar:["inv_ver"],mp_solicitar:["mp_ver"],mp_operar:["mp_ver","mp_solicitar"],mp_eliminar:["mp_ver"],pt_corregir:["pt_ver"],dev_crear:["dev_ver"],dev_todas:["dev_ver"],dev_cerrar:["dev_ver"],dev_eliminar:["dev_ver"],prov_operar:["prov_ver"],prov_eliminar:["prov_ver"]};
 const supLink=id=>{const t=(SB.sup||{})[id];return t?appUrl()+"?sup="+encodeURIComponent(id)+"&t="+encodeURIComponent(t)+sbLinkParams():""};
 const supMsg=e=>/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 17 (supervisores).":({falta_nombre:"Escribe el nombre.",no_existe:"Ese supervisor ya no existe.",datos_invalidos:"Falta ejecutar en Supabase la actualización 18 (permisos por módulo)."}[e.message]||movMsg(e));
 async function supCargar(){const r=await rpc(SB,"cb_sup_listar",{p_clave:SB.admin});SUPS=Array.isArray(r)?r:[];return SUPS}
@@ -5810,10 +6165,10 @@ checkPuestoLink();
 function puestoApply(){
   const b=document.body;b.classList.add("puesto");b.classList.remove("prodv","locked");$("#lockBox").innerHTML="";
   b.classList.toggle("op",puVista==="conteo");b.classList.toggle("mov",puVista==="mp");
-  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel"}[puVista]||"puesto";
+  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel",prov:"provcel"}[puVista]||"puesto";
   if($("#v-"+v).hidden)show(v);
 }
-function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();if(typeof dvStopCam==="function")dvStopCam();puestoApply();renderPuesto();puRefresh()}
+function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();if(typeof dvStopCam==="function")dvStopCam();if(typeof pcStopCam==="function")pcStopCam();puestoApply();renderPuesto();puRefresh()}
 $$("[data-menu]").forEach(b=>b.onclick=()=>puestoMenu());
 async function puestoInit(){try{await puestoReady}catch(e){return}puestoMenu()}
 
@@ -5847,6 +6202,7 @@ function renderPuesto(){
   if(can("mp_recibir"))items.push({k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp});
   if(can("pt_entregar"))items.push({k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"});
   if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
+  if(can("prov_recibir"))items.push({k:"prov",ic:"🚚",t:"Recepción de proveedores",s:"Recibe lo que llega de proveedores, con o sin packing list"});
   if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
   if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
   if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía o de factura, fecha y productos"});
@@ -5859,6 +6215,7 @@ function renderPuesto(){
 function puAbrir(k){
   if(!PST.persona){toast("Escribe tu nombre arriba");return $("#puPersona").focus()}
   if(k==="pt")return ptAbrir();
+  if(k==="prov")return pcAbrir();
   if(k==="dev"||k==="devrec")return dvAbrir(k==="devrec"?"rec":"carga");
   const lista=k==="mp"?puTareas.mp:puTareas.conteos;
   const directa=k==="mp"&&can("mp_entregar");          // bodega puede abrir una entrega sin esperar al supervisor
@@ -5915,7 +6272,7 @@ async function puAbrirConteo(t){
 
 /* ---------- Supervisor: USUARIOS (PC y celulares) con sus permisos — pestaña 6 · Permisos ---------- */
 var USERS=store.get("inv_users",[]), uEdit=null, uBusy=false;
-const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones"};
+const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones",prov_recibir:"Recibe proveedores"};
 const AREAS=["Bodega","Producción","Picking retail","Distribución","Compras","Despacho","Calidad"];
 function usersCon(p){return (USERS||[]).filter(u=>u.activo!==false&&(u.permisos||[]).includes(p))}
 function uNombre(id){const u=(USERS||[]).find(x=>x.id===id);return u?(u.nombre||u.id):(PUN[id]?"Celular de "+PUN[id]:id)}
@@ -5980,10 +6337,11 @@ function uEditor(u,keep){
     <fieldset><legend>Materia prima (MP)</legend>${rad("uMp","",mp,"No")}${rad("uMp","mp_entregar",mp,"Entrega MP (bodega)")}${rad("uMp","mp_recibir",mp,"Recibe MP (producción)")}</fieldset>
     <fieldset><legend>Producto terminado (PT)</legend>${rad("uPt","",pt,"No")}${rad("uPt","pt_entregar",pt,"Entrega PT (producción)")}${rad("uPt","pt_recibir",pt,"Recibe PT (bodega)")}${rad("uPt","pt_retirar",pt,"Retira PT para despacho (retail)")}</fieldset>
     <fieldset><legend>Devoluciones</legend><label><input type="checkbox" id="uP_dev_cargar" ${P.has("dev_cargar")?"checked":""}> Carga devoluciones</label><label><input type="checkbox" id="uP_dev_recibir" ${P.has("dev_recibir")?"checked":""}> Recepciona devoluciones</label></fieldset>
+    <fieldset><legend>Proveedores</legend><label><input type="checkbox" id="uP_prov_recibir" ${P.has("prov_recibir")?"checked":""}> Recibe proveedores (bodega)</label></fieldset>
     <div class="row"><button class="btn primary" id="uSave">${u?"Guardar cambios":"Crear usuario y su link"}</button>${u?'<button class="btn" id="uCancel">Cancelar</button>':""}</div></div>`;
   if($("#uCancel"))$("#uCancel").onclick=()=>{uEdit=null;uEditor(null,true)};
   $("#uSave").onclick=()=>{const perm=[];if($("#uP_conteo").checked)perm.push("conteo");const m=(document.querySelector('input[name="uMp"]:checked')||{}).value,t=(document.querySelector('input[name="uPt"]:checked')||{}).value;
-    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");
+    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");if($("#uP_prov_recibir").checked)perm.push("prov_recibir");
     uGuardar(u,{nombre:norm($("#uNom").value),area:norm($("#uArea").value),permisos:perm},!u)};
   if(!keep)setTimeout(()=>{try{$("#uNom").focus()}catch(e){}},50);
 }
@@ -6710,6 +7068,376 @@ $("#ptExp").onclick=()=>{
   XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Lado":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
   saveWb(wb,"PT_"+new Date().toISOString().slice(0,10)+".xlsx");
 };
+/* =====================================================================
+   7 · RECEPCIÓN DE PROVEEDORES en el celular de bodega (permiso "prov_recibir").
+   Recibe lo que llega: contra el packing list que cargó el supervisor, o una recepción
+   propia (sin packing list) con proveedor, N° de guía y N° de referencia.
+   ===================================================================== */
+var pcList=[], pc=store.get("inv_pc",null), pcT=null, pcSyncing=false, pcCamI=null, pcHold=false, pcLast={c:"",miss:99}, pcChk="";
+const pcSave=()=>store.set("inv_pc",pc);
+const PCTIPO={nacional:"Nacional",importacion:"Importación"};
+const pcMsg=e=>({falta_documento:"Ingresa el N° de guía o el N° de referencia (basta con uno).",sin_productos:"Registra al menos un producto.",ya_recibida:"Esta recepción ya se terminó.",
+  finalizado:"El supervisor cerró esta recepción.",sin_permiso:"Tu usuario no tiene permiso para recibir proveedores. Pídeselo al supervisor.",datos_invalidos:"Hay una línea con datos inválidos: revisa las cantidades."}[e.message]
+  ||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 19 (proveedores).":puMsg(e)));
+async function pcRefresh(){try{const r=await prpc("cb_prov_mis");pcList=Array.isArray(r)?r:[]}catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e;if(/function|PGRST202|404/.test(e.message))toast(pcMsg(e))}}
+async function pcAbrir(){
+  puVista="prov";puestoApply();
+  await dvCatalogo();
+  try{await pcRefresh()}catch(e){}
+  if(pc&&pc.puesto===PST.puesto&&!pc.fin)return pcWork();
+  pcHomeRender();
+}
+function pcRowHtml(d,ro){
+  const n=(d.esperado||[]).length;
+  return `<button class="dvRow" data-pc="${esc(d.id)}" ${ro?"disabled":""}><span class="dd"><b>${esc(d.proveedor||"Proveedor sin nombre")}</b><span>${esc(PCTIPO[d.tipo]||"")} · Guía ${esc(d.guia||"—")} · Ref. ${esc(d.referencia||"—")} · ${fechaCL(d.fecha)}${n?" · "+fmt(n)+" líneas":" · sin packing list"}</span></span><span class="pill ${d.recibido?"p-ok":d.rec_inicio?"p-info":"p-warn"}">${d.recibido?"Recibida":d.rec_inicio?"En recepción":"Por recibir"}</span></button>`;
+}
+function pcHomeRender(){
+  if(pc&&pc.fin){pc=null;pcSave()}
+  $("#pcWork").hidden=true;$("#pcHome").hidden=false;pcStopCam();
+  const pend=pcList.filter(d=>!d.recibido),hechas=pcList.filter(d=>d.recibido);
+  $("#pcHome").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Por recibir</h2>
+      ${pend.length?pend.map(d=>pcRowHtml(d)).join(""):'<p class="muted" style="margin:0">No hay recepciones cargadas por el supervisor. La lista se actualiza sola cada 20 s.</p>'}
+      ${hechas.length?`<h3 style="margin:10px 0 0;font-size:15px">Recibidas hoy</h3>`+hechas.map(d=>pcRowHtml(d,true)).join(""):""}</div>
+    <div class="card contarCard"><button class="btn primary" id="pcNew" style="justify-content:center;font-size:16px;padding:12px">＋ Nueva recepción sin packing list</button>
+      <p class="small muted" style="margin:0">Para lo que llega sin aviso: anota el proveedor, el N° de guía o de referencia, y registra cada producto con su cantidad.</p></div>`;
+  $("#pcNew").onclick=pcNueva;
+  $$("#pcHome [data-pc]").forEach(b=>b.onclick=()=>pcElegir(b.dataset.pc));
+}
+function pcNueva(){
+  if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  pc={id:uuid4(),puesto:PST.puesto,propia:true,doc:{tipo:"nacional",proveedor:"",guia:"",referencia:"",fecha:hoyISO(),nota:""},decl:[],lect:[],dirty:false,ver:0};pcSave();pcWork();
+}
+function pcElegir(id){
+  const d=pcList.find(x=>x.id===id);if(!d)return;
+  if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  if(d.recibido)return toast("Esta recepción ya se terminó");
+  pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
+      decl:Array.isArray(d.esperado)?d.esperado:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0};pcSave();pcWork();
+}
+function pcWork(){
+  $("#pcHome").hidden=true;$("#pcWork").hidden=false;const D=pc.doc;
+  if(pc.propia){
+    $("#pcDocEb").textContent="1 · Datos de la recepción";
+    $("#pcDoc").innerHTML=`<div class="dvGrid"><label class="f">Tipo<select id="pcTipo"><option value="nacional">Nacional</option><option value="importacion">Importación</option></select></label>
+      <label class="f">Proveedor<input id="pcProv" autocomplete="off" autocapitalize="characters" value="${esc(D.proveedor)}"></label>
+      <label class="f">N° de guía<input id="pcGuia" autocomplete="off" autocapitalize="characters" value="${esc(D.guia)}"></label>
+      <label class="f">N° de referencia<input id="pcRefe" autocomplete="off" autocapitalize="characters" value="${esc(D.referencia)}" placeholder="OC, factura o contenedor"></label>
+      <label class="f">Fecha<input id="pcFecha" type="date" value="${esc(D.fecha||hoyISO())}"></label></div>
+      <div class="small muted" style="margin-top:4px">N° de guía o N° de referencia: basta con uno.</div>`;
+    $("#pcTipo").value=D.tipo||"nacional";
+    const bind=(id,k,up)=>$("#"+id).addEventListener("change",e=>{pc.doc[k]=up?norm(e.target.value).toUpperCase():e.target.value;if(up)e.target.value=pc.doc[k];pcDirty()});
+    bind("pcTipo","tipo");bind("pcProv","proveedor",1);bind("pcGuia","guia",1);bind("pcRefe","referencia",1);bind("pcFecha","fecha");
+  }else{
+    $("#pcDocEb").textContent="Recepción que recibes";
+    $("#pcDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(D.proveedor||"Proveedor sin nombre")}</b></span><span>${esc(PCTIPO[D.tipo]||"")}</span><span>Guía <b>${esc(D.guia||"—")}</b></span><span>Ref. <b>${esc(D.referencia||"—")}</b></span><span>Fecha <b>${fechaCL(D.fecha)}</b></span></div>${D.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(D.nota)}</div>`:""}<div id="pcDecl"></div>`;
+  }
+  $("#pcConfirm").innerHTML="";pcLimpiar();pcRender();pcRenderSync();
+  if(pc.propia&&!D.proveedor)setTimeout(()=>{try{$("#pcProv").focus()}catch(e){}},60);else if(!pcCamI)setTimeout(()=>$("#pcScan").focus(),60);
+}
+function pcLimpiar(){$("#pcScan").value="";$("#pcQty").value="";$("#pcPending").hidden=true;$("#pcSugg").hidden=true;$("#pcQtyEb").textContent="3 · Cantidad";pcHold=false;pcChk=""}
+function pcPend(v){
+  const it=ptFind(v),p=$("#pcPending");p.hidden=false;p.className="pending"+(it?"":" bad");
+  const tot=pc.lect.filter(l=>key(l.k||l.code)===key(it?it.cod:v)).reduce((a,l)=>a+(+l.qty||0),0);
+  p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}${tot?` · ya registrado: ${fmt2(tot)}`:""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b> de la balanza.");
+  $("#pcQtyEb").textContent=qtyLabel(it,3);return it;
+}
+function pcRead(raw){
+  let v=norm(raw);if(!v||!pc)return;
+  if(!ptFind(v)&&esTextoBusqueda(v)){const res=buscarNombre(ptItems(),v),box=$("#pcSugg");box.hidden=false;
+    box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(v)}"</span></button>`;
+    $$("#pcSugg [data-n]").forEach(b=>b.onclick=()=>{box.hidden=true;pcRead(res[+b.dataset.n].cod)});return}
+  $("#pcSugg").hidden=true;v=codeStr(v);$("#pcScan").value=v;pcChk=v;
+  const it=pcPend(v);
+  if(pcCamI){pcHold=true;$("#pcCamMsg").textContent="Leído. Digita la cantidad y toca OK."}
+  if(!it&&ptItems().length){codeAlert(v,()=>{if(pcCamI){pcHold=false;$("#pcCamMsg").textContent="Apunta al código del producto."}focusSel($("#pcScan"))},()=>focusSel($("#pcQty")));return}
+  audio.beep(!!it);focusSel($("#pcQty"));
+}
+function pcBlurCheck(){
+  if(!pc||$("#v-provcel").hidden||$("#pcWork").hidden||calertOpen())return;
+  const raw=norm($("#pcScan").value);if(!raw)return;const v=codeStr(raw);if(v===pcChk)return;
+  if(esTextoBusqueda(raw)&&!ptFind(raw))return;
+  pcChk=v;$("#pcScan").value=v;const it=pcPend(v);
+  if(!it&&ptItems().length)codeAlert(v,()=>focusSel($("#pcScan")),()=>focusSel($("#pcQty")));
+}
+var pcOkUnknown="";
+function pcAdd(){
+  if(!pc)return;
+  const code=codeStr($("#pcScan").value);if(!code){toast("Primero escanea o digita un producto");return focusSel($("#pcScan"))}
+  const q=num($("#pcQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#pcQty"))}
+  const it=ptFind(code);
+  if(!it&&ptItems().length&&pcOkUnknown!==code){pcPend(code);codeAlert(code,()=>focusSel($("#pcScan")),()=>{pcOkUnknown=code;pcAdd()});return}
+  const l={lid:newLid(),code,k:it?it.cod:code,desc:it?it.desc:"",um:it?umTxt(it.um):"",qty:q,user:PST.persona||"",t:new Date().toISOString()};
+  if(conv(it)){l.f=+it.f;l.ce=it.ce}
+  pc.lect.push(l);pcDirty();audio.beep(!!it);
+  $("#pcQty").value="";pcPend(code);
+  $("#pcPending").insertAdjacentHTML("afterbegin",`<div class="small" style="color:var(--ok);font-weight:700">✓ Registrado ${l.f?`${fmt2(q)} ${esc(plural(l.ce))} = ${fmt2(q*l.f)} ${esc(l.um)}`:fmt2(q)+(l.um&&l.um!=="un"?" "+esc(l.um):"")}</div>`);
+  pcHold=false;pcRender();
+  if(pcCamI)$("#pcCamMsg").textContent="Listo. Apunta al siguiente producto.";else focusSel($("#pcScan"));
+}
+/* lo esperado (packing list) con lo recibido hasta ahora y botones para aceptar */
+function pcDeclRows(){
+  const m=new Map();
+  for(const l of pc.decl||[]){const k=key(l.k||l.code);if(!k)continue;const r=m.get(k)||{k,cod:l.k||l.code,desc:l.desc||"",um:l.um||"",ce:l.ce||"",f:+l.f||1,D:0,R:0};r.D+=(+l.qty||0)*(+l.f||1);m.set(k,r)}
+  for(const l of pc.lect||[]){const r=m.get(key(l.k||l.code));if(r)r.R+=(+l.qty||0)*(+l.f||1)}
+  return [...m.values()];
+}
+function pcDeclRender(){
+  const box=$("#pcDecl");if(!box||pc.propia)return;
+  const rows=pcDeclRows(),pend=rows.filter(r=>r.R+1e-9<r.D);
+  if(!rows.length){box.innerHTML='<p class="small muted" style="margin:8px 0 0">Esta recepción no trae packing list: registra cada producto que llega.</p>';return}
+  box.innerHTML=`<div class="row" style="margin-top:10px"><b>Packing list (${fmt(rows.length)} producto${rows.length===1?"":"s"})</b><span class="sep"></span>${pend.length?`<button class="btn sm primary" id="pcAccAll">✓ Aceptar todo tal como viene</button>`:'<span class="pill p-ok">Todo aceptado</span>'}</div>
+    <div class="dvDeclL">${rows.map(r=>{const ok=Math.abs(r.R-r.D)<1e-9,dif=r.R-r.D;return `<div class="dvDeclR"><div><div style="font-weight:600;font-size:14px">${esc(r.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(r.cod)} · esperado: <b>${dvEnU(r,r.D)}</b></div>
+      <div class="small">${r.R?`Recibido: <b>${dvEnU(r,r.R)}</b> ${ok?'<span class="pill p-ok">✓</span>':`<span class="pill ${dif<0?"p-bad":"p-warn"}">${dif<0?"faltan":"sobran"} ${dvEnU(r,Math.abs(dif))}</span>`}`:'<span class="muted">Sin recibir</span>'}</div></div>
+      <div class="row" style="gap:6px">${r.R+1e-9<r.D?`<button class="btn sm primary" data-pcacc="${esc(r.k)}">✓ Aceptar</button>`:""}<button class="btn sm" data-pcedt="${esc(r.k)}">Otra cantidad</button></div></div>`}).join("")}</div>
+    <p class="small muted" style="margin:6px 0 0">Si llegó algo que no está en el packing list o una cantidad distinta, regístralo abajo con el producto y la cantidad real.</p>`;
+  const acc=r=>{const falta=r.D-r.R;if(falta<=1e-9)return false;const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc,um:r.um,qty:+(falta/r.f).toFixed(6),user:PST.persona||"",t:new Date().toISOString(),acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}pc.lect.push(l);return true};
+  $$("#pcDecl [data-pcacc]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.pcacc);if(r&&acc(r)){pcDirty();audio.beep(true);pcRender();toast("✓ Aceptado: "+(r.desc||r.cod))}});
+  const all=$("#pcAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pend.length)} producto${pend.length===1?"":"s"} con la cantidad del packing list.`,()=>{let n=0;for(const r of pend)if(acc(r))n++;if(n){pcDirty();audio.beep(true);pcRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#pcConfirm");
+  $$("#pcDecl [data-pcedt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.pcedt);if(!r)return;
+    if(pc.lect.some(l=>key(l.k||l.code)===r.k)){pc.lect=pc.lect.filter(l=>key(l.k||l.code)!==r.k);pcDirty();pcRender()}
+    $("#pcScan").value=r.cod;pcChk=r.cod;pcPend(r.cod);$("#pcQty").value="";focusSel($("#pcQty"));$("#pcQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
+}
+function pcRender(){
+  if(!pc)return;pcDeclRender();const ls=[...pc.lect].reverse();
+  $("#pcInfo").textContent=`${fmt(pc.lect.length)} líneas · ${fmt(new Set(pc.lect.map(l=>key(l.k||l.code))).size)} productos`;
+  $("#pcList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-pcdl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $$("#pcList [data-pcdl]").forEach(b=>b.onclick=()=>{const l=pc.lect.find(z=>z.lid===b.dataset.pcdl);if(!l)return;
+    confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{pc.lect=pc.lect.filter(z=>z.lid!==l.lid);pcDirty();pcRender();toast("Línea quitada")},"#pcConfirm")});
+}
+function pcDirty(){pc.dirty=true;pc.ver=(pc.ver||0)+1;pcSave();clearTimeout(pcT);pcT=setTimeout(()=>pcSync(false),1500);pcRenderSync()}
+function pcRenderSync(){
+  if(!pc)return;let h;
+  if(pcSyncing)h=`<span class="sync s-run">☁ Guardando…</span>`;
+  else if(pc.err)h=`<span class="sync s-bad">⚠ ${esc(pc.err)}</span> <button class="btn sm" id="pcGo">Reintentar</button>`;
+  else if(pc.dirty)h=`<span class="sync s-wait">⏳ ${navigator.onLine===false?"Sin señal: se guardará solo al volver":"Pendiente de guardar"}</span> <button class="btn sm" id="pcGo">Guardar ahora</button>`;
+  else h=pc.syncAt?`<span class="sync s-ok">☁ Guardado para el supervisor · ${hhmm(pc.syncAt)}</span>`:"";
+  $("#pcSync").innerHTML=h;const g=$("#pcGo");if(g)g.onclick=()=>{pc.err="";pcSync(false)};
+}
+async function pcSync(final){
+  if(!pc||pcSyncing)return false;if(!final&&!pc.dirty)return true;
+  if(navigator.onLine===false&&!final){pcRenderSync();return false}
+  pcSyncing=true;pcRenderSync();const v=pc.ver||0;
+  try{await prpc("cb_prov_recibir",{p_id:pc.id,p_doc:Object.assign({},pc.doc,{persona:PST.persona||""}),p_rec:pc.lect,p_terminar:!!final});
+    if((pc.ver||0)===v)pc.dirty=false;pc.err="";pc.syncAt=new Date().toISOString();pcSave();return true}
+  catch(e){if(final)toast(pcMsg(e));else if(!e.net)pc.err=pcMsg(e);pcSave();return false}
+  finally{pcSyncing=false;pcRenderSync()}
+}
+function pcFinalizar(){
+  if(!pc)return;
+  if(pc.propia){const g=$("#pcGuia"),r=$("#pcRefe"),p=$("#pcProv");if(g)pc.doc.guia=norm(g.value).toUpperCase();if(r)pc.doc.referencia=norm(r.value).toUpperCase();if(p)pc.doc.proveedor=norm(p.value).toUpperCase();
+    if(!pc.doc.guia&&!pc.doc.referencia){toast("Ingresa el N° de guía o el N° de referencia (basta con uno)");return $("#pcGuia").focus()}}
+  if(!pc.lect.length){toast("Registra al menos un producto");return focusSel($("#pcScan"))}
+  confirmBox(`Terminar la recepción${pc.doc.proveedor?" de "+esc(pc.doc.proveedor):""} con ${fmt(pc.lect.length)} líneas. Después ya no se puede modificar desde el celular.`,async()=>{
+    if(navigator.onLine===false)return toast("Sin señal: busca conexión y vuelve a intentar.");
+    const ok=await pcSync(true);if(!ok)return;
+    toast("✓ Recepción terminada. El supervisor ya ve el cuadre.");
+    pc=null;pcSave();await pcRefresh().catch(()=>{});pcHomeRender();
+  },"#pcConfirm");
+  $("#pcConfirm").scrollIntoView({behavior:"smooth",block:"center"});
+}
+async function pcOpenCam(){
+  if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
+  if(pcCamI){$("#pcCamWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
+  $("#pcCamWrap").hidden=false;$("#pcCamMsg").textContent="Pidiendo permiso de cámara…";
+  try{pcCamI=await iniciarLector("pcReader",txt=>{txt=norm(txt);if(!txt||pcHold||calertOpen())return;if(txt===pcLast.c&&pcLast.miss<10)return;pcLast={c:txt,miss:0};pcRead(txt)},()=>{pcLast.miss++});
+    $("#pcCamMsg").textContent="Apunta al código del producto.";$("#pcCamWrap").scrollIntoView({block:"start",behavior:"smooth"})}
+  catch(e){pcCamI=null;$("#pcCamWrap").hidden=true;toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.")}
+}
+async function pcStopCam(){if(pcCamI){await detenerLector(pcCamI);pcCamI=null}pcHold=false;const w=$("#pcCamWrap");if(w)w.hidden=true}
+$("#pcCam").onclick=pcOpenCam;$("#pcCamStop").onclick=pcStopCam;$("#pcOk").onclick=pcAdd;$("#pcFin").onclick=pcFinalizar;
+$("#pcBack").onclick=async()=>{if(pc&&pc.dirty)await pcSync(false);pcStopCam();await pcRefresh().catch(()=>{});pcHomeRender()};
+$("#pcQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();pcAdd()}});
+$("#pcScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();pcRead(e.target.value)}});
+$("#pcScan").addEventListener("input",()=>{$("#pcPending").hidden=true;pcOkUnknown=""});
+$("#pcScan").addEventListener("blur",()=>setTimeout(pcBlurCheck,150));
+addEventListener("online",()=>{if(pc&&pc.dirty)pcSync(false)});
+setInterval(async()=>{if(puestoMode()&&puVista==="prov"&&!document.hidden&&!$("#pcHome").hidden){await pcRefresh().catch(()=>{});pcHomeRender()}},20000);
+/* =====================================================================
+   7 · RECEPCIÓN DE PROVEEDORES en el panel: packing list (lo esperado) vs lo recibido en bodega.
+   ===================================================================== */
+var pvList=[], pvSel=store.get("inv_pvsel",null), pvF=store.get("inv_pvf","pend"), pvAt=null, pvBusy=false, pvEd=null, pvOpen=new Set(), pvIdx=new Map();
+const pvSt=d=>d.finalizado?"cerr":d.recibido?"rec":d.rec_inicio?"enrec":"pend";
+const PVST={pend:["Por recibir","p-warn"],enrec:["En recepción","p-info"],rec:["Recibida","p-ok"],cerr:["Cerrada","p-mut"]};
+const PVC={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante","p-warn"],noesp:["No estaba en el packing list","p-warn"],porrec:["Por recibir","p-info"],norec:["No llegó","p-bad"]};
+const pvMsg=e=>({falta_documento:"Ingresa el N° de guía o el N° de referencia (basta con uno).",fecha_invalida:"Revisa la fecha.",finalizado:"Esta recepción ya está cerrada.",
+  en_recepcion:"Bodega todavía está recibiendo: lo que registró el celular se corrige cuando termine.",no_existe:"La recepción o el registro ya no existe.",cantidad_invalida:"Escribe una cantidad (0 o más).",
+  datos_invalidos:"Hay una línea sin código o con una cantidad inválida."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 19 (proveedores).":movMsg(e)));
+const pvPuede=p=>typeof pvCan==="function"?pvCan(p):true;
+function pvItems(){return (typeof dpItems==="function"&&dpItems())||[]}
+function pvIndex(){pvIdx=new Map();pvItems().forEach((it,i)=>{if(it.cod)pvIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!pvIdx.has(k))pvIdx.set(k,i)})})}
+const pvFind=c=>{const i=pvIdx.get(key(c));return i==null?null:pvItems()[i]};
+async function pvCatalogo(){
+  if(typeof catRemoto==="function"&&catRemoto()){if(!movCat)await catLoad(false).catch(()=>{})}
+  else if(!movCatalog()&&typeof dpCat!=="undefined"&&!dpCat){try{const r=await rpc(SB,"cb_catalogo_ver",{p_clave:SB.admin});if(r&&r.items)dpCat=r.items.map(([cod,ean,desc,um,ce,f])=>({cod,ean:ean||"",desc:desc||"",um:um||"",ce:ce||"",f:+f||1}))}catch(e){}}
+  pvIndex();
+}
+/* ---------- menú de días (por fecha de la recepción) ---------- */
+function pvDias(){const sel=$("#pvDia"),v=store.get("inv_pvdia","all"),h=new Date();h.setHours(0,0,0,0);const o=['<option value="all">Todos los días (120 días)</option>'];
+  for(let i=0;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="${ymd(d)}">${i===0?"Hoy · ":i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
+  const html=o.join("");if(sel.dataset.k!==html){sel.innerHTML=html;sel.dataset.k=html}sel.value=v;if(!sel.value)sel.value="all"}
+const pvDiaOk=d=>{const v=$("#pvDia").value||"all";return v==="all"||String(d.fecha||"").slice(0,10)===v||(!d.fecha&&ymd(new Date(d.creado))===v)};
+function pvEnter(){
+  const on=movOk();$("#pvNote").hidden=on;
+  if(!on){$("#pvNote").innerHTML='Para ver las recepciones, conecta el envío automático (Supabase) en <b>6 · Permisos</b>.';$("#pvTbl").innerHTML="";$("#pvDet").hidden=true;$("#pvChips").innerHTML="";return}
+  pvDias();pvCatalogo().then(()=>{if(!$("#pvForm").hidden)pvFormRender()});pvRender();pvRefresh(true);
+}
+async function pvRefresh(silent){
+  if(!movOk()||!pvPuede("prov_ver")||pvBusy)return;pvBusy=true;
+  try{const r=await mrpc("cb_prov_listar");pvList=Array.isArray(r)?r:[];pvAt=new Date();$("#pvNote").hidden=true;pvRender()}
+  catch(e){const m=pvMsg(e);if(!silent)toast(m);if(/actualización 19/.test(m)){$("#pvNote").hidden=false;$("#pvNote").textContent=m}}
+  finally{pvBusy=false}
+}
+setInterval(()=>{if(movOk()&&!document.hidden&&!$("#v-prov").hidden&&$("#pvForm").hidden)pvRefresh(true)},20000);
+/* ---------- cuadre por SKU: esperado (packing list) vs recibido (celular + agregado a mano) ---------- */
+function pvRegs(d){return [...(d.rec||[]).map(l=>Object.assign({src:"cel"},l)),...(d.man||[]).map(l=>Object.assign({src:"man"},l))]}
+function pvCuadre(d){
+  const m=new Map(),row=l=>{convFix(l);const k=key(l.k||l.code);if(!k)return null;const r=m.get(k)||{k,cod:l.k||l.code,desc:"",um:"",ce:"",f:1,E:null,R:null,regs:[]};
+    r.desc=r.desc||l.desc||"";r.um=r.um||l.um||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}m.set(k,r);return r};
+  for(const l of d.esperado||[]){const r=row(l);if(r)r.E=(r.E||0)+(+l.qty||0)*(+l.f||1)}
+  for(const l of pvRegs(d)){const r=row(l);if(!r)continue;r.regs.push(l);if(+l.qty>0)r.R=(r.R||0)+(+l.qty||0)*(+l.f||1)}
+  const fin=!!d.recibido;
+  return [...m.values()].map(r=>{if(!r.desc){const it=pvFind(r.cod);if(it){r.desc=it.desc;r.um=r.um||umTxt(it.um)}}
+    r.dif=r.E!=null&&r.R!=null?r.R-r.E:null;
+    r.st=r.E==null?"noesp":r.R==null?(fin?"norec":"porrec"):Math.abs(r.dif)<1e-9?"ok":r.dif<0?"falta":"sobra";return r});
+}
+const pvConDif=d=>d.recibido&&pvCuadre(d).some(r=>r.st!=="ok");
+function pvRender(){
+  pvDias();
+  const F=[["pend","Por recibir",d=>["pend","enrec"].includes(pvSt(d))],["rec","Recibidas",d=>pvSt(d)==="rec"],["dif","Con diferencia",pvConDif],["cerr","Cerradas",d=>pvSt(d)==="cerr"],["todas","Todas",()=>true]];
+  if(!F.some(f=>f[0]===pvF))pvF="pend";
+  const q=deacc($("#pvQ").value||"");
+  const base=pvList.filter(d=>pvDiaOk(d)&&(!q||deacc([d.proveedor,d.guia,d.referencia,d.persona,d.rec_persona,...(d.esperado||[]).map(l=>l.code+" "+(l.desc||"")),...pvRegs(d).map(l=>l.code)].join(" ")).includes(q)));
+  $("#pvChips").innerHTML=F.map(([k,l,fn])=>`<button class="chip" data-f="${k}" aria-pressed="${pvF===k}">${l} · ${fmt(base.filter(fn).length)}</button>`).join("");
+  $$("#pvChips .chip").forEach(b=>b.onclick=()=>{pvF=b.dataset.f;store.set("inv_pvf",pvF);pvRender()});
+  const nEsp=base.reduce((a,d)=>a+(d.esperado||[]).length,0),nRec=base.filter(d=>d.recibido).length;
+  $("#pvKpis").innerHTML=[[fmt(base.length),"Recepciones"],[`${fmt(nRec)} / ${fmt(base.length)}`,"Recibidas por bodega"],[fmt(base.filter(pvConDif).length),"Con diferencia"],[fmt(nEsp),"Líneas en packing list"]].map(([v,l])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
+  $("#pvAt").textContent=pvAt?"actualizado "+hhmm(pvAt)+" · cada 20 s":"";
+  const fn=F.find(f=>f[0]===pvF)[2],L=base.filter(fn);
+  $("#pvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Tipo</th><th>Proveedor</th><th>Guía</th><th>Referencia</th><th class="num">Packing list</th><th>Recibe</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
+    (L.length?L.map(d=>{const s=pvSt(d),[t,c]=PVST[s],cu=d.recibido?pvCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
+      return `<tr data-pv="${esc(d.id)}" class="${d.id===pvSel?"sel":""}" style="cursor:pointer"><td>${fechaCL(d.fecha)}</td><td>${esc(PCTIPO[d.tipo]||"")}</td><td>${esc(d.proveedor||"—")}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.referencia||"—")}</td><td class="num">${(d.esperado||[]).length?fmt(d.esperado.length)+" líneas":'<span class="muted">sin packing list</span>'}</td><td>${esc(d.rec_persona||"—")}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
+     :`<tr><td colspan="9" class="muted">${pvList.length?"No hay recepciones con este filtro.":"Todavía no hay recepciones. Crea la primera con ＋ Nueva recepción, o bodega la crea desde su celular."}</td></tr>`)+"</tbody>";
+  $$("#pvTbl [data-pv]").forEach(tr=>tr.onclick=()=>{pvSel=tr.dataset.pv;store.set("inv_pvsel",pvSel);pvOpen.clear();pvRender();$("#pvDet").scrollIntoView({behavior:"smooth",block:"start"})});
+  pvDetRender();
+}
+function pvDetRender(){
+  const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;if(!d)return;
+  const rows=pvCuadre(d),cnt=s=>rows.filter(r=>r.st===s).length,[t]=PVST[pvSt(d)];
+  $("#pvDetT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}`;
+  $("#pvDetS").innerHTML=`${esc(PCTIPO[d.tipo]||"")} · Fecha ${fechaCL(d.fecha)} · ${t}${d.persona?" · creó "+esc(d.persona):d.origen&&d.origen!=="panel"?" · creada desde el celular":""}${d.rec_persona?" · recibe "+esc(d.rec_persona):""}${d.recibido?" · terminada "+fmtDT(d.recibido):""}${d.nota?`<br>Observación: ${esc(d.nota)}`:""}`;
+  $("#pvDetK").innerHTML=[["En packing list",rows.filter(r=>r.E!=null).length],["Recibidos",rows.filter(r=>r.R!=null).length],["Cuadran",cnt("ok")],["Faltantes",cnt("falta")+cnt("norec")],["Sobrantes / no esperados",cnt("sobra")+cnt("noesp")]].map(([l,v])=>`<div class="kpi"><span class="v">${fmt(v)}</span><span class="l">${l}</span></div>`).join("");
+  const cerr=!!d.finalizado;
+  $("#pvAddTog").hidden=cerr;$("#pvEdTog").hidden=cerr;$("#pvCerrar").hidden=cerr;if(cerr)$("#pvAdd").hidden=true;
+  const ord={falta:0,norec:1,noesp:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
+  const corr=l=>{if(cerr||!pvPuede("prov_operar"))return "";if(l.src==="cel"&&!d.recibido)return "";const ed=Array.isArray(l.ed)&&l.ed.length;
+    return `${ed?`<span class="small" title="${esc(l.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)} · ${x.por||""} · ${fmtDT(x.t)}`).join("\n"))}" style="color:var(--warn)">corregido</span> `:""}<button class="linkBtn" data-pvc="${esc(l.lid)}">✎ corregir</button>`};
+  $("#pvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Packing list</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
+    (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}${r.regs.length?`<span class="sub"><button class="linkBtn" data-pvo="${esc(r.k)}">${pvOpen.has(r.k)?"▲ ocultar registros":"✎ ver y corregir registros ("+fmt(r.regs.length)+")"}</button></span>`:""}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td>
+      <td class="num">${r.E==null?"—":qBC(r.E,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="font-weight:600;color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.dif==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${PVC[r.st][1]}">${PVC[r.st][0]}</span></td></tr>`+
+      (pvOpen.has(r.k)?`<tr class="ptSnDet"><td colspan="7" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
+        r.regs.sort((a,b)=>String(a.t).localeCompare(String(b.t))).map(l=>{const f=+l.f||1,cv=l.ce&&f!==1;return `<span>${l.src==="man"?"✍ Agregado a mano":"📱 Celular"}</span><span class="muted">${l.t?hm24(l.t):""}</span><span>${esc(l.user||"")}</span><span style="white-space:nowrap">${+l.qty>0?"":'<s class="muted">'}<b>${fmt2(+l.qty||0)}</b> ${esc(cv?plural(l.ce):umTxt(l.um))}${cv?` <span class="muted">= ${fmt2((+l.qty||0)*f)} ${esc(umTxt(l.um))}</span>`:""}${+l.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span>${corr(l)}</span>`}).join("")+
+        `</div>${!d.recibido&&r.regs.some(l=>l.src==="cel")?'<div class="small muted" style="margin-top:4px">Lo registrado por el celular se corrige cuando bodega termine la recepción.</div>':""}</td></tr>`:"")).join("")
+     :'<tr><td colspan="7" class="muted">Sin productos todavía: carga el packing list o espera lo que registre bodega.</td></tr>')+"</tbody>";
+  $$("#pvCmp [data-pvo]").forEach(b=>b.onclick=()=>{const k=b.dataset.pvo;pvOpen.has(k)?pvOpen.delete(k):pvOpen.add(k);pvDetRender()});
+  $$("#pvCmp [data-pvc]").forEach(b=>b.onclick=async()=>{const l=pvRegs(d).find(x=>x.lid===b.dataset.pvc);if(!l)return;
+    const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),v=prompt(`${l.desc||l.code}\nNueva cantidad (en ${u}). Escribe 0 para anular un registro equivocado:`,fmt2(l.qty));if(v==null)return;
+    const q=num(v);if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
+    if(q===0&&!confirm("¿Dejar este registro en 0?\nQueda anulado: no suma. Queda en el historial y se puede volver a corregir."))return;
+    try{await rpc(SB,"cb_prov_corregir",{p_clave:SB.admin,p_id:d.id,p_lid:l.lid,p_qty:q});toast(q===0?"Registro anulado (en 0)":"Cantidad corregida");await pvRefresh(true)}catch(e){toast(pvMsg(e))}});
+  $("#pvConfirm").innerHTML="";
+}
+/* ---------- crear o editar: datos y packing list ---------- */
+function pvFormAbrir(d){
+  pvEd={id:d?d.id:null,lines:d?(d.esperado||[]).map(l=>Object.assign({},l)):[]};
+  $("#pvFormT").textContent=d?"Editar recepción: datos y packing list":"Nueva recepción";
+  $("#pvSave").textContent=d?"Guardar cambios":"Crear y enviar a bodega";
+  $("#pvTipo").value=d?d.tipo||"nacional":"nacional";$("#pvProv").value=d?d.proveedor||"":"";$("#pvGuia").value=d?d.guia||"":"";$("#pvRefe").value=d?d.referencia||"":"";
+  $("#pvFecha").value=d?d.fecha||hoyISO():hoyISO();$("#pvNota").value=d?d.nota||"":"";$("#pvPaste").value="";$("#pvCod").value="";$("#pvCant").value="";$("#pvParseInfo").textContent="";$("#pvFormInfo").textContent="";
+  $("#pvForm").hidden=false;pvFormRender();$("#pvForm").scrollIntoView({behavior:"smooth",block:"start"});setTimeout(()=>$("#pvProv").focus(),250);
+}
+function pvFormRender(){
+  if(!pvEd)return;const L=pvEd.lines;
+  $("#pvLines").innerHTML=L.length?`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th></th></tr></thead><tbody>`+L.map((l,i)=>`<tr><td class="code">${esc(l.code)}</td><td>${esc(l.desc||"")}${l.desc?"":'<span class="small" style="color:var(--warn)"> no está en la lista de productos</span>'}</td><td class="num">${qBC((+l.qty||0)*(+l.f||1),l.ce,+l.f||1,l.um)}</td><td><button class="btn sm" data-pvx="${i}" aria-label="Quitar">✕</button></td></tr>`).join("")+"</tbody>"
+    :'<tbody><tr><td class="muted">Sin productos. Carga el packing list (Excel o pegar) o agrégalos uno por uno. También puedes crear la recepción sin packing list.</td></tr></tbody>';
+  $$("#pvLines [data-pvx]").forEach(b=>b.onclick=()=>{pvEd.lines.splice(+b.dataset.pvx,1);pvFormRender()});
+  $("#pvFormInfo").textContent=L.length?`${fmt(L.length)} líneas · ${fmt(new Set(L.map(l=>key(l.k||l.code))).size)} productos`:"";
+}
+function pvLinea(code,qty,enBase,desc){
+  const it=pvFind(code),cv=it&&conv(it),l={lid:newLid(),code:codeStr(code),k:it?it.cod:codeStr(code),desc:it?it.desc:(desc||""),um:it?umTxt(it.um):"",qty:qty};
+  if(cv){l.ce=it.ce;l.f=+it.f;if(enBase)l.qty=+(qty/l.f).toFixed(6)}
+  return l;
+}
+/* Detecta columnas (código, cantidad, descripción) en filas copiadas o leídas de un Excel. */
+function pvFilas(rows){
+  const R=rows.map(r=>r.map(c=>String(c==null?"":c).trim())).filter(r=>r.some(c=>c));let h=-1,ic=-1,iq=-1,id=-1;
+  for(let i=0;i<Math.min(R.length,15)&&h<0;i++){const r=R[i].map(c=>deacc(c));
+    const c=r.findIndex(x=>/^(cod|codigo|sku|item|articulo|material|ref|part|n de parte)/.test(x)),q=r.findIndex(x=>/(cant|qty|quant|pcs|pzs|bultos|unidades|piezas)/.test(x));
+    if(c>=0&&q>=0){h=i;ic=c;iq=q;id=r.findIndex(x=>/(desc|nombre|detalle|producto)/.test(x))}}
+  const datos=h>=0?R.slice(h+1):R;if(h<0){ic=0;iq=1;id=-1;
+    const s=datos.find(r=>r.length>=2);if(s&&num(s[1])==null&&num(s[2])!=null){id=1;iq=2}}
+  const out=[],malas=[];
+  for(const r of datos){const code=codeStr(r[ic]||""),q=num(r[iq]);if(!code)continue;if(q==null||q<=0){malas.push(code);continue}out.push({code,qty:q,desc:id>=0?r[id]:""})}
+  return {out,malas,hdr:h>=0};
+}
+function pvAgregarFilas(res,origen){
+  const enBase=(document.querySelector('input[name="pvU"]:checked')||{}).value==="base";
+  for(const x of res.out)pvEd.lines.push(pvLinea(x.code,x.qty,enBase,x.desc));
+  const sin=res.out.filter(x=>!pvFind(x.code)).length;
+  $("#pvParseInfo").innerHTML=`${origen}: <b>${fmt(res.out.length)}</b> líneas agregadas${res.hdr?"":" (sin encabezado: columna 1 = código, siguiente número = cantidad)"}${sin?` · <span style="color:var(--warn)">${fmt(sin)} código${sin===1?"":"s"} no está${sin===1?"":"n"} en la lista de productos</span>`:""}${res.malas.length?` · <span style="color:var(--bad)">${fmt(res.malas.length)} fila${res.malas.length===1?"":"s"} sin cantidad válida (no se agregaron)</span>`:""}`;
+  pvFormRender();
+}
+$("#pvFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f||!pvEd)return;
+  try{const buf=await f.arrayBuffer();let rows;
+    if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf);const sep=txt.includes("\t")?"\t":txt.split("\n")[0].includes(";")?";":",";rows=txt.split(/\r?\n/).map(l=>l.split(sep))}
+    else{const wb=XLSX.read(buf,{type:"array"});const ws=wb.Sheets[wb.SheetNames[0]];rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""})}
+    pvAgregarFilas(pvFilas(rows),"Packing list "+f.name)}
+  catch(er){toast("No se pudo leer el archivo. Prueba guardarlo como .xlsx o copia y pega las filas.")}});
+$("#pvPasteOk").onclick=()=>{if(!pvEd)return;const t=$("#pvPaste").value;if(!t.trim())return toast("Pega las filas copiadas desde Excel");
+  const rows=t.split(/\r?\n/).map(l=>l.split(l.includes("\t")?"\t":l.includes(";")?";":/\s{2,}|,/));pvAgregarFilas(pvFilas(rows),"Filas pegadas");$("#pvPaste").value=""};
+function pvCodInfo(){const c=$("#pvCod").value.trim(),it=c?pvFind(c):null,cv=it&&conv(it);
+  $("#pvCantL").textContent=it?`Cantidad (${cv?plural(it.ce).toLowerCase():umTxt(it.um)})`:"Cantidad";
+  $("#pvCodInfo").innerHTML=!c?"":it?`<b>${esc(it.desc)}</b>${cv?` <span class="muted">· 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</span>`:""}`:'<span style="color:var(--warn)">Ese código no está en la lista de productos (se puede agregar igual)</span>'}
+$("#pvCod").addEventListener("input",pvCodInfo);
+$("#pvLinAdd").onclick=()=>{if(!pvEd)return;const c=codeStr($("#pvCod").value),q=num($("#pvCant").value);if(!c)return toast("Escribe el código");if(q==null||q<=0)return toast("Escribe la cantidad");
+  pvEd.lines.push(pvLinea(c,q,false));$("#pvCod").value="";$("#pvCant").value="";pvCodInfo();pvFormRender();$("#pvCod").focus()};
+$("#pvCant").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#pvLinAdd").click()}});
+$("#pvNewTog").onclick=()=>{if(!$("#pvForm").hidden&&pvEd&&!pvEd.id){$("#pvForm").hidden=true;pvEd=null;return}pvFormAbrir(null)};
+$("#pvCancel").onclick=()=>{$("#pvForm").hidden=true;pvEd=null};
+$("#pvSave").onclick=async()=>{if(!pvEd)return;
+  const doc={tipo:$("#pvTipo").value,proveedor:norm($("#pvProv").value).toUpperCase(),guia:norm($("#pvGuia").value).toUpperCase(),referencia:norm($("#pvRefe").value).toUpperCase(),fecha:$("#pvFecha").value,nota:norm($("#pvNota").value)};
+  if(!doc.guia&&!doc.referencia){toast("Ingresa el N° de guía o el N° de referencia (basta con uno)");return $("#pvGuia").focus()}
+  if(!doc.fecha){toast("Falta la fecha");return $("#pvFecha").focus()}
+  const b=$("#pvSave");b.disabled=true;
+  try{const r=await mrpc("cb_prov_guardar",{p_id:pvEd.id,p_doc:doc,p_esperado:pvEd.lines});const nuevo=!pvEd.id;
+    $("#pvForm").hidden=true;pvEd=null;pvSel=r&&r.id||pvSel;store.set("inv_pvsel",pvSel);if(nuevo){pvF="pend";store.set("inv_pvf",pvF)}
+    toast(nuevo?"✓ Recepción creada: bodega la ve en su celular":"Cambios guardados");await pvRefresh(true)}
+  catch(e){toast(pvMsg(e))}finally{b.disabled=false}};
+/* ---------- detalle: agregar registro, editar, Excel, cerrar, eliminar ---------- */
+function pvAdInfo(){const c=$("#pvAdCod").value.trim(),it=c?pvFind(c):null,cv=it&&conv(it);
+  $("#pvAdQL").textContent=it?`Cantidad (${cv?plural(it.ce).toLowerCase():umTxt(it.um)})`:"Cantidad";
+  $("#pvAdInfo").innerHTML=!c?"Queda como recibido, marcado como agregado a mano. Lo que envía el celular no lo borra.":it?`<b>${esc(it.desc)}</b>${cv?` <span class="muted">· 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</span>`:""}`:'<span style="color:var(--warn)">Ese código no está en la lista de productos (se puede agregar igual)</span>'}
+$("#pvAdCod").addEventListener("input",pvAdInfo);
+$("#pvAddTog").onclick=()=>{const p=$("#pvAdd");p.hidden=!p.hidden;if(!p.hidden){if(!$("#pvAdHora").value)$("#pvAdHora").value=hm24(new Date());pvAdInfo();$("#pvAdCod").focus()}};
+$("#pvAdOk").onclick=async()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const c=codeStr($("#pvAdCod").value),q=num($("#pvAdQty").value);
+  if(!c)return toast("Escribe el código");if(q==null||q<=0)return toast("Escribe la cantidad");
+  const l=pvLinea(c,q,false);delete l.lid;const b=$("#pvAdOk");b.disabled=true;
+  try{await mrpc("cb_prov_agregar_panel",{p_id:d.id,p_hora:$("#pvAdHora").value||"",p_linea:l});$("#pvAdCod").value="";$("#pvAdQty").value="";pvAdInfo();toast("Registro agregado");await pvRefresh(true)}
+  catch(e){toast(pvMsg(e))}finally{b.disabled=false}};
+$("#pvEdTog").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(d)pvFormAbrir(d)};
+$("#pvX").onclick=()=>{pvSel=null;store.set("inv_pvsel",null);pvRender()};
+$("#pvCerrar").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Cerrar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}): queda como histórico y bodega ya no la ve.`,async()=>{try{await mrpc("cb_prov_cerrar",{p_id:d.id});toast("Recepción cerrada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
+$("#pvDel").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Eliminar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}) con todo su detalle. No se puede deshacer.`,async()=>{try{await mrpc("cb_prov_eliminar",{p_id:d.id});pvSel=null;store.set("inv_pvsel",null);toast("Recepción eliminada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
+$("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const rows=pvCuadre(d),wb=XLSX.utils.book_new(),cv=r=>r.ce&&r.f!==1;
+  XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"Bulto":cv(r)?r.ce:umTxt(r.um),"Packing list (bultos)":r.E==null?"":cv(r)?r.E/r.f:r.E,"Recibido (bultos)":r.R==null?"":cv(r)?r.R/r.f:r.R,
+    "Diferencia (bultos)":r.dif==null?"":cv(r)?r.dif/r.f:r.dif,"Packing list":r.E??"","Recibido":r.R??"","Diferencia":r.dif??"","Unidad ERP":umTxt(r.um),"Estado":PVC[r.st][0]}))),"Cuadre");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(pvRegs(d).map(l=>({"Origen":l.src==="man"?"Agregado a mano":"Celular","Hora":l.t?fmtDT(l.t):"","Persona":l.user||"","Código":l.code,"Descripción":l.desc||"","Cantidad":+l.qty||0,"Bulto":l.ce||umTxt(l.um),"Conversión":(+l.qty||0)*(+l.f||1)}))),"Registros");
+  saveWb(wb,`Recepcion_${(d.proveedor||"proveedor").replace(/[^\w-]+/g,"_")}_${d.guia||d.referencia||""}.xlsx`)};
+$("#pvXlsAll").onclick=()=>{const L=pvList.filter(pvDiaOk),wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetFrom(L.map(d=>{const cu=pvCuadre(d);return {"Fecha":fechaCL(d.fecha),"Tipo":PCTIPO[d.tipo]||"","Proveedor":d.proveedor||"","Guía":d.guia||"","Referencia":d.referencia||"","Estado":PVST[pvSt(d)][0],
+    "Líneas packing list":(d.esperado||[]).length,"Productos con diferencia":d.recibido?cu.filter(r=>r.st!=="ok").length:"","Recibe":d.rec_persona||"","Terminada":d.recibido?fmtDT(d.recibido):""}})),"Recepciones");
+  saveWb(wb,"Recepciones_proveedores_"+new Date().toISOString().slice(0,10)+".xlsx")};
+$("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;
+$("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
