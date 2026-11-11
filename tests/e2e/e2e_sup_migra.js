@@ -17,7 +17,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await p.evaluate(([u,v,id])=>{localStorage.clear();localStorage.setItem('inv_prod',JSON.stringify({url:u,key:'anon',tok:id+':tok-migracion-xxxxxxxxxx',ses:v.ses,sup:{id,nombre:v.nombre,permisos:v.permisos}}))},[SBU,v,id]);
  await p.goto(B+'#mp');await p.reload();await p.waitForTimeout(3500);
  const tabs=await p.$$eval('nav.tabs button',bs=>bs.filter(x=>x.offsetParent!==null).map(x=>x.dataset.v).join(','));
- check(tabs==='mp,pt,devol'&&/Supervisor Prod\. 1/.test(await p.textContent('#supChip')),'Sesión de la v14: entra directo con la versión nueva, mismo menú → '+tabs);
+ check(tabs==='devol,mp,pt'&&/Supervisor Prod\. 1/.test(await p.textContent('#supChip')),'Sesión de la v14: entra directo con la versión nueva, mismo menú → '+tabs);
  check(await p.evaluate(()=>localStorage.inv_prod==='null'&&!!JSON.parse(localStorage.inv_sup).ses),'La sesión quedó guardada en el formato nuevo');
  check(await p.isVisible('#solCard')&&await p.isHidden('#lockBox .lockCard').catch(()=>true),'Puede seguir solicitando MP; sin pantalla de bloqueo');
  await p.reload();await p.waitForTimeout(3000);

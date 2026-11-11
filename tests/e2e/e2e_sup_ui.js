@@ -32,7 +32,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  const cp=await b.newContext({viewport:{width:1366,height:900}});await route(cp);const p=await cp.newPage();p.on('pageerror',e=>errs.push('sup: '+e.message));
  await p.goto(link);await p.waitForTimeout(3500);
  const tabs=async()=>p.$$eval('nav.tabs button',bs=>bs.filter(x=>x.offsetParent!==null).map(x=>x.dataset.v).join(','));
- check((await tabs())==='mp,pt,devol','Supervisor: su menú muestra solo Entrega MP, Recepción PT y Devoluciones → '+(await tabs()));
+ check((await tabs())==='devol,mp,pt','Supervisor: su menú muestra solo Entrega MP, Recepción PT y Devoluciones → '+(await tabs()));
  check(/Supervisor Prod\. 1/.test(await p.textContent('#supChip'))&&!/\?sup=|t=/.test(p.url()),'Se ve su nombre arriba y el link desaparece de la barra de direcciones');
  check(await p.evaluate(a=>!(localStorage.inv_sb||'').includes(a),ADMIN)&&await p.evaluate(()=>/^s_[0-9a-f]+\./.test(JSON.parse(localStorage.inv_sup).ses)),'En su navegador queda solo su sesión (ninguna clave de administrador)');
  // MP
@@ -59,7 +59,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await p.screenshot({path:S+'/sup_panel.png'});
  // No puede ir a otros módulos
  for(const h of ['erp','resultado','permisos','contar']){await p.goto(B+'#'+h);await p.waitForTimeout(1200);
-   check(await p.isHidden('#v-'+h)&&(await tabs())==='mp,pt,devol','Escribir #'+h+' en la dirección: no entra')}
+   check(await p.isHidden('#v-'+h)&&(await tabs())==='devol,mp,pt','Escribir #'+h+' en la dirección: no entra')}
  // Administrador le quita Devoluciones → se nota sin recargar
  rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:id,p_nombre:'Supervisor Prod. 1',p_permisos:['mp_ver','pt_ver'],p_activo:true});
  await p.evaluate(()=>supYo());await p.waitForTimeout(1500);
@@ -78,7 +78,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  // ---- El jefe cambia de perfil: el administrador le da más permisos (sin link nuevo) ----
  rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:id,p_nombre:'Supervisor Prod. 1',p_permisos:['inv_ver','mp_operar','mp_eliminar','pt_corregir','dev_todas','dev_cerrar'],p_activo:true});
  await p.reload();await p.waitForTimeout(3500);
- check((await tabs())==='erp,mp,resultado,pt,devol','Con más permisos: aparecen Panel e Inventario, sin link nuevo → '+(await tabs()));
+ check((await tabs())==='erp,resultado,devol,mp,pt','Con más permisos: aparecen Panel e Inventario, sin link nuevo → '+(await tabs()));
  await p.click('nav.tabs button[data-v="pt"]');await p.waitForTimeout(2500);
  check((await p.$$('#ptRes [data-pted]')).length>0&&await p.isVisible('#ptAddTog'),'PT con "corregir": aparecen "✎ corregir" y "＋ Agregar registro"');
  await p.click('nav.tabs button[data-v="mp"]');await p.waitForTimeout(2500);
@@ -88,7 +88,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await p.click('#dvTbl [data-di]');await p.waitForTimeout(500);check(await p.isVisible('#dvCerrar')&&await p.isHidden('#dvDel'),'Devoluciones con "cerrar" pero sin "eliminar": solo aparece Cerrar');
  await p.click('nav.tabs button[data-v="resultado"]');await p.waitForTimeout(2500);
  check(await p.isVisible('#v-resultado')&&await p.isHidden('#maestroCard')&&await p.isHidden('#edCard')&&await p.isHidden('#reCard'),'Inventario solo "ver": entra, pero sin Crear conteo, Modificar ni Reconteo');
- await p.goto(B+'#permisos');await p.waitForTimeout(1200);check(await p.isHidden('#v-permisos'),'Sin permiso de usuarios: no entra a 6 · Permisos');
+ await p.goto(B+'#permisos');await p.waitForTimeout(1200);check(await p.isHidden('#v-permisos'),'Sin permiso de usuarios: no entra a 2 · Permisos');
  await p.screenshot({path:S+'/sup_mas_permisos.png'});
  rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:id,p_nombre:'Supervisor Prod. 1',p_permisos:['usr_admin'],p_activo:true});await p.reload();await p.waitForTimeout(3500);
  check((await tabs())==='permisos'&&await p.isVisible('#uEdCard')&&await p.isHidden('#sbCard')&&await p.isHidden('#supAdm')&&await p.isHidden('#mpAcc'),'Solo "Usuarios": ve 6 · Permisos con los usuarios, sin Supabase, sin supervisores ni acceso de producción');
