@@ -68,10 +68,11 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  // Agregar registro (alambre) y corregir el rollo extra a 0
  await s.click('#pvAddTog');await s.fill('#pvAdCod','110107');await s.fill('#pvAdQty','30');await s.fill('#pvAdHora','10:30');await s.click('#pvAdOk');await s.waitForTimeout(2000);
  check(sql("select jsonb_array_length(man)||'|'||(man->0->>'qty')||'|'||(man->0->>'user') from cb_prov")==='1|30|Supervisor','Agregar registro: 30 kg de alambre, a mano, a nombre de Supervisor');
- await s.click('#pvCmp [data-pvo="221317"]');await s.waitForTimeout(300);
+ await s.click('#pvModTog');await s.waitForTimeout(300);
+ check(/Listo/.test(await s.textContent('#pvModTog'))&&(await s.$$('#pvCmp [data-pvq]')).length>=3,'"✎ Modificar recibido" abre todos los registros con su cantidad editable');
  const lid=sql("select e->>'lid' from cb_prov, jsonb_array_elements(rec) e where e->>'k'='221317' and (e->>'qty')::numeric=1");
- let nd=0;s.on('dialog',async dl=>{nd++;if(nd===1)await dl.accept('0');else await dl.accept()});
- await s.click(`#pvCmp [data-pvc="${lid}"]`);await s.waitForTimeout(2500);
+ s.on('dialog',async dl=>{await dl.accept()});
+ await s.fill(`#pvCmp [data-pvq="${lid}"]`,'0');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
  check(sql(`select e->>'qty' from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`)==='0','Corregir a 0 el rollo leído de más (queda en el historial)');
  const det2=await s.textContent('#pvCmp');
  check(!/Sobrante/.test(det2)&&!/No llegó/.test(det2)&&/Faltante/.test(det2),'El cuadre se recalcula: solo queda la harina faltante');
