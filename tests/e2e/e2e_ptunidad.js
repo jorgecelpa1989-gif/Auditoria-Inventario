@@ -19,4 +19,15 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  const t=(await a.textContent('#ptRes')).replace(/\s+/g,' ');console.log('PT',t.slice(0,400));
  check(/20 ROLLOS/.test(t)&&/500 m/.test(t)&&/Recibido OK/.test(t)&&!/500 un/.test(t)&&!/260/.test(t),'120125: entregado 20 ROLLOS = 500 m, recibido 10 un antiguo + 10 rollos = 20 ROLLOS, cuadra (antes 500 un vs 260 un)');
  check(/4 ROLLOS/.test(t)&&/100 m/.test(t),'120262 "4 un" en un PC sin equivalencias: se lee 4 ROLLOS = 100 m con el catálogo de Supabase');
+ // Entrega MP: línea de solicitud antigua "3 un" sin conversión → 3 ROLLOS = 75 m
+ const sf=await a.evaluate(()=>JSON.stringify(solFix([["120125",3,"ROMBO","un","",1],["120262",50,"R","m","ROLLO",25],["120125",100]])));
+ check(sf==='[["120125",75,"ROMBO","ML","ROLLO",25],["120262",50,"R","m","ROLLO",25],["120125",100]]','Solicitud MP antigua "3 un" se lee 3 ROLLOS = 75 m; las que traen conversión y las cortas (en unidad del ERP) no cambian → '+sf);
+ // Celular: "Mis pallets por día" muestra el registro antiguo sin conversión en ROLLOS
+ const uid=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMIN,p_id:'',p_nombre:'Felipe',p_area:'Bodega',p_permisos:['pt_recibir'],p_activo:true}).body);const tk='tok'+uid+'xxxxxxxxxxxx';rpc('cb_puesto_link',{p_clave:ADMIN,p_puesto:uid,p_token:tk});
+ ins('r9',uid,'R',10,{k:'120125',qty:10,um:'un',desc:'ROMBO PLAST. 5012'});
+ const cc=await b.newContext({viewport:{width:412,height:900},timezoneId:'America/Santiago'});await route(cc);const m=await cc.newPage();m.on('pageerror',x=>errs.push(x.message));
+ await m.goto(`${B}?puesto=${uid}&t=${tk}&u=${encodeURIComponent(SBU)}&k=anon`);await m.waitForTimeout(2000);await m.fill('#puPersona','FELIPE');await m.dispatchEvent('#puPersona','change');await m.waitForTimeout(300);
+ await m.click('#puMenu [data-pk="pt"]');await m.waitForTimeout(2500);
+ const pl=(await m.textContent('#ptPrevList')).replace(/\s+/g,' ');
+ check(/ROMBO PLAST/.test(pl)&&/ROLLOS/.test(pl)&&!/\bun\b/.test(pl),'Celular, Mis pallets por día: el "10 un" antiguo se muestra en ROLLOS → '+pl.slice(0,120));
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

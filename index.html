@@ -4204,7 +4204,7 @@ let FACT=store.get("inv_fact",{});
 const UMN=u=>{const s=deacc(u).replace(/[.\s]/g,"");if(/^(kg|kgs|kilo|kilos|kilogramos?)$/.test(s))return "kg";if(/^(m|mt|mts|ml|mtl|mtrs|metros?|metroslineales|mlineal(es)?)$/.test(s))return "m";if(!s||/^(un|und|unid|unidad(es)?|u|c\/u|cu|pza|pz|piezas?|uni)$/.test(s))return "un";return s.toUpperCase()};
 const umTxt=u=>{const n=UMN(u);return n==="un"?(u?"un":"un"):n};
 let MASTER=store.get("inv_master",{});
-function enrich(items){for(const it of items){const k=key(it.cod),x=FACT[k],ms=MASTER[k];it.ce=x?x.ce:"";it.f=x?x.f:1;if(ms){if(!it.um)it.um=ms.um;it.sg=ms.sg||"";if(!it.desc)it.desc=ms.desc||""}}return items}
+function enrich(items){for(const it of items){const k=key(it.cod),x=FACT[k],ms=MASTER[k];it.ce=x?x.ce:(it.ceN||"");it.f=x?x.f:(it.ceN?+it.fN||1:1);if(ms){if(!it.um)it.um=ms.um;it.sg=ms.sg||"";if(!it.desc)it.desc=ms.desc||""}}return items}
 const sq=s=>(+s.qty||0)*(+s.f||1);
 const uCv=(qty,ce,f,um)=>{f=+f||1;const c=ce&&f!==1;return [`<b>${fmt2(qty)}</b> <span class="small muted">${esc(c?plural(ce):umTxt(um||""))}</span>`,c?`${fmt2(qty*f)} <span class="small muted">${esc(umTxt(um||""))}</span><span class="sub">1 ${esc(ce)} = ${fmt2(f)} ${esc(umTxt(um||""))}</span>`:'<span class="muted">—</span>']};
 /* Cantidad con conversión: se ingresan BULTOS (sacos, rollos, cajas…) y debajo se ve la unidad del ERP. */
@@ -4234,7 +4234,8 @@ function show(v){
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
   if(v==="contar"){renderRecent();if(!/Mobi|Android|iPhone/i.test(navigator.userAgent))setTimeout(()=>(cfg.ubic?$("#scan"):$("#ubic")).focus(),50)}
-  if(v==="resultado"){maestroSync();renderResult();if(nubeOn())traerSel(true).then(renderResult);if(nubeOn()&&typeof uCargar==="function")uCargar().then(()=>{cPuSync();edRender()}).catch(()=>{})}
+  if(v==="resultado"){maestroSync();renderResult();if(nubeOn()&&!prodMode()&&typeof erpDesdeNube==="function"&&(!erp||erp.fromServer))erpDesdeNube();   // supervisor u otro PC: lista de productos y bultos desde Supabase
+if(nubeOn())traerSel(true).then(renderResult);if(nubeOn()&&typeof uCargar==="function")uCargar().then(()=>{cPuSync();edRender()}).catch(()=>{})}
   if(v==="erp"&&typeof refreshNube==="function")refreshNube(true);
   if(v==="erp"&&typeof uCargar==="function"&&nubeOn())uCargar().then(()=>{if(typeof renderConteosOnly==="function")renderConteosOnly()});
   if(v!=="contar")stopCam();
@@ -5567,7 +5568,7 @@ async function erpDesdeNube(){
     const st=r.stock||{};
     erp={file:"ERP en Supabase · "+(r.origen||""),at:r.actualizado,fromServer:true,merged:0,
       items:r.items.map(([cod,ean,desc,um,ce,f])=>{const x=st[cod];const tot=Array.isArray(x)?x[1]:null,disp=Array.isArray(x)?x[0]:null;
-        return {cod,ean:ean||"",desc:desc||"",um:um||"",stock:tot!=null?+tot:(disp!=null?+disp:null),costo:null,ubic:""}})};
+        return {cod,ean:ean||"",desc:desc||"",um:um||"",ceN:ce&&+f>0&&+f!==1?String(ce).toUpperCase():"",fN:+f||1,stock:tot!=null?+tot:(disp!=null?+disp:null),costo:null,ubic:""}})};   // ceN/fN: bulto del catálogo de Supabase
     store.set("inv_erp",erp);buildIndex();updStatus();if(typeof maestroSync==="function")maestroSync();
     if(!$("#v-resultado").hidden&&typeof renderResult==="function")renderResult()}
   catch(e){}
@@ -5936,7 +5937,14 @@ function renderMp(){
 }
 $("#mpListBox").open=store.get("inv_mplist",false);
 $("#mpListBox").addEventListener("toggle",()=>store.set("inv_mplist",$("#mpListBox").open));
-function mpSolOf(id){const m=movById(id);return (m&&m.sol)||null}
+/* Línea de solicitud antigua sin conversión (p. ej. ["230125",3,"…","un","",1], de antes de cargar la equivalencia):
+   la cantidad se lee en bultos, como en todas las lecturas (3 ROLLOS = 90 m). Las que ya traen conversión no cambian. */
+// Solo se toca la línea que dice explícitamente "un" en un producto cuya unidad del ERP NO es "un" (m, kg…).
+// Las líneas cortas ["140101",100] ya vienen en la unidad del ERP (100 kg) y no se cambian.
+function solFix(arr){return Array.isArray(arr)?arr.map(x=>{if(!Array.isArray(x))return x;const [cod,q,desc,um,ce,f]=x;if(ce&&+f>0&&+f!==1)return x;
+  if(!um||UMN(um)!=="un")return x;
+  const d=convFix({k:cod,code:cod,um:""});return d.ce&&+d.f>0&&+d.f!==1&&d.um&&UMN(d.um)!=="un"?[cod,(+q||0)*d.f,desc,d.um,d.ce,d.f]:x}):arr}
+function mpSolOf(id){const m=movById(id);return m&&m.sol?solFix(m.sol):null}
 function mpRows(id){
   const ls=(movLect[id]||[]).map(convFix), map=new Map(), sol=mpSolOf(id);
   for(const [cod,q,desc,um,ce,f] of sol||[]){const k=key(cod),r=map.get(k)||{cod,desc:desc||"",um:um||"",ce:ce||"",f:+f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0,S:null};r.S=(r.S||0)+(+q||0);map.set(k,r)}
@@ -6126,7 +6134,7 @@ async function omTake(id,token,url,k,rol,pre){
     if(om&&om.id!==id&&om.dirty&&!om.fin){await omSync();}
     const m=pre||await rpc({url,key:k},"cb_mov_abrir",{p_id:id,p_token:token,p_device:cfg.dev,p_rol:rol});
     const loc=om&&om.id===id&&om.rol===rol&&!om.fin&&om.lect?om.lect:null, srv=Array.isArray(m.lect)?m.lect:[], keep=loc&&(loc.length>=srv.length||om.dirty)?loc:srv;
-    om={id,rol,nombre:m.nombre,ref:(m.meta&&m.meta.ref)||"",vence:m.vence,conf:{url,key:k,secret:m.secret},items:omItems(m.items),sol:(m.meta&&m.meta.sol)||null,stock:m.stock||null,stockAt:m.stock_at||null,lect:keep||[],persona:(om&&om.persona)||cfg.user||"",dirty:keep!==srv,ver:0,syncAt:null,syncErr:"",fin:false};
+    om={id,rol,nombre:m.nombre,ref:(m.meta&&m.meta.ref)||"",vence:m.vence,conf:{url,key:k,secret:m.secret},items:omItems(m.items),sol:solFix((m.meta&&m.meta.sol)||null),stock:m.stock||null,stockAt:m.stock_at||null,lect:keep||[],persona:(om&&om.persona)||cfg.user||"",dirty:keep!==srv,ver:0,syncAt:null,syncErr:"",fin:false};
     omSave();ban.innerHTML="";$("#omPick").innerHTML="";omEnter();if(om.dirty)omSync();omLatido();
     toast(rol==="E"?"Listo: escanea lo que entregas":"Listo: escanea lo que recibes");
   }catch(e){ban.innerHTML=`<div class="lockCard"><div class="big">⚠️</div><h2>No se pudo tomar el rol</h2><p>${esc(movMsg(e))}</p></div>`;$("#omPick").innerHTML=""}
@@ -6607,6 +6615,7 @@ $("#ptAddOk").onclick=async()=>{const dia=$("#ptPrevDia").value,it=ptAddInfo(),q
 async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");$("#ptAddBox").hidden=!dia;if(!dia){tb.innerHTML="";return}
   tb.innerHTML='<tr><td class="muted">Cargando…</td></tr>';
   try{const L=await prpc("cb_pt_dia",{p_dia:dia})||[];
+    for(const l of L)if(!(l.ce&&+l.f>0&&+l.f!==1)){const it=ptFind(l.k||l.code);if(conv(it)){l.ce=it.ce;l.f=+it.f;if(!l.um||UMN(l.um)==="un")l.um=umTxt(it.um);l.convAp=true}}   // registro antiguo sin bulto: se muestra con el de la lista de productos
     const ya=new Set(L.map(l=>l.lid)),pend=dia===ymd(new Date())?ptCel.lect.filter(l=>!l.sync&&!ya.has(l.lid)&&ymd(new Date(l.t))===dia).reverse():[];
     tb.innerHTML=pend.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)} · ⏳ por enviar</div></td><td style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span></td><td></td></tr>`).join("")+
     (L.length?L.slice().reverse().map(l=>{const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),ed=Array.isArray(l.ed)&&l.ed.length;
