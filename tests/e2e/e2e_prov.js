@@ -74,6 +74,12 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  s.on('dialog',async dl=>{await dl.accept()});
  await s.fill(`#pvCmp [data-pvq="${lid}"]`,'0');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
  check(sql(`select e->>'qty' from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`)==='0','Corregir a 0 el rollo leído de más (queda en el historial)');
+ // Corregir dos veces seguidas el mismo registro (0 → 3 → 0), como al probar y volver atrás
+ await s.fill(`#pvCmp [data-pvq="${lid}"]`,'3');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
+ const q2=sql(`select e->>'qty' from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`);
+ await s.fill(`#pvCmp [data-pvq="${lid}"]`,'0');await s.click(`#pvCmp [data-pvg="${lid}"]`);await s.waitForTimeout(2500);
+ const q3=sql(`select e->>'qty'||'|'||jsonb_array_length(e->'ed') from cb_prov, jsonb_array_elements(rec) e where e->>'lid'='${lid}'`);
+ check(q2==='3'&&q3==='0|3','Se puede volver a corregir el mismo registro (0 → 3 → 0), con historial de 3 cambios → '+q2+' / '+q3);
  const det2=await s.textContent('#pvCmp');
  check(!/Sobrante/.test(det2)&&!/No llegó/.test(det2)&&/Faltante/.test(det2),'El cuadre se recalcula: solo queda la harina faltante');
  // Editar packing list (agregar o quitar productos) y Excel
@@ -125,6 +131,9 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  const csv=require('fs').readFileSync(require('path').join(__dirname,'../datos/packing_ONEU9196570.csv'),'utf8');
  const csR=await s.evaluate(t=>{const o=pvFilas(csvFilas(t,","));return o.out.length+"|"+o.cont+"|"+o.out.filter(x=>x.code==="221203").map(x=>[x.qty,x.fpl,x.bxp,x.abc].join("/"))+"|"+o.out.map(x=>x.abc).join("")},csv);
  check(csR==='16|ONEU9196570|145/30/34/NSO|CCNSOBBNSONSONSONSONSONSOCBBBOU','CSV del proveedor: 16 filas, 221203 = 145 bultos, 30 m, 34 x pallet, NSO → '+csR);
+ // Recibido sin conversión (el maestro no la tiene: 110107 en KG) → usa la del packing list (CAJA de 25), en cualquier PC
+ const cv=await s.evaluate(()=>{const r=pvCuadre({recibido:"x",esperado:[{code:"110107",k:"110107",qty:60,ce:"CAJA",f:25,um:"kg"}],rec:[{lid:"a1",code:"110107",k:"110107",qty:60,um:"kg"}],man:[]})[0];return r.E+"|"+r.R+"|"+r.st+"|"+r.ce});
+ check(cv==='1500|1500|ok|CAJA','Celular registró 60 (sin conversión en el maestro): se lee 60 CAJAS = 1.500 kg y cuadra → '+cv);
  // Validaciones del servidor
  check(/falta_documento/.test(rpc('cb_prov_guardar',{p_clave:ADMIN,p_id:null,p_doc:{fecha:'2026-11-11'},p_esperado:[]}).body),'Sin guía ni referencia: rechazado');
  check(!rpc('cb_prov_listar',{p_clave:'clave-mala-xxxx'}).ok,'Sin clave: rechazado');
