@@ -13,7 +13,7 @@ const dev=(g,area)=>sql(`insert into cb_dev(origen,persona,guia,fecha,enviado,ar
  await a.goto(B+'#panel');await a.evaluate(([u,k])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:k,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
  await a.goto(B+'#erp');await a.reload();await a.waitForTimeout(6000);
  const menu=await a.$$eval('#sideNav > *',els=>els.filter(e=>getComputedStyle(e).display!=='none').map(e=>e.textContent.replace(/\s+/g,' ').trim()).join(' | '));console.log('MENÚ',menu);
- check(/^Secciones \| 1Panel \| 2Permisos \| Logística \| 3Inventario \| 4Logística inversa\d* \| 5Recepción proveedores \| Producción \| 6Entrega MP\d* \| 7Recepción PT$/.test(menu),'Menú: Panel, Permisos, LOGÍSTICA (Inventario, Logística inversa, Proveedores), PRODUCCIÓN (Entrega MP, Recepción PT)');
+ check(/^Secciones \| 1Panel \| 2Permisos \| Logística \| 3Inventario \| 4Logística inversa\d* \| 5Recepción proveedores \| 8Almacenamiento \| Producción \| 6Entrega MP\d* \| 7Recepción PT$/.test(menu),'Menú: Panel, Permisos, LOGÍSTICA (Inventario, Logística inversa, Proveedores), PRODUCCIÓN (Entrega MP, Recepción PT)');
  check(await a.isVisible('#nDev')&&(await a.textContent('#nDev'))==='1','Número rojo en Logística inversa: 1 devolución por recibir');
  const toasts=[];await a.exposeFunction('__t',t=>toasts.push(t));await a.evaluate(()=>{const o=window.toast;window.toast=(m,...x)=>{window.__t(String(m));return o(m,...x)}});
  dev('G-555','Producción');await a.waitForTimeout(33000);

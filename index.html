@@ -210,6 +210,19 @@ body.mov nav.tabs,body.mov #status{display:none!important}
 /* ===== Menú lateral (supervisor). En celular se abre con ☰. Los operarios no lo ven (body.op/.mov/.puesto/.locked). ===== */
 .shell{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start}
 nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;position:sticky;top:var(--hdrH,64px);width:232px;height:calc(100vh - var(--hdrH,64px));padding:14px 10px 24px;background:var(--hdr);border-right:1px solid var(--line)}
+.ubMapa{display:flex;flex-direction:column;gap:14px;margin-top:10px}
+.ubPasT{font:600 13px var(--font);margin-bottom:6px}
+.ubRacks{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px}
+.ubRack{display:flex;flex-direction:column;gap:4px;min-width:104px}
+.ubRackT{font:600 11px var(--mono);color:var(--muted);text-align:center}
+.ubCell{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:6px;text-align:left;cursor:pointer;min-height:62px;display:flex;flex-direction:column;gap:2px;font:12px var(--font);color:var(--ink)}
+.ubCell .c{font:600 11px var(--mono);color:var(--muted)}
+.ubCell.occ{background:var(--info-bg);border-color:var(--primary)}
+.ubCell.hit{outline:3px solid var(--warn);outline-offset:-1px}
+.ubCell.sel{box-shadow:0 0 0 2px var(--accent) inset}
+.ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+.ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
+.ucTipos .btn[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
 nav.tabs .navGrp{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 4px 4px;padding:10px 8px 2px;border-top:1px solid var(--line)}
 nav.tabs .navGrp[hidden]{display:none}
 nav.tabs .navHd{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:2px 12px 8px}
@@ -273,6 +286,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <button role="tab" data-v="resultado" aria-selected="false"><span class="num">3</span>Inventario</button>
   <button role="tab" data-v="devol" aria-selected="false"><span class="num">4</span>Logística inversa<span class="n alert" id="nDev" hidden>0</span></button>
   <button role="tab" data-v="prov" aria-selected="false"><span class="num">5</span>Recepción proveedores</button>
+  <button role="tab" data-v="ubic" aria-selected="false"><span class="num">8</span>Almacenamiento</button>
   <div class="navGrp">Producción</div>
   <button role="tab" data-v="mp" aria-selected="false"><span class="num">6</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
   <button role="tab" data-v="pt" aria-selected="false"><span class="num">7</span>Recepción PT</button>
@@ -735,6 +749,46 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
 </section>
 
+<section class="view" id="v-ubiccel" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b>Almacenamiento</b></div>
+  <div class="card contarCard">
+    <div class="eyebrow">1 · ¿Qué movimiento?</div>
+    <div class="ucTipos"><button class="btn" data-ut="ingreso">⬇️ Ingreso</button><button class="btn" data-ut="traslado">↔️ Traslado</button><button class="btn" data-ut="salida">⬆️ Salida</button></div>
+    <div class="small muted" id="ucTipoTxt"></div>
+  </div>
+  <div class="card contarCard" id="ucForm" hidden>
+    <div id="ucCamWrap" class="camWrap" hidden>
+      <div class="row" style="justify-content:space-between"><span class="camTarget" id="ucCamT">Leyendo</span><button class="btn sm" id="ucCamStop">Cerrar cámara</button></div>
+      <div id="ucReader"></div>
+      <div class="small muted" id="ucCamMsg"></div>
+    </div>
+    <div class="step" id="ucDesdeW">
+      <div class="eyebrow" id="ucDesdeEb">2 · Ubicación de origen</div>
+      <div class="scanbox"><input id="ucDesde" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea o digita la ubicación"><button class="btn accent" data-ucam="desde">Cámara</button></div>
+      <div class="small" id="ucDesdeInfo"></div>
+    </div>
+    <div class="step" id="ucHaciaW">
+      <div class="eyebrow" id="ucHaciaEb">2 · Ubicación de destino</div>
+      <div class="scanbox"><input id="ucHacia" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea o digita la ubicación"><button class="btn accent" data-ucam="hacia">Cámara</button></div>
+      <div class="small" id="ucHaciaInfo"></div>
+    </div>
+    <div class="step">
+      <div class="eyebrow" id="ucSkuEb">3 · Producto (SKU)</div>
+      <div class="scanbox"><input id="ucScan" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="Escanea, digita el código o el nombre"><button class="btn accent" data-ucam="sku">Cámara</button></div>
+      <div class="pending" id="ucPending" hidden></div>
+      <div class="sugg" id="ucSugg" hidden></div>
+    </div>
+    <div class="step">
+      <div class="eyebrow" id="ucQtyEb">4 · Cantidad</div>
+      <div class="scanbox"><input id="ucQty" class="qty" type="text" inputmode="decimal" enterkeyhint="done" placeholder="0" autocomplete="off"><button class="btn primary" id="ucOk" style="padding-inline:26px;font-size:18px;min-width:84px;justify-content:center">OK</button></div>
+    </div>
+  </div>
+  <div class="card contarCard">
+    <div class="row"><h2 style="margin:0">Mis movimientos</h2><span class="sep"></span><span class="small muted" id="ucInfo"></span></div>
+    <div id="ucSync"></div>
+    <div class="tbl"><table id="ucList"></table></div>
+  </div>
+</section>
 <section class="view" id="v-provcel" hidden>
   <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b>Recepción de proveedores</b></div>
   <div id="pcHome"></div>
@@ -3990,6 +4044,252 @@ begin
    where id = p_id;
   return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end);
 end $$;
+
+-- =====================================================================
+--  Actualización 22 · Almacenamiento y ubicaciones (módulo 8)
+--  El panel carga las ubicaciones de la bodega (pasillo, rack, nivel). El operario de bodega
+--  (permiso de usuario "ubic_mover") registra desde el celular cada movimiento:
+--    · ingreso  : llega producto a una ubicación
+--    · traslado : pasa de una ubicación a otra
+--    · salida   : sale de la ubicación (despacho o consumo)
+--  El stock de cada ubicación es la suma de sus movimientos (no se guarda aparte: siempre cuadra).
+--  Una salida o traslado no puede sacar más de lo que hay en la ubicación.
+--  Permisos de supervisor: ubi_ver · ubi_operar.
+--  Solo agrega cosas: la app anterior sigue funcionando igual.
+-- =====================================================================
+
+create table if not exists public.cb_ubic (
+  cod      text primary key,                 -- código de la ubicación (ej. A-01-2)
+  pasillo  text,
+  rack     text,
+  nivel    text,
+  pos      text,
+  tipo     text,                             -- rack, piso, cámara… (libre)
+  nota     text,
+  orden    int,
+  activo   boolean not null default true,
+  creado   timestamptz not null default now()
+);
+alter table public.cb_ubic enable row level security;
+revoke all on public.cb_ubic from public, anon, authenticated;
+
+create table if not exists public.cb_ubic_mov (
+  id          uuid primary key default gen_random_uuid(),
+  lid         text unique,                   -- id del celular: reenviar no duplica
+  t           timestamptz not null default now(),
+  tipo        text not null check (tipo in ('ingreso','traslado','salida')),
+  desde       text,
+  hacia       text,
+  k           text not null,
+  descr       text,
+  qty         numeric not null check (qty > 0),   -- en bultos
+  f           numeric not null default 1 check (f > 0),
+  ce          text,
+  um          text,
+  persona     text,
+  origen      text not null,                 -- usuario (celular) o 'panel'
+  nota        text,
+  anulado     timestamptz,
+  anulado_por text
+);
+create index if not exists cb_ubic_mov_t_idx on public.cb_ubic_mov (t desc);
+create index if not exists cb_ubic_mov_desde_idx on public.cb_ubic_mov (desde, k) where anulado is null;
+create index if not exists cb_ubic_mov_hacia_idx on public.cb_ubic_mov (hacia, k) where anulado is null;
+alter table public.cb_ubic_mov enable row level security;
+revoke all on public.cb_ubic_mov from public, anon, authenticated;
+
+-- Stock (en la unidad del ERP) de un producto en una ubicación.
+create or replace function public.cb_ubic_hay(p_u text, p_k text) returns numeric
+language sql stable security definer set search_path = public, extensions as $$
+  select coalesce(sum(case when hacia = p_u then qty * f else 0 end) - sum(case when desde = p_u then qty * f else 0 end), 0)
+    from cb_ubic_mov where anulado is null and k = p_k and (hacia = p_u or desde = p_u)
+$$;
+
+-- Stock de todas las ubicaciones: [{u, k, base, f, ce, um, descr, ult}]
+create or replace function public.cb_ubic_stock_json() returns jsonb
+language sql stable security definer set search_path = public, extensions as $$
+  with m as (
+    select hacia u, k, qty * f b, f, ce, um, descr, t from cb_ubic_mov where anulado is null and hacia is not null
+    union all
+    select desde, k, -qty * f, f, ce, um, descr, t from cb_ubic_mov where anulado is null and desde is not null)
+  select coalesce(jsonb_agg(jsonb_build_object('u', u, 'k', k, 'base', base, 'f', f, 'ce', ce, 'um', um, 'descr', descr, 'ult', ult) order by u, k), '[]'::jsonb)
+    from (select u, k, sum(b) base, (array_agg(f order by t desc))[1] f, (array_agg(ce order by t desc))[1] ce,
+                 (array_agg(um order by t desc))[1] um, (array_agg(descr order by t desc))[1] descr, max(t) ult
+            from m group by u, k having abs(sum(b)) > 1e-9) s
+$$;
+
+-- Registra un movimiento (uso interno: lo llaman el celular y el panel).
+create or replace function public.cb_ubic_registrar(p_mov jsonb, p_origen text, p_persona text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_tipo text := p_mov->>'tipo'; v_desde text := nullif(upper(trim(coalesce(p_mov->>'desde',''))), '');
+        v_hacia text := nullif(upper(trim(coalesce(p_mov->>'hacia',''))), ''); v_k text := nullif(trim(coalesce(p_mov->>'k', p_mov->>'code', '')), '');
+        v_qty numeric; v_f numeric; v_lid text := nullif(left(p_mov->>'lid', 40), ''); v_id uuid; v_hay numeric;
+begin
+  if v_lid is not null then
+    select id into v_id from cb_ubic_mov where lid = v_lid;
+    if found then return jsonb_build_object('id', v_id, 'repetido', true); end if;   -- reenvío del mismo movimiento
+  end if;
+  if v_tipo is null or v_tipo not in ('ingreso','traslado','salida') then raise exception 'datos_invalidos'; end if;
+  if v_k is null or length(v_k) > 40 then raise exception 'datos_invalidos'; end if;
+  begin v_qty := (p_mov->>'qty')::numeric; v_f := coalesce(nullif(p_mov->>'f','')::numeric, 1); exception when others then raise exception 'datos_invalidos'; end;
+  if v_qty is null or v_qty <= 0 or v_qty > 1000000 or v_f <= 0 or v_f > 100000 then raise exception 'cantidad_invalida'; end if;
+  if v_tipo = 'ingreso' then v_desde := null; if v_hacia is null then raise exception 'falta_ubicacion'; end if; end if;
+  if v_tipo = 'salida' then v_hacia := null; if v_desde is null then raise exception 'falta_ubicacion'; end if; end if;
+  if v_tipo = 'traslado' then
+    if v_desde is null or v_hacia is null then raise exception 'falta_ubicacion'; end if;
+    if v_desde = v_hacia then raise exception 'misma_ubicacion'; end if;
+  end if;
+  if v_desde is not null and not exists (select 1 from cb_ubic where cod = v_desde and activo) then raise exception 'ubicacion_no_existe'; end if;
+  if v_hacia is not null and not exists (select 1 from cb_ubic where cod = v_hacia and activo) then raise exception 'ubicacion_no_existe'; end if;
+  if v_desde is not null then
+    perform pg_advisory_xact_lock(hashtext('cb_ubic:' || v_desde));          -- dos celulares no sacan lo mismo a la vez
+    v_hay := cb_ubic_hay(v_desde, v_k);
+    if v_qty * v_f > v_hay + 1e-9 then raise exception 'sin_stock'; end if;
+  end if;
+  insert into cb_ubic_mov(lid, tipo, desde, hacia, k, descr, qty, f, ce, um, persona, origen, nota)
+  values (v_lid, v_tipo, v_desde, v_hacia, v_k, left(p_mov->>'desc', 120), v_qty, v_f, left(nullif(p_mov->>'ce',''), 20), left(p_mov->>'um', 10),
+          left(p_persona, 80), left(p_origen, 40), left(p_mov->>'nota', 200))
+  returning id into v_id;
+  return jsonb_build_object('id', v_id);
+end $$;
+revoke execute on function public.cb_ubic_hay(text, text), public.cb_ubic_stock_json(), public.cb_ubic_registrar(jsonb, text, text) from public, anon, authenticated;
+
+-- ---------- Panel ----------
+create or replace function public.cb_ubic_datos(p_clave text, p_dias int default 30) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'ubi_ver');
+begin
+  return jsonb_build_object(
+    'ubic', coalesce((select jsonb_agg(to_jsonb(u) order by u.orden nulls last, u.cod) from cb_ubic u where u.activo), '[]'::jsonb),
+    'stock', cb_ubic_stock_json(),
+    'movs', coalesce((select jsonb_agg(to_jsonb(m) order by m.t desc) from (select * from cb_ubic_mov
+               where t > now() - make_interval(days => least(greatest(coalesce(p_dias, 30), 1), 400)) order by t desc limit 3000) m), '[]'::jsonb));
+end $$;
+
+-- Carga las ubicaciones. Con p_reemplazar, las que no vienen en la lista quedan inactivas (su historial se conserva).
+create or replace function public.cb_ubic_guardar(p_clave text, p_lista jsonb, p_reemplazar boolean default false) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'ubi_operar'); n int; v_ocup int;
+begin
+  if p_lista is null or jsonb_typeof(p_lista) <> 'array' or jsonb_array_length(p_lista) > 20000 then raise exception 'datos_invalidos'; end if;
+  if exists (select 1 from jsonb_array_elements(p_lista) e where jsonb_typeof(e) <> 'object' or coalesce(trim(e->>'cod'), '') = '' or length(e->>'cod') > 40) then
+    raise exception 'datos_invalidos'; end if;
+  if p_reemplazar then
+    -- no se puede desactivar una ubicación que todavía tiene producto
+    select count(*) into v_ocup from (select distinct x->>'u' u from jsonb_array_elements(cb_ubic_stock_json()) x where (x->>'base')::numeric > 1e-9) s
+     where s.u not in (select upper(trim(e->>'cod')) from jsonb_array_elements(p_lista) e);
+    if v_ocup > 0 then raise exception 'ubicacion_con_stock'; end if;
+    update cb_ubic set activo = false where cod not in (select upper(trim(e->>'cod')) from jsonb_array_elements(p_lista) e);
+  end if;
+  insert into cb_ubic(cod, pasillo, rack, nivel, pos, tipo, nota, orden, activo)
+  select distinct on (upper(trim(e->>'cod'))) upper(trim(e->>'cod')), left(nullif(trim(e->>'pasillo'),''), 20), left(nullif(trim(e->>'rack'),''), 20),
+         left(nullif(trim(e->>'nivel'),''), 20), left(nullif(trim(e->>'pos'),''), 20), left(nullif(trim(e->>'tipo'),''), 30), left(e->>'nota', 200), (o)::int, true
+    from jsonb_array_elements(p_lista) with ordinality t(e, o)
+  on conflict (cod) do update set pasillo = excluded.pasillo, rack = excluded.rack, nivel = excluded.nivel, pos = excluded.pos,
+         tipo = excluded.tipo, nota = excluded.nota, orden = excluded.orden, activo = true;
+  get diagnostics n = row_count;
+  return jsonb_build_object('n', n, 'activas', (select count(*) from cb_ubic where activo));
+end $$;
+
+-- Movimiento registrado desde el panel (corrección o carga inicial), a nombre del supervisor.
+create or replace function public.cb_ubic_mover_panel(p_clave text, p_mov jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'ubi_operar');
+begin
+  return cb_ubic_registrar(p_mov, 'panel', coalesce(cb_sup_nombre(p_clave), 'Supervisor'));
+end $$;
+
+-- Anula un movimiento equivocado (queda en el historial). No se puede si deja una ubicación en negativo.
+create or replace function public.cb_ubic_anular(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'ubi_operar'); m cb_ubic_mov;
+begin
+  select * into m from cb_ubic_mov where id = p_id for update;
+  if not found then raise exception 'no_existe'; end if;
+  if m.anulado is not null then return; end if;
+  if m.hacia is not null then perform pg_advisory_xact_lock(hashtext('cb_ubic:' || m.hacia)); end if;
+  update cb_ubic_mov set anulado = now(), anulado_por = left(coalesce(cb_sup_nombre(p_clave), 'Supervisor'), 80) where id = p_id;
+  if m.hacia is not null and cb_ubic_hay(m.hacia, m.k) < -1e-9 then raise exception 'sin_stock'; end if;   -- ya salió de ahí: no se puede anular
+end $$;
+
+-- ---------- Celular de bodega (permiso de usuario "ubic_mover") ----------
+create or replace function public.cb_ubic_cel(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'ubic_mover') then raise exception 'sin_permiso'; end if;
+  return jsonb_build_object(
+    'ubic', coalesce((select jsonb_agg(jsonb_build_array(u.cod, u.pasillo, u.rack, u.nivel) order by u.orden nulls last, u.cod) from cb_ubic u where u.activo), '[]'::jsonb),
+    'stock', cb_ubic_stock_json(),
+    'mis', coalesce((select jsonb_agg(to_jsonb(m) order by m.t desc) from (select * from cb_ubic_mov where origen = p_puesto
+               and t > now() - interval '36 hours' order by t desc limit 300) m), '[]'::jsonb));
+end $$;
+
+create or replace function public.cb_ubic_mover(p_puesto text, p_ses text, p_mov jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'ubic_mover') then raise exception 'sin_permiso'; end if;
+  return cb_ubic_registrar(p_mov, p_puesto, coalesce(nullif(trim(p_mov->>'persona'), ''), (select nombre from cb_puesto where id = p_puesto)));
+end $$;
+
+revoke all on function public.cb_ubic_datos(text, int), public.cb_ubic_guardar(text, jsonb, boolean), public.cb_ubic_mover_panel(text, jsonb),
+  public.cb_ubic_anular(text, uuid), public.cb_ubic_cel(text, text), public.cb_ubic_mover(text, text, jsonb) from public;
+grant execute on function public.cb_ubic_datos(text, int), public.cb_ubic_guardar(text, jsonb, boolean), public.cb_ubic_mover_panel(text, jsonb),
+  public.cb_ubic_anular(text, uuid), public.cb_ubic_cel(text, text), public.cb_ubic_mover(text, text, jsonb) to anon, authenticated;
+
+-- Permisos nuevos: supervisores (ubi_ver, ubi_operar) y usuarios de celular (ubic_mover).
+create or replace function public.cb_sup_guardar(p_clave text, p_id text, p_nombre text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[]; par record;
+begin
+  perform cb_check(p_clave);
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar',
+      'pt_ver','pt_corregir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','usr_admin',
+      'prov_ver','prov_operar','prov_eliminar','ubi_ver','ubi_operar')) then raise exception 'datos_invalidos'; end if;
+  -- para operar o eliminar hay que poder ver el módulo
+  for par in select * from (values ('inv_operar','inv_ver'),('mp_solicitar','mp_ver'),('mp_operar','mp_ver'),('mp_operar','mp_solicitar'),('mp_eliminar','mp_ver'),
+      ('pt_corregir','pt_ver'),('dev_crear','dev_ver'),('dev_todas','dev_ver'),('dev_cerrar','dev_ver'),('dev_eliminar','dev_ver'),
+      ('prov_operar','prov_ver'),('prov_eliminar','prov_ver'),('ubi_operar','ubi_ver')) v(hijo, padre) loop
+    if par.hijo = any(v_perm) and not (par.padre = any(v_perm)) then v_perm := v_perm || par.padre; end if;
+  end loop;
+  if v_id is null then
+    if (select count(*) from cb_sup) >= 50 then raise exception 'datos_invalidos'; end if;
+    v_id := 's_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_sup(id, nombre, permisos, activo) values (v_id, left(trim(p_nombre), 80), v_perm, coalesce(p_activo, true));
+  else
+    update cb_sup set nombre = left(trim(p_nombre), 80), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
+
+
+create or replace function public.cb_u_guardar(p_clave text, p_id text, p_nombre text, p_area text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[];
+begin
+  perform cb_puede(p_clave, 'usr_admin');
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('conteo','mp_entregar','mp_recibir','pt_entregar','pt_recibir','pt_retirar','dev_cargar','dev_recibir','prov_recibir','ubic_mover')) then raise exception 'datos_invalidos'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'mp\_%') > 1 then raise exception 'mp_uno'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'pt\_%') > 1 then raise exception 'pt_uno'; end if;
+  if v_id is null then
+    v_id := 'u_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_puesto(id, hash, nombre, area, permisos, activo)
+    values (v_id, extensions.crypt(encode(extensions.gen_random_bytes(16), 'hex'), extensions.gen_salt('bf')), left(trim(p_nombre), 80), left(trim(coalesce(p_area,'')), 60), v_perm, coalesce(p_activo, true));
+  else
+    update cb_puesto set nombre = left(trim(p_nombre), 80), area = left(trim(coalesce(p_area,'')), 60), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
+
 </script>
   </div>
 
@@ -4035,6 +4335,53 @@ end $$;
 </section>
 
 <!-- ============ 7 RECEPCIÓN DE PROVEEDORES ============ -->
+<section class="view" id="v-ubic" hidden>
+  <div class="card">
+    <div class="row"><div class="eyebrow">8 · Almacenamiento y ubicaciones</div><span class="sep"></span><span class="small muted" id="ubAt"></span></div>
+    <div class="row"><h2 style="margin:0">Mapa de la bodega</h2><span class="sep"></span>
+      <button class="btn primary" id="ubRef">Actualizar</button><button class="btn" id="ubXls">Excel</button><button class="btn" id="ubMovTog">＋ Registrar movimiento</button><button class="btn" id="ubCargaTog">Cargar ubicaciones</button></div>
+    <div class="notice" id="ubNote" hidden></div>
+    <div class="cbox" id="ubCarga" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b>Cargar las ubicaciones de la bodega</b>
+      <div class="small muted">Una ubicación por fila. Puede ser solo el código (ej. <b>A-01-2</b> = pasillo A, rack 01, nivel 2) o columnas <b>Ubicación · Pasillo · Rack · Nivel · Posición · Tipo</b> (con o sin encabezado).</div>
+      <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
+        <label class="btn sm" style="cursor:pointer">📄 Cargar Excel o CSV<input id="ubFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden></label>
+        <span class="small muted">o pega las filas copiadas desde Excel:</span></div>
+      <textarea id="ubPaste" rows="4" placeholder="A-01-1&#10;A-01-2&#10;B-01-1" style="width:100%;font:13px var(--mono)"></textarea>
+      <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ubReempl"> Reemplazar la lista: las ubicaciones que no vengan quedan inactivas (solo si están vacías; su historial se guarda)</label>
+      <div class="small" id="ubCargaInfo"></div>
+      <div class="row" style="gap:8px"><button class="btn sm" id="ubPrev" type="button">Revisar</button><button class="btn primary" id="ubCargaOk" type="button" disabled>Guardar ubicaciones</button><button class="btn" id="ubCargaX" type="button">Cancelar</button></div>
+    </div>
+    <div class="cbox" id="ubMovBox" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b>Registrar un movimiento desde el panel</b> <span class="small muted">(carga inicial o corrección; queda a tu nombre)</span>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:0 1 140px">Tipo<select id="ubMvTipo"><option value="ingreso">Ingreso</option><option value="traslado">Traslado</option><option value="salida">Salida</option></select></label>
+        <label class="f" style="flex:0 1 130px" id="ubMvDesdeL">Desde<input id="ubMvDesde" autocomplete="off" autocapitalize="characters" list="ubDl"></label>
+        <label class="f" style="flex:0 1 130px" id="ubMvHaciaL">Hacia<input id="ubMvHacia" autocomplete="off" autocapitalize="characters" list="ubDl"></label>
+        <label class="f" style="flex:1 1 160px">Producto (código)<input id="ubMvCod" autocomplete="off" autocapitalize="characters"></label>
+        <label class="f" style="flex:0 1 120px"><span id="ubMvQL">Cantidad</span><input id="ubMvQty" inputmode="decimal" placeholder="0" autocomplete="off"></label>
+        <button class="btn primary" id="ubMvOk" type="button">Registrar</button></div>
+      <div class="small" id="ubMvInfo"></div>
+      <datalist id="ubDl"></datalist>
+    </div>
+    <div class="kpis" id="ubKpis"></div>
+    <div class="row"><div class="chips" id="ubChips"></div><span class="sep"></span><input id="ubQ" placeholder="Buscar producto (SKU o nombre) o ubicación" style="flex:0 1 300px"></div>
+    <div id="ubDonde"></div>
+    <div id="ubMapa" class="ubMapa"></div>
+  </div>
+  <div class="card" id="ubDet" hidden>
+    <div class="row"><div class="eyebrow">Ubicación</div><span class="sep"></span><button class="btn sm" id="ubDetX">Cerrar vista</button></div>
+    <h2 id="ubDetT" style="margin:0"></h2><div class="small muted" id="ubDetS"></div>
+    <div class="tbl" style="margin-top:6px"><table id="ubDetTbl"></table></div>
+    <h3 style="margin:12px 0 4px;font-size:15px">Historial de la ubicación</h3>
+    <div class="tbl" style="max-height:320px"><table id="ubDetMov"></table></div>
+  </div>
+  <div class="card">
+    <div class="row"><h2 style="margin:0">Movimientos</h2><span class="sep"></span><select id="ubDia" style="flex:0 1 210px"></select></div>
+    <div class="tbl" style="max-height:460px"><table id="ubMovs"></table></div>
+    <div id="ubConfirm"></div>
+  </div>
+</section>
 <section class="view" id="v-prov" hidden>
   <div class="card">
     <div class="row"><div class="eyebrow">5 · Recepción de proveedores</div><span class="sep"></span><span class="small muted" id="pvAt"></span></div>
@@ -4230,6 +4577,8 @@ function show(v){
   if(v==="permisos"){if(typeof renderAcc==="function")renderAcc();if(typeof renderPuAdm==="function")renderPuAdm();if(typeof renderSup==="function")renderSup();if(typeof lbEnter==="function")lbEnter()}
   if(v==="devol"&&typeof devEnter==="function")devEnter();
   if(v==="prov"&&typeof pvEnter==="function")pvEnter();
+  if(v==="ubic"&&typeof ubEnter==="function")ubEnter();
+  if(v!=="ubiccel"&&typeof ucStopCam==="function")ucStopCam();
   if(v!=="provcel"&&typeof pcStopCam==="function")pcStopCam();
   if(v!=="devcel"&&typeof dvStopCam==="function")dvStopCam();
   $$("section.view").forEach(s=>s.hidden=s.id!=="v-"+v);
@@ -5115,7 +5464,7 @@ const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"in
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",
   cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
-  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",
+  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
 async function rpc(conf,fn,args){
   if(SUP_FN[fn]&&args&&args.p_clave){let s=false;try{s=supOn()&&args.p_clave===SUPI.ses}catch(e){}
@@ -5510,7 +5859,7 @@ const PROD_PERM=["mp_ver","mp_solicitar","pt_ver"];   // acceso antiguo de produ
 const pvCan=p=>p==="mp_cerrar"?(supOn()?pvCan("mp_operar"):true):supOn()?(SUPI.permisos||[]).includes(p):prodMode()?PROD_PERM.includes(p):true;
 /* Títulos de grupo del menú (LOGÍSTICA, PRODUCCIÓN): se ven solo si el grupo tiene alguna sección visible para quien entra. */
 function navGrupos(){for(const g of $$("nav.tabs .navGrp")){let ok=false;for(let e=g.nextElementSibling;e&&!e.classList.contains("navGrp");e=e.nextElementSibling)if(e.tagName==="BUTTON"&&!e.hidden&&e.classList.contains("pvOk"))ok=true;g.classList.toggle("pvOk",ok)}}
-const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["devol","dev_ver"],["permisos","usr_admin"],["prov","prov_ver"]];
+const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["devol","dev_ver"],["permisos","usr_admin"],["prov","prov_ver"],["ubic","ubi_ver"]];
 const pvViews=()=>supOn()?SUP_VISTAS.filter(x=>pvCan(x[1])).map(x=>x[0]):prodMode()?["mp","pt"]:null;   // null = sin límite (administrador)
 const mpLim=()=>prodMode()||(supOn()&&!pvCan("mp_operar"));       // solo solicita: no activa, asigna ni cierra
 const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la lista de productos de la nube, no un ERP cargado aquí
@@ -5518,7 +5867,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 const SUP_SIEMPRE="#sbCard,#ghCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
-  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
+  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
   let st=$("#supStyle");if(!st){st=document.createElement("style");st.id="supStyle";document.head.appendChild(st)}
@@ -5786,11 +6135,12 @@ const SUP_PERM=[["inv_ver","Inventario","Ver el panel, conteos y resultados"],["
   ["pt_ver","Recepción PT","Ver cuadraturas y bajar Excel"],["pt_corregir","Recepción PT","Corregir, anular y agregar registros"],
   ["dev_ver","Devoluciones","Ver devoluciones y su avance"],["dev_crear","Devoluciones","Crear devoluciones"],["dev_todas","Devoluciones","Todas las áreas (sin esto, solo Producción)"],["dev_cerrar","Devoluciones","Cerrar devoluciones"],["dev_eliminar","Devoluciones","Eliminar devoluciones"],
   ["prov_ver","Recepción proveedores","Ver recepciones, cuadre y bajar Excel"],["prov_operar","Recepción proveedores","Crear recepciones, packing list, agregar, corregir y cerrar"],["prov_eliminar","Recepción proveedores","Eliminar recepciones"],
+  ["ubi_ver","Almacenamiento","Ver el mapa, dónde está cada producto, movimientos y Excel"],["ubi_operar","Almacenamiento","Cargar ubicaciones, registrar y anular movimientos"],
   ["usr_admin","Usuarios de celulares","Crear, editar, liberar, bloquear y eliminar usuarios"]];
 const SUP_TXT={inv_ver:"Inventario · ver",inv_operar:"Inventario · operar",mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",mp_operar:"MP · operar",mp_eliminar:"MP · eliminar",pt_ver:"PT · ver",pt_corregir:"PT · corregir",
-  dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · eliminar",prov_ver:"Proveedores · ver",prov_operar:"Proveedores · operar",prov_eliminar:"Proveedores · eliminar",usr_admin:"Usuarios"};
+  dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · eliminar",prov_ver:"Proveedores · ver",prov_operar:"Proveedores · operar",prov_eliminar:"Proveedores · eliminar",ubi_ver:"Almacenamiento · ver",ubi_operar:"Almacenamiento · operar",usr_admin:"Usuarios"};
 /* Para operar o eliminar hay que poder ver el módulo (el servidor lo exige igual). */
-const SUP_PADRES={inv_operar:["inv_ver"],mp_solicitar:["mp_ver"],mp_operar:["mp_ver","mp_solicitar"],mp_eliminar:["mp_ver"],pt_corregir:["pt_ver"],dev_crear:["dev_ver"],dev_todas:["dev_ver"],dev_cerrar:["dev_ver"],dev_eliminar:["dev_ver"],prov_operar:["prov_ver"],prov_eliminar:["prov_ver"]};
+const SUP_PADRES={inv_operar:["inv_ver"],mp_solicitar:["mp_ver"],mp_operar:["mp_ver","mp_solicitar"],mp_eliminar:["mp_ver"],pt_corregir:["pt_ver"],dev_crear:["dev_ver"],dev_todas:["dev_ver"],dev_cerrar:["dev_ver"],dev_eliminar:["dev_ver"],prov_operar:["prov_ver"],prov_eliminar:["prov_ver"],ubi_operar:["ubi_ver"]};
 const supLink=id=>{const t=(SB.sup||{})[id];return t?appUrl()+"?sup="+encodeURIComponent(id)+"&t="+encodeURIComponent(t)+sbLinkParams():""};
 const supMsg=e=>/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 17 (supervisores).":({falta_nombre:"Escribe el nombre.",no_existe:"Ese supervisor ya no existe.",datos_invalidos:"Falta ejecutar en Supabase la actualización 18 (permisos por módulo)."}[e.message]||movMsg(e));
 async function supCargar(){const r=await rpc(SB,"cb_sup_listar",{p_clave:SB.admin});SUPS=Array.isArray(r)?r:[];return SUPS}
@@ -6331,7 +6681,7 @@ checkPuestoLink();
 function puestoApply(){
   const b=document.body;b.classList.add("puesto");b.classList.remove("prodv","locked");$("#lockBox").innerHTML="";
   b.classList.toggle("op",puVista==="conteo");b.classList.toggle("mov",puVista==="mp");
-  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel",prov:"provcel"}[puVista]||"puesto";
+  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel",prov:"provcel",ubic:"ubiccel"}[puVista]||"puesto";
   if($("#v-"+v).hidden)show(v);
 }
 function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();if(typeof dvStopCam==="function")dvStopCam();if(typeof pcStopCam==="function")pcStopCam();puestoApply();renderPuesto();puRefresh()}
@@ -6371,6 +6721,7 @@ function renderPuesto(){
   if(can("mp_recibir"))items.push({k:"mp",ic:"📥",t:"Recepción de materia prima (MP)",s:nMp?`${nMp} entrega${nMp>1?"s":""} por recibir`:"Sin entregas de bodega por ahora",dot:pMp});
   if(can("pt_entregar"))items.push({k:"pt",ic:"🏭",t:"Entrega de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que sale de máquina"});
   if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
+  if(can("ubic_mover"))items.push({k:"ubic",ic:"📍",t:"Almacenamiento y ubicaciones",s:"Registra ingresos, traslados y salidas de pallets en sus ubicaciones"});
   if(can("prov_recibir"))items.push({k:"prov",ic:"🚚",t:"Recepción de proveedores",s:"Recibe lo que llega de proveedores, con o sin packing list"});
   if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
   if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
@@ -6385,6 +6736,7 @@ function puAbrir(k){
   if(!PST.persona){toast("Escribe tu nombre arriba");return $("#puPersona").focus()}
   if(k==="pt")return ptAbrir();
   if(k==="prov")return pcAbrir();
+  if(k==="ubic")return ucAbrir();
   if(k==="dev"||k==="devrec")return dvAbrir(k==="devrec"?"rec":"carga");
   const lista=k==="mp"?puTareas.mp:puTareas.conteos;
   const directa=k==="mp"&&can("mp_entregar");          // bodega puede abrir una entrega sin esperar al supervisor
@@ -6443,7 +6795,7 @@ async function puAbrirConteo(t){
 
 /* ---------- Supervisor: USUARIOS (PC y celulares) con sus permisos — pestaña 6 · Permisos ---------- */
 var USERS=store.get("inv_users",[]), uEdit=null, uBusy=false;
-const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones",prov_recibir:"Recibe proveedores"};
+const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones",ubic_mover:"Almacenamiento",prov_recibir:"Recibe proveedores"};
 const AREAS=["Bodega","Producción","Picking retail","Distribución","Compras","Despacho","Calidad"];
 function usersCon(p){return (USERS||[]).filter(u=>u.activo!==false&&(u.permisos||[]).includes(p))}
 function uNombre(id){const u=(USERS||[]).find(x=>x.id===id);return u?(u.nombre||u.id):(PUN[id]?"Celular de "+PUN[id]:id)}
@@ -6509,10 +6861,11 @@ function uEditor(u,keep){
     <fieldset><legend>Producto terminado (PT)</legend>${rad("uPt","",pt,"No")}${rad("uPt","pt_entregar",pt,"Entrega PT (producción)")}${rad("uPt","pt_recibir",pt,"Recibe PT (bodega)")}${rad("uPt","pt_retirar",pt,"Retira PT para despacho (retail)")}</fieldset>
     <fieldset><legend>Devoluciones</legend><label><input type="checkbox" id="uP_dev_cargar" ${P.has("dev_cargar")?"checked":""}> Carga devoluciones</label><label><input type="checkbox" id="uP_dev_recibir" ${P.has("dev_recibir")?"checked":""}> Recepciona devoluciones</label></fieldset>
     <fieldset><legend>Proveedores</legend><label><input type="checkbox" id="uP_prov_recibir" ${P.has("prov_recibir")?"checked":""}> Recibe proveedores (bodega)</label></fieldset>
+    <fieldset><legend>Almacenamiento</legend><label><input type="checkbox" id="uP_ubic_mover" ${P.has("ubic_mover")?"checked":""}> Registra ingresos, traslados y salidas en ubicaciones (bodega)</label></fieldset>
     <div class="row"><button class="btn primary" id="uSave">${u?"Guardar cambios":"Crear usuario y su link"}</button>${u?'<button class="btn" id="uCancel">Cancelar</button>':""}</div></div>`;
   if($("#uCancel"))$("#uCancel").onclick=()=>{uEdit=null;uEditor(null,true)};
   $("#uSave").onclick=()=>{const perm=[];if($("#uP_conteo").checked)perm.push("conteo");const m=(document.querySelector('input[name="uMp"]:checked')||{}).value,t=(document.querySelector('input[name="uPt"]:checked')||{}).value;
-    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");if($("#uP_prov_recibir").checked)perm.push("prov_recibir");
+    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");if($("#uP_prov_recibir").checked)perm.push("prov_recibir");if($("#uP_ubic_mover").checked)perm.push("ubic_mover");
     uGuardar(u,{nombre:norm($("#uNom").value),area:norm($("#uArea").value),permisos:perm},!u)};
   if(!keep)setTimeout(()=>{try{$("#uNom").focus()}catch(e){}},50);
 }
@@ -7696,6 +8049,248 @@ $("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const
   saveWb(wb,`Recepcion_${(d.proveedor||d.contenedor||"proveedor").replace(/[^\w-]+/g,"_")}_${(d.guia||d.referencia||"").replace(/[^\w-]+/g,"_")}.xlsx`)};
 $("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;
 $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
+/* =====================================================================
+   8 · ALMACENAMIENTO Y UBICACIONES
+   Panel: mapa de la bodega (pasillo · rack · nivel) con lo que hay en cada ubicación, dónde está cada
+   producto, historial y Excel. Celular de bodega (permiso de usuario "ubic_mover"): registra cada
+   ingreso, traslado o salida con ubicación, código y cantidad en bultos (con su conversión).
+   El stock de cada ubicación lo calcula el servidor sumando los movimientos.
+   ===================================================================== */
+var ub={ubic:[],stock:[],movs:[]}, ubAt=null, ubBusy=false, ubSel=store.get("inv_ubsel",null), ubF=store.get("inv_ubf","todas"), ubCargaL=null;
+const UBT={ingreso:["Ingreso","p-ok"],traslado:["Traslado","p-info"],salida:["Salida","p-warn"]};
+const ubMsg=e=>({sin_stock:"No hay esa cantidad en la ubicación de origen.",ubicacion_no_existe:"Esa ubicación no está cargada.",misma_ubicacion:"El origen y el destino son la misma ubicación.",
+  falta_ubicacion:"Falta la ubicación.",cantidad_invalida:"Escribe una cantidad mayor que 0.",ubicacion_con_stock:"Hay ubicaciones con producto que no vienen en la lista: vacíalas antes de quitarlas.",
+  datos_invalidos:"Hay una fila sin código de ubicación o con datos inválidos.",sin_permiso:"Tu usuario no tiene permiso de Almacenamiento. Pídeselo al supervisor.",no_existe:"Ese movimiento ya no existe."}[e.message]
+  ||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 22 (almacenamiento).":(typeof puestoMode==="function"&&puestoMode()?puMsg(e):movMsg(e))));
+/* A-01-2 → pasillo A, rack 01, nivel 2 (si la ubicación no trae sus columnas) */
+function ubPartes(cod){const p=String(cod||"").toUpperCase().split(/[-_. \/]+/).filter(Boolean);return {pasillo:p[0]||"",rack:p[1]||"",nivel:p[2]||"",pos:p.slice(3).join("-")}}
+const ubNum=v=>{const n=parseFloat(String(v).replace(",","."));return isNaN(n)?null:n};
+const ubCmp=(a,b)=>{const x=ubNum(a),y=ubNum(b);return x!=null&&y!=null?x-y:String(a).localeCompare(String(b),"es",{numeric:true})};
+const ubCod=v=>norm(String(v||"")).toUpperCase().replace(/\s+/g,"");
+/* stock agrupado: ubicación → [{k,base,f,ce,um,descr,ult}] (solo lo que hay) */
+function ubStockMap(){const m=new Map();for(const s of ub.stock||[]){if(!(+s.base>1e-9))continue;const it=pvFind(s.k)||{};
+  const x=Object.assign({},s,{descr:s.descr||it.desc||"",um:s.um||umTxt(it.um||""),ce:s.ce||(conv(it)?it.ce:""),f:+s.f||(conv(it)?+it.f:1)});(m.get(s.u)||m.set(s.u,[]).get(s.u)).push(x)}return m}
+const ubBul=s=>`${fmt2((+s.base||0)/(+s.f||1))} ${esc(s.ce&&+s.f!==1?plural(s.ce):umTxt(s.um))}`;
+async function ubEnter(){
+  const on=movOk();$("#ubNote").hidden=on;
+  if(!on){$("#ubNote").innerHTML='Para ver el almacenamiento, conecta el envío automático (Supabase) en <b>2 · Permisos</b>.';return}
+  ubDias();if(typeof pvCatalogo==="function")await pvCatalogo().catch(()=>{});ubRender();ubRefresh(false);
+}
+async function ubRefresh(avisar){
+  if(!movOk()||!pvPuede("ubi_ver")||ubBusy)return;ubBusy=true;
+  try{const r=await mrpc("cb_ubic_datos",{p_dias:60});ub={ubic:r.ubic||[],stock:r.stock||[],movs:r.movs||[]};ubAt=new Date();$("#ubNote").hidden=true;ubRender()}
+  catch(e){const m=ubMsg(e);if(avisar)toast(m);$("#ubNote").hidden=false;$("#ubNote").textContent=m}
+  finally{ubBusy=false}
+}
+setInterval(()=>{const a=document.activeElement,ed=a&&a.closest&&a.closest("#ubCarga,#ubMovBox,#ubQ");if(movOk()&&!document.hidden&&!$("#v-ubic").hidden&&!ed)ubRefresh(false)},30000);
+function ubDias(){const sel=$("#ubDia"),v=sel.value||store.get("inv_ubdia","d0"),h=new Date();h.setHours(0,0,0,0);const o=[];
+  for(let i=0;i<=14;i++){const d=new Date(h);d.setDate(h.getDate()-i);o.push(`<option value="d${i}">${i===0?"Hoy · ":i===1?"Ayer · ":""}${DIAS[d.getDay()]} ${ymd(d).split("-").reverse().join("-")}</option>`)}
+  o.push('<option value="all">Últimos 60 días</option>');sel.innerHTML=o.join("");sel.value=[...sel.options].some(x=>x.value===v)?v:"d0"}
+function ubDiaOk(t){const v=$("#ubDia").value;if(v==="all")return true;const i=+v.slice(1),d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-i);const e=new Date(d);e.setDate(d.getDate()+1);const x=new Date(t);return x>=d&&x<e}
+function ubRender(){
+  const sm=ubStockMap(),U=ub.ubic||[],q=deacc(($("#ubQ").value||"").trim()),occ=u=>sm.has(u.cod);
+  // búsqueda: por producto (código o nombre) o por ubicación
+  const hitsK=new Set();if(q)for(const [u,l] of sm)for(const s of l)if(deacc(s.k+" "+(s.descr||"")).includes(q))hitsK.add(u);
+  const hitU=u=>q&&(hitsK.has(u.cod)||deacc(u.cod).includes(q));
+  const hoy=ub.movs.filter(m=>new Date(m.t).toDateString()===new Date().toDateString()&&!m.anulado).length,skus=new Set((ub.stock||[]).filter(s=>+s.base>1e-9).map(s=>s.k));
+  $("#ubKpis").innerHTML=[[fmt(U.length),"Ubicaciones"],[fmt(U.filter(occ).length),"Ocupadas"],[fmt(U.filter(u=>!occ(u)).length),"Vacías"],[fmt(skus.size),"Productos distintos"],[fmt(hoy),"Movimientos hoy"]]
+    .map(([v,l])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
+  const F=[["todas","Todas",()=>true],["ocup","Ocupadas",occ],["vac","Vacías",u=>!occ(u)]];if(!F.some(f=>f[0]===ubF))ubF="todas";
+  $("#ubChips").innerHTML=F.map(([k,l,fn])=>`<button class="chip" data-f="${k}" aria-pressed="${ubF===k}">${l} · ${fmt(U.filter(fn).length)}</button>`).join("");
+  $$("#ubChips .chip").forEach(b=>b.onclick=()=>{ubF=b.dataset.f;store.set("inv_ubf",ubF);ubRender()});
+  $("#ubAt").textContent=ubAt?"actualizado "+hhmm(ubAt)+" · cada 30 s":"";
+  $("#ubDl").innerHTML=U.map(u=>`<option value="${esc(u.cod)}">`).join("");
+  // dónde está el producto buscado
+  if(q&&hitsK.size){const rows=[];for(const [u,l] of sm)for(const s of l)if(deacc(s.k+" "+(s.descr||"")).includes(q))rows.push([u,s]);
+    const tot=new Map();for(const [,s] of rows){const t=tot.get(s.k)||{s,base:0};t.base+=+s.base;tot.set(s.k,t)}
+    $("#ubDonde").innerHTML=`<div class="tbl" style="margin:8px 0"><table><thead><tr><th>Código</th><th>Descripción</th><th>Ubicación</th><th class="num">Cantidad</th></tr></thead><tbody>`+
+      rows.sort((a,b)=>String(a[1].k).localeCompare(String(b[1].k))||ubCmp(a[0],b[0])).map(([u,s])=>`<tr><td class="code">${esc(s.k)}</td><td>${esc(s.descr)}</td><td class="code"><button class="linkBtn" data-ubg="${esc(u)}">${esc(u)}</button></td><td class="num">${qBC(+s.base,s.ce,s.f,s.um)}</td></tr>`).join("")+
+      [...tot.values()].map(t=>`<tr style="font-weight:700"><td class="code">${esc(t.s.k)}</td><td>Total en bodega</td><td></td><td class="num">${qBC(t.base,t.s.ce,t.s.f,t.s.um)}</td></tr>`).join("")+`</tbody></table></div>`;
+    $$("#ubDonde [data-ubg]").forEach(b=>b.onclick=()=>ubAbrir(b.dataset.ubg))}
+  else $("#ubDonde").innerHTML=q?'<div class="small muted" style="margin:6px 0">Ningún producto con ese código o nombre está en una ubicación.</div>':"";
+  // mapa: pasillo → rack → niveles (el más alto arriba)
+  const fn=F.find(f=>f[0]===ubF)[2],L=U.filter(fn);
+  if(!U.length){$("#ubMapa").innerHTML='<p class="muted">Todavía no hay ubicaciones. Cárgalas con <b>Cargar ubicaciones</b> (Excel o pegando la lista).</p>'}
+  else{const pas=new Map();for(const u of L){const p=ubPartes(u.cod),P=u.pasillo||p.pasillo||"—",R=u.rack||p.rack||"—";const m=pas.get(P)||new Map();(m.get(R)||m.set(R,[]).get(R)).push(u);pas.set(P,m)}
+    $("#ubMapa").innerHTML=[...pas.keys()].sort(ubCmp).map(P=>{const racks=pas.get(P),all=[...racks.values()].flat(),no=all.filter(occ).length;
+      return `<div class="ubPas"><div class="ubPasT">Pasillo ${esc(P)} <span class="muted">· ${fmt(all.length)} ubicaciones · ${fmt(no)} ocupadas</span></div><div class="ubRacks">`+
+        [...racks.keys()].sort(ubCmp).map(R=>`<div class="ubRack"><div class="ubRackT">Rack ${esc(R)}</div>`+racks.get(R).sort((a,b)=>{const x=ubPartes(a.cod),y=ubPartes(b.cod);return ubCmp(b.nivel||y.nivel,a.nivel||x.nivel)||ubCmp(a.pos||x.pos,b.pos||y.pos)}).map(u=>{
+          const l=sm.get(u.cod)||[],s=(q&&l.find(x=>deacc(x.k+" "+(x.descr||"")).includes(q)))||l[0];return `<button class="ubCell${l.length?" occ":""}${hitU(u)?" hit":""}${u.cod===ubSel?" sel":""}" data-ub="${esc(u.cod)}" title="${esc(l.map(x=>x.k+" "+(x.descr||"")).join("\n"))}"><span class="c">${esc(u.cod)}</span>${s?`<span class="s"><b>${esc(s.k)}</b>${l.length>1?` +${l.length-1}`:""}</span><span class="s">${ubBul(s)}</span>`:'<span class="s muted">vacía</span>'}</button>`}).join("")+`</div>`).join("")+`</div></div>`}).join("")||'<p class="muted">Ninguna ubicación con este filtro.</p>';
+    $$("#ubMapa [data-ub]").forEach(b=>b.onclick=()=>ubAbrir(b.dataset.ub))}
+  ubDetRender();ubMovsRender();
+}
+function ubAbrir(u){ubSel=u;store.set("inv_ubsel",u);ubRender();$("#ubDet").scrollIntoView({behavior:"smooth",block:"start"})}
+function ubMovRow(m,acc){const [t,c]=UBT[m.tipo]||[m.tipo,"p-mut"],an=!!m.anulado;
+  return `<tr${an?' style="opacity:.55"':""}><td style="white-space:nowrap">${fechaCL(ymd(new Date(m.t)))} ${hm24(m.t)}</td><td><span class="pill ${c}">${t}</span></td><td class="code">${esc(m.desde||"—")}</td><td class="code">${esc(m.hacia||"—")}</td><td class="code">${esc(m.k)}</td><td>${esc(m.descr||(pvFind(m.k)||{}).desc||"")}</td>
+    <td class="num">${an?"<s>":""}${qBC((+m.qty||0)*(+m.f||1),m.ce,m.f,m.um)}${an?"</s>":""}</td><td>${esc(m.persona||"")}${m.origen==="panel"?' <span class="small muted">(panel)</span>':""}</td>
+    <td>${an?`<span class="small muted" title="${esc((m.anulado_por||"")+" · "+fmtDT(m.anulado))}">anulado</span>`:acc&&pvPuede("ubi_operar")?`<button class="linkBtn" data-uban="${esc(m.id)}">anular</button>`:""}</td></tr>`}
+const UBMH='<thead><tr><th>Fecha</th><th>Tipo</th><th>Desde</th><th>Hacia</th><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th>Quién</th><th></th></tr></thead>';
+function ubDetRender(){
+  const u=(ub.ubic||[]).find(x=>x.cod===ubSel);$("#ubDet").hidden=!u;if(!u)return;
+  const p=ubPartes(u.cod),l=ubStockMap().get(u.cod)||[];
+  $("#ubDetT").textContent=u.cod;
+  $("#ubDetS").textContent=[`Pasillo ${u.pasillo||p.pasillo||"—"}`,`Rack ${u.rack||p.rack||"—"}`,`Nivel ${u.nivel||p.nivel||"—"}`,u.pos||p.pos?`Posición ${u.pos||p.pos}`:"",u.tipo||"",u.nota||""].filter(Boolean).join(" · ");
+  $("#ubDetTbl").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th>Último movimiento</th></tr></thead><tbody>`+
+    (l.length?l.map(s=>`<tr><td class="code">${esc(s.k)}</td><td>${esc(s.descr)}</td><td class="num">${qBC(+s.base,s.ce,s.f,s.um)}</td><td>${fmtDT(s.ult)}</td></tr>`).join(""):'<tr><td colspan="4" class="muted">Vacía.</td></tr>')+"</tbody>";
+  const M=ub.movs.filter(m=>m.desde===u.cod||m.hacia===u.cod);
+  $("#ubDetMov").innerHTML=UBMH+"<tbody>"+(M.length?M.map(m=>ubMovRow(m,false)).join(""):'<tr><td colspan="9" class="muted">Sin movimientos en los últimos 60 días.</td></tr>')+"</tbody>";
+}
+function ubMovsRender(){
+  const M=ub.movs.filter(m=>ubDiaOk(m.t));
+  $("#ubMovs").innerHTML=UBMH+"<tbody>"+(M.length?M.map(m=>ubMovRow(m,true)).join(""):'<tr><td colspan="9" class="muted">No hay movimientos en el período elegido.</td></tr>')+"</tbody>";
+  $$("#ubMovs [data-uban]").forEach(b=>b.onclick=()=>{const m=ub.movs.find(x=>x.id===b.dataset.uban);if(!m)return;
+    confirmBox(`Anular el ${UBT[m.tipo][0].toLowerCase()} de ${esc(m.k)} (${esc(m.desde||"")}${m.desde&&m.hacia?" → ":""}${esc(m.hacia||"")}). Queda en el historial como anulado.`,async()=>{
+      try{await mrpc("cb_ubic_anular",{p_id:m.id});toast("Movimiento anulado");await ubRefresh(true)}catch(e){toast(e.message==="sin_stock"?"No se puede: ese producto ya se movió desde la ubicación de destino. Anula primero ese movimiento.":ubMsg(e))}},"#ubConfirm");
+    $("#ubConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
+}
+$("#ubDetX").onclick=()=>{ubSel=null;store.set("inv_ubsel",null);ubRender()};
+$("#ubRef").onclick=()=>ubRefresh(true);$("#ubQ").oninput=ubRender;$("#ubDia").onchange=()=>{store.set("inv_ubdia",$("#ubDia").value);ubMovsRender()};
+/* ---------- cargar ubicaciones ---------- */
+function ubFilasCarga(rows){
+  const R=rows.map(r=>r.map(c=>String(c==null?"":c).trim())).filter(r=>r.some(Boolean));let h=-1,C={cod:0,pasillo:-1,rack:-1,nivel:-1,pos:-1,tipo:-1,nota:-1};
+  for(let i=0;i<Math.min(R.length,10)&&h<0;i++){const r=R[i].map(c=>deacc(c));const f=re=>r.findIndex(x=>re.test(x));const c=f(/^(ubicacion|ubic|codigo|cod|location)/);
+    if(c>=0){h=i;C={cod:c,pasillo:f(/^(pasillo|calle|aisle)/),rack:f(/^(rack|estante|modulo)/),nivel:f(/^(nivel|altura|level|piso)/),pos:f(/^(posicion|pos\b|columna|hueco)/),tipo:f(/^tipo/),nota:f(/^(nota|obs)/)}}}
+  if(h<0&&R.some(r=>r.length>=4))C=Object.assign(C,{pasillo:1,rack:2,nivel:3});
+  const out=new Map(),cel=(r,k)=>C[k]>=0?(r[C[k]]||""):"";
+  for(const r of (h>=0?R.slice(h+1):R)){const cod=ubCod(cel(r,"cod"));if(!cod||cod.length>40)continue;const p=ubPartes(cod);
+    out.set(cod,{cod,pasillo:cel(r,"pasillo")||p.pasillo,rack:cel(r,"rack")||p.rack,nivel:cel(r,"nivel")||p.nivel,pos:cel(r,"pos")||p.pos,tipo:cel(r,"tipo"),nota:cel(r,"nota")})}
+  return [...out.values()];
+}
+function ubCargaVer(L){ubCargaL=L;const ok=L&&L.length;$("#ubCargaOk").disabled=!ok;
+  if(!ok){$("#ubCargaInfo").innerHTML='<span style="color:var(--bad)">No encontré ubicaciones. Pega una por fila o carga el Excel.</span>';return}
+  const pas=new Set(L.map(u=>u.pasillo)),nuevas=L.filter(u=>!(ub.ubic||[]).some(x=>x.cod===u.cod)).length,quitar=$("#ubReempl").checked?(ub.ubic||[]).filter(x=>!L.some(u=>u.cod===x.cod)).length:0;
+  $("#ubCargaInfo").innerHTML=`<b>${fmt(L.length)}</b> ubicaciones · ${fmt(pas.size)} pasillo${pas.size===1?"":"s"} · ${fmt(nuevas)} nueva${nuevas===1?"":"s"}${quitar?` · <span style="color:var(--warn)">${fmt(quitar)} quedarían inactivas</span>`:""}<br><span class="muted">Ejemplo: ${L.slice(0,4).map(u=>`${esc(u.cod)} (pasillo ${esc(u.pasillo||"—")}, rack ${esc(u.rack||"—")}, nivel ${esc(u.nivel||"—")})`).join(" · ")}</span>`}
+$("#ubCargaTog").onclick=()=>{const b=$("#ubCarga");b.hidden=!b.hidden;if(!b.hidden)$("#ubPaste").focus()};
+$("#ubCargaX").onclick=()=>{$("#ubCarga").hidden=true;ubCargaL=null;$("#ubCargaInfo").innerHTML="";$("#ubCargaOk").disabled=true};
+$("#ubPrev").onclick=()=>{const t=$("#ubPaste").value;ubCargaVer(ubFilasCarga(t.split(/\r?\n/).map(l=>l.split(l.includes("\t")?"\t":l.includes(";")?";":/\s{2,}|,/))))};
+$("#ubReempl").onchange=()=>{if(ubCargaL)ubCargaVer(ubCargaL)};
+$("#ubFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f)return;
+  try{const buf=await f.arrayBuffer();let rows;
+    if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf).replace(/^﻿/,"");const l0=txt.split("\n")[0];rows=csvFilas(txt,l0.includes("\t")?"\t":l0.includes(";")?";":",")}
+    else{const wb=XLSX.read(buf,{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""})}
+    ubCargaVer(ubFilasCarga(rows))}catch(er){toast("No se pudo leer el archivo. Prueba guardarlo como .xlsx o pega las filas.")}});
+$("#ubCargaOk").onclick=async()=>{if(!ubCargaL||!ubCargaL.length)return;const b=$("#ubCargaOk");b.disabled=true;
+  try{const r=await mrpc("cb_ubic_guardar",{p_lista:ubCargaL,p_reemplazar:$("#ubReempl").checked});toast(`Ubicaciones guardadas: ${fmt(r.activas)} activas`);
+    $("#ubCarga").hidden=true;$("#ubPaste").value="";ubCargaL=null;$("#ubCargaInfo").innerHTML="";await ubRefresh(true)}
+  catch(e){toast(ubMsg(e));b.disabled=false}};
+/* ---------- movimiento desde el panel ---------- */
+function ubMvForm(){const t=$("#ubMvTipo").value;$("#ubMvDesdeL").hidden=t==="ingreso";$("#ubMvHaciaL").hidden=t==="salida";
+  const it=pvFind($("#ubMvCod").value),d=ubCod($("#ubMvDesde").value),c=$("#ubMvCod").value.trim();
+  $("#ubMvQL").textContent=it&&conv(it)?"Cantidad ("+plural(it.ce).toLowerCase()+")":it?"Cantidad ("+umTxt(it.um)+")":"Cantidad";
+  const hay=t!=="ingreso"&&d&&it?(ubStockMap().get(d)||[]).find(s=>key(s.k)===key(it.cod)):null;
+  $("#ubMvInfo").innerHTML=!c?"":it?`<b>${esc(it.desc)}</b>${conv(it)?` <span class="muted">· 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</span>`:""}${t!=="ingreso"&&d?` · en ${esc(d)} hay ${hay?ubBul(hay):"0"}`:""}`:'<span style="color:var(--warn)">Ese código no está en la lista de productos</span>'}
+["#ubMvTipo","#ubMvDesde","#ubMvCod"].forEach(s=>$(s).addEventListener(s==="#ubMvTipo"?"change":"input",ubMvForm));
+$("#ubMovTog").onclick=()=>{const b=$("#ubMovBox");b.hidden=!b.hidden;if(!b.hidden){ubMvForm();$("#ubMvCod").focus()}};
+$("#ubMvOk").onclick=async()=>{const t=$("#ubMvTipo").value,it=pvFind($("#ubMvCod").value),q=num($("#ubMvQty").value),desde=t==="ingreso"?"":ubCod($("#ubMvDesde").value),hacia=t==="salida"?"":ubCod($("#ubMvHacia").value);
+  if(!it)return toast("Escribe un código de la lista de productos");if(q==null||q<=0)return toast("Escribe la cantidad");
+  if((t!=="ingreso"&&!desde)||(t!=="salida"&&!hacia))return toast("Falta la ubicación");
+  const b=$("#ubMvOk");b.disabled=true;
+  try{await mrpc("cb_ubic_mover_panel",{p_mov:{lid:newLid(),tipo:t,desde,hacia,k:it.cod,code:it.cod,desc:it.desc,qty:q,f:conv(it)?+it.f:1,ce:conv(it)?it.ce:"",um:umTxt(it.um)}});
+    toast(`${UBT[t][0]} registrado`);$("#ubMvCod").value="";$("#ubMvQty").value="";ubMvForm();await ubRefresh(true)}
+  catch(e){toast(ubMsg(e))}finally{b.disabled=false}};
+/* ---------- Excel: stock por ubicación (incluye las vacías) y movimientos ---------- */
+$("#ubXls").onclick=()=>{const sm=ubStockMap(),wb=XLSX.utils.book_new(),rows=[];
+  for(const u of ub.ubic||[]){const p=ubPartes(u.cod),base={"Ubicación":u.cod,"Pasillo":u.pasillo||p.pasillo,"Rack":u.rack||p.rack,"Nivel":u.nivel||p.nivel};const l=sm.get(u.cod)||[];
+    if(!l.length)rows.push(Object.assign({},base,{"Código":"","Descripción":"","Bulto":"","Cantidad (bultos)":"","Cantidad (unidad ERP)":"","Unidad ERP":"","Estado":"Vacía","Último movimiento":""}));
+    for(const s of l)rows.push(Object.assign({},base,{"Código":s.k,"Descripción":s.descr,"Bulto":s.ce&&+s.f!==1?s.ce:umTxt(s.um),"Cantidad (bultos)":(+s.base)/(+s.f||1),"Cantidad (unidad ERP)":+s.base,"Unidad ERP":umTxt(s.um),"Estado":"Ocupada","Último movimiento":fmtDT(s.ult)}))}
+  XLSX.utils.book_append_sheet(wb,sheetFrom(rows),"Stock por ubicación");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(ub.movs.map(m=>({"Fecha":fechaCL(ymd(new Date(m.t))),"Hora":hm24(m.t),"Tipo":(UBT[m.tipo]||[m.tipo])[0],"Desde":m.desde||"","Hacia":m.hacia||"","Código":m.k,"Descripción":m.descr||(pvFind(m.k)||{}).desc||"",
+    "Bulto":m.ce&&+m.f!==1?m.ce:umTxt(m.um),"Cantidad (bultos)":+m.qty,"Cantidad (unidad ERP)":(+m.qty)*(+m.f||1),"Unidad ERP":umTxt(m.um),"Quién":m.persona||"","Anulado":m.anulado?fmtDT(m.anulado)+" · "+(m.anulado_por||""):""}))),"Movimientos");
+  saveWb(wb,"Almacenamiento_"+ymd(new Date())+".xlsx")};
+
+/* =====================================================================
+   8 · ALMACENAMIENTO en el celular de bodega (permiso "ubic_mover")
+   ===================================================================== */
+var uc={tipo:store.get("inv_uctipo",null)}, ucData={ubic:[],stock:[],mis:[]}, ucSetU=new Set(), ucPend=store.get("inv_ucpend",[]), ucErr=[], ucCamI=null, ucCamT=null, ucLast={c:"",miss:99}, ucHold=false, ucOkUnk="", ucBusy=false;
+const ucSave=()=>store.set("inv_ucpend",ucPend);
+const UCTXT={ingreso:"Llega producto a una ubicación: escanea la ubicación de destino, el producto y la cantidad.",traslado:"Cambias un pallet de ubicación: origen, destino, producto y cantidad.",salida:"Sale producto de una ubicación (despacho o consumo): origen, producto y cantidad."};
+async function ucAbrir(){puVista="ubic";puestoApply();await dvCatalogo().catch(()=>{});await ucRefresh();ucTipo(uc.tipo,true);ucRender();ucEnviar()}
+async function ucRefresh(){try{const r=await prpc("cb_ubic_cel");ucData={ubic:r.ubic||[],stock:r.stock||[],mis:r.mis||[]};ucSetU=new Set(ucData.ubic.map(u=>u[0]))}
+  catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e;if(!e.net)toast(ubMsg(e))}}
+function ucHay(u,k){const s=ucData.stock.find(x=>x.u===u&&key(x.k)===key(k));return s?+s.base:0}
+function ucTipo(t,quieto){uc.tipo=t||null;store.set("inv_uctipo",uc.tipo);$$("#v-ubiccel [data-ut]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.ut===t));
+  $("#ucForm").hidden=!t;$("#ucTipoTxt").textContent=t?UCTXT[t]:"Elige qué vas a registrar.";if(!t)return;
+  $("#ucDesdeW").hidden=t==="ingreso";$("#ucHaciaW").hidden=t==="salida";
+  $("#ucDesdeEb").textContent="2 · Ubicación de origen";$("#ucHaciaEb").textContent=(t==="traslado"?"3":"2")+" · Ubicación de destino";
+  $("#ucSkuEb").textContent=(t==="traslado"?"4":"3")+" · Producto (SKU)";$("#ucQtyEb").textContent=(t==="traslado"?"5":"4")+" · Cantidad";
+  ucUbInfo("desde");ucUbInfo("hacia");if(!quieto)setTimeout(()=>focusSel($(t==="ingreso"?"#ucHacia":"#ucDesde")),60)}
+function ucUbInfo(w){const el=$(w==="desde"?"#ucDesdeInfo":"#ucHaciaInfo"),v=ubCod($(w==="desde"?"#ucDesde":"#ucHacia").value);if(!v){el.innerHTML="";return}
+  if(!ucSetU.has(v)){el.innerHTML=`<span style="color:var(--bad)">⚠ La ubicación <b>${esc(v)}</b> no está cargada. Revisa el código.</span>`;return}
+  const l=ucData.stock.filter(s=>s.u===v&&+s.base>1e-9);
+  el.innerHTML=!l.length?'<span class="muted">Vacía</span>':`<span class="muted">Tiene${w==="desde"?" (toca para elegir)":""}:</span>`+l.map(s=>{const it=ptFind(s.k)||{},f=+s.f||1;return `<button class="clrow" ${w==="desde"?`data-ucsku="${esc(s.k)}"`:"disabled"} style="margin-top:4px"><span class="code">${esc(s.k)}</span><span class="cd">${esc(s.descr||it.desc||"")}</span><span class="cs">${fmt2(+s.base/f)} ${esc(s.ce&&f!==1?plural(s.ce):umTxt(s.um))}</span></button>`}).join("");
+  $$("#ucDesdeInfo [data-ucsku]").forEach(b=>b.onclick=()=>{ucRead(b.dataset.ucsku)})}
+function ucUbOk(w){const inp=$(w==="desde"?"#ucDesde":"#ucHacia"),v=ubCod(inp.value);inp.value=v;ucUbInfo(w);
+  if(!v)return false;if(!ucSetU.has(v)){audio.beep(false);return false}audio.beep(true);return true}
+function ucSiguiente(w){const t=uc.tipo;if(w==="desde"&&t==="traslado")return focusSel($("#ucHacia"));focusSel($("#ucScan"))}
+["desde","hacia"].forEach(w=>{const inp=$(w==="desde"?"#ucDesde":"#ucHacia");
+  inp.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!inp.value.trim())return;e.preventDefault();if(ucUbOk(w))ucSiguiente(w);else focusSel(inp)}});
+  inp.addEventListener("change",()=>ucUbOk(w))});
+function ucItem(v){return ptFind(v)}
+function ucPend1(v){const it=ucItem(v),p=$("#ucPending");p.hidden=false;p.className="pending"+(it?"":" bad");const d=ubCod($("#ucDesde").value),f=it&&conv(it)?+it.f:1;
+  const hay=uc.tipo!=="ingreso"&&d&&ucSetU.has(d)?ucHay(d,it?it.cod:v):null;
+  p.innerHTML=`<div class="d">${it?esc(it.desc||"(sin descripción)"):"Este código NO está en la lista de productos"}</div><div class="small muted">${esc(v)}${it&&it.cod!==v?" → "+esc(it.cod):""}${hay!=null?` · en ${esc(d)} hay <b>${fmt2(hay/f)}</b> ${esc(it&&conv(it)?plural(it.ce):umTxt(it?it.um:""))}`:""}</div>`+convHint(it,"Ingresa","Digita los <b>kg</b>.");
+  $("#ucQtyEb").textContent=qtyLabel(it,uc.tipo==="traslado"?5:4);return it}
+function ucRead(raw){let v=norm(raw);if(!v)return;
+  if(!ptFind(v)&&esTextoBusqueda(v)){const res=buscarNombre(ptItems(),v),box=$("#ucSugg");box.hidden=false;
+    box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(v)}"</span></button>`;
+    $$("#ucSugg [data-n]").forEach(b=>b.onclick=()=>{box.hidden=true;ucRead(res[+b.dataset.n].cod)});return}
+  $("#ucSugg").hidden=true;v=codeStr(v);$("#ucScan").value=v;const it=ucPend1(v);
+  if(!it&&ptItems().length&&ucOkUnk!==v){codeAlert(v,()=>focusSel($("#ucScan")),()=>{ucOkUnk=v;focusSel($("#ucQty"))});return}
+  focusSel($("#ucQty"))}
+$("#ucScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();ucRead(e.target.value)}});
+$("#ucQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();ucAdd()}});
+$("#ucOk").onclick=()=>ucAdd();
+$$("#v-ubiccel [data-ut]").forEach(b=>b.onclick=()=>ucTipo(b.dataset.ut));
+function ucAdd(){const t=uc.tipo;if(!t)return toast("Elige Ingreso, Traslado o Salida");
+  const desde=t==="ingreso"?"":ubCod($("#ucDesde").value),hacia=t==="salida"?"":ubCod($("#ucHacia").value);
+  if(t!=="ingreso"&&!desde){toast("Escanea la ubicación de origen");return focusSel($("#ucDesde"))}
+  if(t!=="salida"&&!hacia){toast("Escanea la ubicación de destino");return focusSel($("#ucHacia"))}
+  for(const [w,v] of [["desde",desde],["hacia",hacia]])if(v&&!ucSetU.has(v)){toast(`La ubicación ${v} no está cargada`);return focusSel($(w==="desde"?"#ucDesde":"#ucHacia"))}
+  if(desde&&desde===hacia){toast("El origen y el destino son la misma ubicación");return focusSel($("#ucHacia"))}
+  const code=codeStr($("#ucScan").value);if(!code){toast("Escanea o digita el producto");return focusSel($("#ucScan"))}
+  const q=num($("#ucQty").value);if(q==null||q<=0){toast("Digita la cantidad");return focusSel($("#ucQty"))}
+  const it=ucItem(code);if(!it&&ptItems().length&&ucOkUnk!==code){codeAlert(code,()=>focusSel($("#ucScan")),()=>{ucOkUnk=code;ucAdd()});return}
+  const f=it&&conv(it)?+it.f:1;
+  if(desde){const pend=ucPend.filter(m=>m.desde===desde&&key(m.k)===key(it?it.cod:code)).reduce((a,m)=>a+m.qty*m.f,0)-ucPend.filter(m=>m.hacia===desde&&key(m.k)===key(it?it.cod:code)).reduce((a,m)=>a+m.qty*m.f,0);
+    const hay=ucHay(desde,it?it.cod:code)-pend;if(q*f>hay+1e-9){audio.beep(false);toast(`En ${desde} hay solo ${fmt2(hay/f)}${it&&conv(it)?" "+plural(it.ce).toLowerCase():""}. Revisa la ubicación o la cantidad.`);return focusSel($("#ucQty"))}}
+  const m={lid:newLid(),tipo:t,desde,hacia,k:it?it.cod:code,code,desc:it?it.desc:"",qty:q,f,ce:it&&conv(it)?it.ce:"",um:it?umTxt(it.um):"",persona:PST.persona||"",t:new Date().toISOString()};
+  ucPend.push(m);ucSave();audio.beep(true);toast(`✓ ${UBT[t][0]}: ${fmt2(q)} ${m.ce?plural(m.ce).toLowerCase():m.um} de ${m.k}${desde?" desde "+desde:""}${hacia?" a "+hacia:""}`);
+  ["#ucDesde","#ucHacia","#ucScan","#ucQty"].forEach(s=>$(s).value="");$("#ucPending").hidden=true;$("#ucDesdeInfo").innerHTML="";$("#ucHaciaInfo").innerHTML="";ucOkUnk="";
+  ucRender();ucEnviar();if(ucCamI)ucSetCam(t==="ingreso"?"hacia":"desde");else setTimeout(()=>focusSel($(t==="ingreso"?"#ucHacia":"#ucDesde")),60)}
+async function ucEnviar(){if(ucBusy||!ucPend.length)return;if(navigator.onLine===false){ucRender();return}ucBusy=true;let n=0;
+  try{while(ucPend.length){const m=ucPend[0];const d=Object.assign({},m);delete d.t;
+      try{await prpc("cb_ubic_mover",{p_mov:d});ucPend.shift();ucSave();n++}
+      catch(e){if(e.net)break;ucPend.shift();ucSave();ucErr.unshift(Object.assign({},m,{err:ubMsg(e)}));audio.beep(false);toast("⚠ No se registró: "+ubMsg(e))}}}
+  finally{ucBusy=false;if(n||ucErr.length)await ucRefresh().catch(()=>{});ucRender()}}
+setInterval(()=>{if(puestoMode()&&ucPend.length)ucEnviar()},20000);
+setInterval(async()=>{if(puestoMode()&&puVista==="ubic"&&!document.hidden&&!ucPend.length&&!ucBusy){const a=document.activeElement;if(a&&a.closest&&a.closest("#ucForm"))return;await ucRefresh().catch(()=>{});ucRender()}},30000);
+addEventListener("online",()=>{if(puestoMode())ucEnviar()});
+function ucRender(){
+  const P=ucPend.map(m=>Object.assign({},m,{pend:true})),E=ucErr.slice(0,10),M=(ucData.mis||[]).filter(m=>!ucPend.some(p=>p.lid===m.lid));
+  const fila=(m,est)=>{const f=+m.f||1,[tt,c]=UBT[m.tipo]||[m.tipo,"p-mut"],it=ptFind(m.k)||{};return `<tr${m.anulado?' style="opacity:.55"':""}><td style="white-space:normal;width:100%"><div><span class="pill ${c}">${tt}</span> <b>${esc(m.desde||"")}${m.desde&&m.hacia?" → ":""}${esc(m.hacia||"")}</b></div>
+    <div style="font-weight:600;font-size:13px">${esc(m.descr||m.desc||it.desc||m.k)}</div><div class="small muted">${esc(m.k)} · ${hm24(m.t)}${est}</div></td>
+    <td class="num" style="white-space:nowrap"><b>${fmt2(+m.qty)}</b> <span class="small muted">${esc(m.ce&&f!==1?plural(m.ce):umTxt(m.um))}</span>${m.ce&&f!==1?`<span class="sub">= ${fmt2(m.qty*f)} ${esc(umTxt(m.um))}</span>`:""}</td></tr>`};
+  $("#ucInfo").textContent=`${fmt(M.filter(m=>!m.anulado&&new Date(m.t).toDateString()===new Date().toDateString()).length+P.length)} hoy`;
+  $("#ucList").innerHTML=(P.map(m=>fila(m," · ⏳ por enviar")).join("")+E.map(m=>fila(m,` · <span style="color:var(--bad)">no se registró: ${esc(m.err)}</span>`)).join("")+M.map(m=>fila(m,m.anulado?" · anulado por el supervisor":" · ✓ registrado")).join(""))||'<tr><td class="muted">Todavía no registras movimientos hoy.</td></tr>';
+  $("#ucSync").innerHTML=ucPend.length?`<span class="sync s-wait">⏳ ${fmt(ucPend.length)} movimiento${ucPend.length>1?"s":""} por enviar</span> <button class="btn sm" id="ucGo">Enviar ahora</button>`:"";
+  if($("#ucGo"))$("#ucGo").onclick=ucEnviar;
+}
+/* cámara: ubicación de origen, de destino o producto */
+const UCCAM={desde:"Leyendo ubicación de origen",hacia:"Leyendo ubicación de destino",sku:"Leyendo producto"};
+function ucSetCam(t){ucCamT=t;$("#ucCamT").textContent=UCCAM[t]||"Leyendo";$("#ucCamMsg").textContent=t==="sku"?"Apunta al código del producto.":"Apunta a la etiqueta de la ubicación."}
+async function ucOpenCam(t){
+  if(typeof Html5Qrcode==="undefined")return toast("El lector de cámara no cargó. Revisa la conexión.");
+  ucSetCam(t);if(ucCamI){$("#ucCamWrap").scrollIntoView({block:"start",behavior:"smooth"});return}
+  $("#ucCamWrap").hidden=false;$("#ucCamMsg").textContent="Pidiendo permiso de cámara…";
+  try{ucCamI=await iniciarLector("ucReader",txt=>{txt=norm(txt);if(!txt||ucHold||calertOpen())return;if(txt===ucLast.c&&ucLast.miss<10)return;ucLast={c:txt,miss:0};
+      if(ucCamT==="sku"){ucRead(txt);return}
+      const w=ucCamT,inp=$(w==="desde"?"#ucDesde":"#ucHacia");inp.value=txt;if(ucUbOk(w)){if(w==="desde"&&uc.tipo==="traslado")ucSetCam("hacia");else ucSetCam("sku")}},()=>{ucLast.miss++});
+    ucSetCam(t);$("#ucCamWrap").scrollIntoView({block:"start",behavior:"smooth"})}
+  catch(e){ucCamI=null;$("#ucCamWrap").hidden=true;toast("No se pudo abrir la cámara. Revisa el permiso de cámara del navegador.")}
+}
+async function ucStopCam(){if(ucCamI){await detenerLector(ucCamI);ucCamI=null}ucHold=false;const w=$("#ucCamWrap");if(w)w.hidden=true}
+$$("#v-ubiccel [data-ucam]").forEach(b=>b.onclick=()=>ucOpenCam(b.dataset.ucam));$("#ucCamStop").onclick=ucStopCam;
+
 updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
@@ -7705,6 +8300,6 @@ if(puestoMode())puestoInit();else checkMovLink().then(mv=>{if(mv)return;if(movOn
 if(nubeOn())refreshNube(true);
 if(cfg.dirty)setTimeout(syncNow,1500);
 const h=(location.hash||"").slice(1);
-if(!movOn()&&!_qMov&&!puestoMode())show(isOp()?"contar":["erp","mp","resultado","pt","devol","permisos","prov"].includes(h)?h:"erp");
+if(!movOn()&&!_qMov&&!puestoMode())show(isOp()?"contar":["erp","mp","resultado","pt","devol","permisos","prov","ubic"].includes(h)?h:"erp");
 </script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){const had=!!navigator.serviceWorker.controller;let rl=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(had&&!rl){rl=true;location.reload()}});addEventListener("load",()=>navigator.serviceWorker.register("sw.js").then(r=>{r.update();setInterval(()=>r.update(),30*60*1000)}).catch(()=>{}))}</script></body></html>
