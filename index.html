@@ -5939,8 +5939,11 @@ $("#mpListBox").open=store.get("inv_mplist",false);
 $("#mpListBox").addEventListener("toggle",()=>store.set("inv_mplist",$("#mpListBox").open));
 /* Línea de solicitud antigua sin conversión (p. ej. ["230125",3,"…","un","",1], de antes de cargar la equivalencia):
    la cantidad se lee en bultos, como en todas las lecturas (3 ROLLOS = 90 m). Las que ya traen conversión no cambian. */
+// Solo se toca la línea que dice explícitamente "un" en un producto cuya unidad del ERP NO es "un" (m, kg…).
+// Las líneas cortas ["140101",100] ya vienen en la unidad del ERP (100 kg) y no se cambian.
 function solFix(arr){return Array.isArray(arr)?arr.map(x=>{if(!Array.isArray(x))return x;const [cod,q,desc,um,ce,f]=x;if(ce&&+f>0&&+f!==1)return x;
-  const d=convFix({k:cod,code:cod,um:um||""});return d.ce&&+d.f>0&&+d.f!==1?[cod,(+q||0)*d.f,desc,d.um||um,d.ce,d.f]:x}):arr}
+  if(!um||UMN(um)!=="un")return x;
+  const d=convFix({k:cod,code:cod,um:""});return d.ce&&+d.f>0&&+d.f!==1&&d.um&&UMN(d.um)!=="un"?[cod,(+q||0)*d.f,desc,d.um,d.ce,d.f]:x}):arr}
 function mpSolOf(id){const m=movById(id);return m&&m.sol?solFix(m.sol):null}
 function mpRows(id){
   const ls=(movLect[id]||[]).map(convFix), map=new Map(), sol=mpSolOf(id);
