@@ -189,6 +189,7 @@ body.prodv .supOnly{display:none!important}
 .solRow input{width:64px;padding:4px 6px;text-align:right}
 .mpLeft{display:flex;flex-direction:column;gap:16px;min-width:0}.mpMain{min-width:0;display:flex;flex-direction:column;gap:16px}
 body:has(#v-mp:not([hidden])) .wrap,body:has(#v-pt:not([hidden])) .wrap{max-width:1720px}
+body:has(#v-ubic:not([hidden])) .wrap{max-width:none}   /* almacenamiento: el mapa usa todo el ancho de la pantalla */
 .mpList{display:flex;flex-direction:column;gap:8px;max-height:62vh;overflow:auto}
 .mpItem{border:1px solid var(--line);border-radius:9px;padding:9px 10px;display:flex;flex-direction:column;gap:5px;background:var(--panel);cursor:pointer}
 .mpItem:hover{border-color:var(--primary)}.mpItem.sel{border:2px solid var(--primary);background:var(--info-bg)}
