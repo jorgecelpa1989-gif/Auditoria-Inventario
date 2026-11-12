@@ -189,7 +189,8 @@ body.prodv .supOnly{display:none!important}
 .solRow input{width:64px;padding:4px 6px;text-align:right}
 .mpLeft{display:flex;flex-direction:column;gap:16px;min-width:0}.mpMain{min-width:0;display:flex;flex-direction:column;gap:16px}
 body:has(#v-mp:not([hidden])) .wrap,body:has(#v-pt:not([hidden])) .wrap{max-width:1720px}
-body:has(#v-ubic:not([hidden])) .wrap{max-width:none}   /* almacenamiento: el mapa usa todo el ancho de la pantalla */
+body:has(#v-ubic:not([hidden])) .wrap{max-width:none;min-width:0;width:100%;margin:0;box-sizing:border-box}   /* almacenamiento: el mapa usa todo el ancho de la pantalla */
+#v-ubic,#v-ubic>.card,.ubMapa,.ubPas{min-width:0;max-width:100%}   /* el desplazamiento horizontal queda dentro de cada hilera, no en la página */
 .mpList{display:flex;flex-direction:column;gap:8px;max-height:62vh;overflow:auto}
 .mpItem{border:1px solid var(--line);border-radius:9px;padding:9px 10px;display:flex;flex-direction:column;gap:5px;background:var(--panel);cursor:pointer}
 .mpItem:hover{border-color:var(--primary)}.mpItem.sel{border:2px solid var(--primary);background:var(--info-bg)}
@@ -214,10 +215,10 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .ubMapa{display:flex;flex-direction:column;gap:14px;margin-top:10px}
 .ubPasT{font:600 13px var(--font);margin-bottom:6px}
 .ubRacks{display:flex;gap:3px;overflow-x:auto;padding-bottom:6px}
-.ubRack{display:flex;flex-direction:column;gap:2px;min-width:48px}
+.ubRack{display:flex;flex-direction:column;gap:2px;flex:1 0 38px;min-width:38px;max-width:70px}
 .ubRackT{font:600 10px var(--mono);color:var(--muted);text-align:center}
-.ubCell{border:1px solid var(--line);border-radius:5px;background:var(--bg);padding:2px 3px;text-align:center;cursor:pointer;height:34px;display:flex;flex-direction:column;justify-content:center;gap:0;font:10px var(--font);color:var(--ink);overflow:hidden;white-space:nowrap}
-.ubCell .c{font:600 10px var(--mono);color:var(--muted)}
+.ubCell{border:1px solid var(--line);border-radius:5px;background:var(--bg);padding:2px 1px;text-align:center;cursor:pointer;height:34px;display:flex;flex-direction:column;justify-content:center;gap:0;font:10px var(--font);color:var(--ink);overflow:hidden;white-space:nowrap}
+.ubCell .c{font:600 9.5px var(--mono);color:var(--muted);letter-spacing:-.02em}
 .ubCell.occ{background:var(--ok-bg);border-color:var(--ok)}
 .ubCell.occ .c{color:var(--ok)}
 .ubCell.hit{outline:3px solid var(--warn);outline-offset:-1px}
