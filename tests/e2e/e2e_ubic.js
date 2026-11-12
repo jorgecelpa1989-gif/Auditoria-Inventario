@@ -50,7 +50,7 @@ const hay=(u,k)=>sql(`select cb_ubic_hay('${u}','${k}')`);
  await a.click('#ubMovTog');await a.selectOption('#ubMvTipo','ingreso');await a.fill('#ubMvHacia','a-01-1');await a.fill('#ubMvCod','140101');await a.fill('#ubMvQty','10');await a.waitForTimeout(200);
  check(/SACO HARINA/.test(await a.textContent('#ubMvInfo'))&&/sacos/.test(await a.textContent('#ubMvQL')),'Registrar desde el panel: reconoce el producto y pide sacos');
  await a.click('#ubMvOk');await a.waitForTimeout(2500);
- check(hay('A-01-1','140101')==='250'&&/140101/.test(await a.textContent('#ubMapa [data-ub="A-01-1"]'))&&/10 SACOS/.test(await a.textContent('#ubMapa [data-ub="A-01-1"]')),'Ingreso desde el panel: A-01-1 muestra 140101 · 10 SACOS');
+ check(hay('A-01-1','140101')==='250'&&/140101/.test(await a.getAttribute('#ubMapa [data-ub="A-01-1"]','title'))&&/10 SACOS/.test(await a.getAttribute('#ubMapa [data-ub="A-01-1"]','title'))&&/\bocc\b/.test(await a.getAttribute('#ubMapa [data-ub="A-01-1"]','class'))&&/^A-01-1\s*10$/.test((await a.textContent('#ubMapa [data-ub="A-01-1"]')).trim()),'Ingreso desde el panel: A-01-1 en verde con 10 (globo: 140101 · 10 SACOS)');
  // ---------- Celular de bodega ----------
  const [cid,ct]=usr('Bodega Ubic','Bodega',['ubic_mover']);
  const cc=await b.newContext({...devices['Pixel 7'],timezoneId:'America/Santiago'});await route(cc);const m=await cc.newPage();m.on('pageerror',x=>errs.push('cel: '+x.message));
@@ -75,7 +75,7 @@ const hay=(u,k)=>sql(`select cb_ubic_hay('${u}','${k}')`);
  check(hay('B-01-1','140101')==='0','Salida de los 4 sacos: B-01-1 queda vacía');
  // ---------- Panel ve todo ----------
  await a.click('#ubRef');await a.waitForTimeout(2500);
- check(/vacía/.test(await a.textContent('#ubMapa [data-ub="B-01-1"]'))&&/6 SACOS/.test(await a.textContent('#ubMapa [data-ub="A-01-1"]')),'Panel: A-01-1 con 6 SACOS y B-01-1 vacía');
+ check(/vacía/.test(await a.getAttribute('#ubMapa [data-ub="B-01-1"]','title'))&&!/\bocc\b/.test(await a.getAttribute('#ubMapa [data-ub="B-01-1"]','class'))&&/6 SACOS/.test(await a.getAttribute('#ubMapa [data-ub="A-01-1"]','title')),'Panel: A-01-1 con 6 SACOS (verde) y B-01-1 vacía (sin color)');
  const mvT=await a.textContent('#ubMovs');check(/Ingreso/.test(mvT)&&/Traslado/.test(mvT)&&/Salida/.test(mvT)&&/JUAN/.test(mvT),'Movimientos de hoy: ingreso, traslado y salida con quién');
  await a.fill('#ubQ','harina');await a.waitForTimeout(300);
  check(/A-01-1/.test(await a.textContent('#ubDonde'))&&/Total en bodega/.test(await a.textContent('#ubDonde'))&&(await a.$$('#ubMapa .ubCell.hit')).length===1,'Buscar "harina": dice dónde está y marca la ubicación en el mapa');
