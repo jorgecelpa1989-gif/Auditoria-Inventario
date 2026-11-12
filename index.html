@@ -8055,7 +8055,7 @@ $("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const
 $("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;
 $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
 /* =====================================================================
-   8 · ALMACENAMIENTO Y UBICACIONES
+   6 · ALMACENAMIENTO Y UBICACIONES
    Panel: mapa de la bodega (pasillo · rack · nivel) con lo que hay en cada ubicación, dónde está cada
    producto, historial y Excel. Celular de bodega (permiso de usuario "ubic_mover"): registra cada
    ingreso, traslado o salida con ubicación, código y cantidad en bultos (con su conversión).
@@ -8182,7 +8182,10 @@ $("#ubFile").addEventListener("change",async e=>{const f=e.target.files&&e.targe
     if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf).replace(/^﻿/,"");const l0=txt.split("\n")[0];rows=csvFilas(txt,l0.includes("\t")?"\t":l0.includes(";")?";":",")}
     else{const wb=XLSX.read(buf,{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""})}
     ubCargaVer(ubFilasCarga(rows))}catch(er){toast("No se pudo leer el archivo. Prueba guardarlo como .xlsx o pega las filas.")}});
-$("#ubCargaOk").onclick=async()=>{if(!ubCargaL||!ubCargaL.length)return;const b=$("#ubCargaOk");b.disabled=true;
+$("#ubCargaOk").onclick=async()=>{if(!ubCargaL||!ubCargaL.length)return;const b=$("#ubCargaOk");
+  if($("#ubReempl").checked){const quitar=(ub.ubic||[]).filter(x=>!ubCargaL.some(u=>u.cod===x.cod)).length;
+    if(quitar&&!confirm(`Vas a REEMPLAZAR la lista: ${quitar} ${quitar===1?"ubicación actual":"ubicaciones actuales"} quedará${quitar===1?"":"n"} inactiva${quitar===1?"":"s"} y saldrá${quitar===1?"":"n"} del mapa (su historial se guarda).\n\nSi solo quieres AGREGAR ubicaciones nuevas, cancela y desmarca "Reemplazar la lista".\n\n¿Continuar?`))return}
+  b.disabled=true;
   try{const r=await mrpc("cb_ubic_guardar",{p_lista:ubCargaL,p_reemplazar:$("#ubReempl").checked});toast(`Ubicaciones guardadas: ${fmt(r.activas)} activas`);
     $("#ubCarga").hidden=true;$("#ubPaste").value="";ubCargaL=null;$("#ubCargaInfo").innerHTML="";await ubRefresh(true)}
   catch(e){toast(ubMsg(e));b.disabled=false}};
@@ -8212,9 +8215,9 @@ $("#ubXls").onclick=()=>{const sm=ubStockMap(),wb=XLSX.utils.book_new(),rows=[];
   saveWb(wb,"Almacenamiento_"+ymd(new Date())+".xlsx")};
 
 /* =====================================================================
-   8 · ALMACENAMIENTO en el celular de bodega (permiso "ubic_mover")
+   6 · ALMACENAMIENTO en el celular de bodega (permiso "ubic_mover")
    ===================================================================== */
-var uc={tipo:store.get("inv_uctipo",null)}, ucData={ubic:[],stock:[],mis:[]}, ucSetU=new Set(), ucPend=store.get("inv_ucpend",[]), ucErr=[], ucCamI=null, ucCamT=null, ucLast={c:"",miss:99}, ucHold=false, ucOkUnk="", ucBusy=false;
+var uc={tipo:store.get("inv_uctipo",null)}, ucData={ubic:[],stock:[],mis:[]}, ucSetU=new Set(), ucPend=store.get("inv_ucpend",[]), ucErr=store.get("inv_ucerr",[]).filter(m=>Date.now()-Date.parse(m.t||0)<36*3600e3), ucCamI=null, ucCamT=null, ucLast={c:"",miss:99}, ucHold=false, ucOkUnk="", ucBusy=false;
 const ucSave=()=>store.set("inv_ucpend",ucPend);
 const UCTXT={ingreso:"Llega producto a una ubicación: escanea la ubicación de destino, el producto y la cantidad.",traslado:"Cambias un pallet de ubicación: origen, destino, producto y cantidad.",salida:"Sale producto de una ubicación (despacho o consumo): origen, producto y cantidad."};
 async function ucAbrir(){puVista="ubic";puestoApply();await dvCatalogo().catch(()=>{});await ucRefresh();ucTipo(uc.tipo,true);ucRender();ucEnviar()}
@@ -8270,11 +8273,17 @@ function ucAdd(){const t=uc.tipo;if(!t)return toast("Elige Ingreso, Traslado o S
   ucPend.push(m);ucSave();audio.beep(true);toast(`✓ ${UBT[t][0]}: ${fmt2(q)} ${m.ce?plural(m.ce).toLowerCase():m.um} de ${m.k}${desde?" desde "+desde:""}${hacia?" a "+hacia:""}`);
   ["#ucDesde","#ucHacia","#ucScan","#ucQty"].forEach(s=>$(s).value="");$("#ucPending").hidden=true;$("#ucDesdeInfo").innerHTML="";$("#ucHaciaInfo").innerHTML="";ucOkUnk="";
   ucRender();ucEnviar();if(ucCamI)ucSetCam(t==="ingreso"?"hacia":"desde");else setTimeout(()=>focusSel($(t==="ingreso"?"#ucHacia":"#ucDesde")),60)}
-async function ucEnviar(){if(ucBusy||!ucPend.length)return;if(navigator.onLine===false){ucRender();return}ucBusy=true;let n=0;
+const UC_RECHAZO=/^(sin_stock|ubicacion_no_existe|misma_ubicacion|cantidad_invalida|datos_invalidos|falta_ubicacion)$/;
+var ucAviso="",ucAvisoT=0;
+async function ucEnviar(){if(ucBusy||!ucPend.length)return;ucAviso="";const e0=ucErr.length;if(navigator.onLine===false){ucRender();return}ucBusy=true;let n=0;
   try{while(ucPend.length){const m=ucPend[0];const d=Object.assign({},m);delete d.t;
       try{await prpc("cb_ubic_mover",{p_mov:d});ucPend.shift();ucSave();n++}
-      catch(e){if(e.net)break;ucPend.shift();ucSave();ucErr.unshift(Object.assign({},m,{err:ubMsg(e)}));audio.beep(false);toast("⚠ No se registró: "+ubMsg(e))}}}
-  finally{ucBusy=false;if(n||ucErr.length)await ucRefresh().catch(()=>{});ucRender()}}
+      catch(e){if(e.net)break;
+        // Solo se descarta lo que el servidor rechaza por el movimiento mismo (no hay esa cantidad, ubicación inexistente…).
+        // Sesión liberada, usuario inactivo, permiso quitado o error del servidor: el movimiento se QUEDA en la cola y se reintenta.
+        if(!UC_RECHAZO.test(e.message||"")){ucAviso=ubMsg(e);if(!ucAvisoT||Date.now()-ucAvisoT>60000){ucAvisoT=Date.now();audio.beep(false);toast("⚠ Movimientos guardados en el celular, sin enviar: "+ucAviso)}break}
+        ucPend.shift();ucSave();ucErr.unshift(Object.assign({},m,{err:ubMsg(e)}));ucErr=ucErr.slice(0,30);store.set("inv_ucerr",ucErr);audio.beep(false);toast("⚠ No se registró: "+ubMsg(e))}}}
+  finally{ucBusy=false;if(n||ucErr.length!==e0)await ucRefresh().catch(()=>{});ucRender()}}
 setInterval(()=>{if(puestoMode()&&ucPend.length)ucEnviar()},20000);
 setInterval(async()=>{if(puestoMode()&&puVista==="ubic"&&!document.hidden&&!ucPend.length&&!ucBusy){const a=document.activeElement;if(a&&a.closest&&a.closest("#ucForm"))return;await ucRefresh().catch(()=>{});ucRender()}},30000);
 addEventListener("online",()=>{if(puestoMode())ucEnviar()});
@@ -8285,7 +8294,7 @@ function ucRender(){
     <td class="num" style="white-space:nowrap"><b>${fmt2(+m.qty)}</b> <span class="small muted">${esc(m.ce&&f!==1?plural(m.ce):umTxt(m.um))}</span>${m.ce&&f!==1?`<span class="sub">= ${fmt2(m.qty*f)} ${esc(umTxt(m.um))}</span>`:""}</td></tr>`};
   $("#ucInfo").textContent=`${fmt(M.filter(m=>!m.anulado&&new Date(m.t).toDateString()===new Date().toDateString()).length+P.length)} hoy`;
   $("#ucList").innerHTML=(P.map(m=>fila(m," · ⏳ por enviar")).join("")+E.map(m=>fila(m,` · <span style="color:var(--bad)">no se registró: ${esc(m.err)}</span>`)).join("")+M.map(m=>fila(m,m.anulado?" · anulado por el supervisor":" · ✓ registrado")).join(""))||'<tr><td class="muted">Todavía no registras movimientos hoy.</td></tr>';
-  $("#ucSync").innerHTML=ucPend.length?`<span class="sync s-wait">⏳ ${fmt(ucPend.length)} movimiento${ucPend.length>1?"s":""} por enviar</span> <button class="btn sm" id="ucGo">Enviar ahora</button>`:"";
+  $("#ucSync").innerHTML=ucPend.length?`<span class="sync s-wait">⏳ ${fmt(ucPend.length)} movimiento${ucPend.length>1?"s":""} por enviar (guardado${ucPend.length>1?"s":""} en el celular)</span> <button class="btn sm" id="ucGo">Enviar ahora</button>${ucAviso?`<div class="small" style="color:var(--bad);margin-top:4px">No se pudo enviar: ${esc(ucAviso)}</div>`:""}`:"";
   if($("#ucGo"))$("#ucGo").onclick=ucEnviar;
 }
 /* cámara: ubicación de origen, de destino o producto */
