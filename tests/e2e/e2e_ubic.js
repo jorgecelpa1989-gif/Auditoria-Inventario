@@ -73,14 +73,27 @@ const hay=(u,k)=>sql(`select cb_ubic_hay('${u}','${k}')`);
  check(/Traslado/.test(await m.textContent('#ucList'))&&/registrado/.test(await m.textContent('#ucList')),'Celular: aparece en "Mis movimientos" como registrado');
  await m.click('[data-ut="salida"]');await m.fill('#ucDesde','B-01-1');await m.press('#ucDesde','Enter');await m.fill('#ucScan','140101');await m.press('#ucScan','Enter');await m.fill('#ucQty','4');await m.click('#ucOk');await m.waitForTimeout(2500);
  check(hay('B-01-1','140101')==='0','Salida de los 4 sacos: B-01-1 queda vacía');
+ // Cola del celular: si el servidor rechaza por permiso/sesión, el movimiento NO se pierde; se envía al volver el permiso
+ rpc('cb_u_guardar',{p_clave:ADMIN,p_id:cid,p_nombre:'Bodega Ubic',p_area:'Bodega',p_permisos:['pt_recibir'],p_activo:true});
+ await m.click('[data-ut="ingreso"]');await m.fill('#ucHacia','A-02-1');await m.press('#ucHacia','Enter');await m.fill('#ucScan','140101');await m.press('#ucScan','Enter');await m.fill('#ucQty','2');await m.click('#ucOk');await m.waitForTimeout(2500);
+ const cola=await m.evaluate(()=>JSON.parse(localStorage.getItem('inv_ucpend')||'[]').length);
+ check(cola===1&&sql("select count(*) from cb_ubic_mov where hacia='A-02-1'")==='0'&&/sin enviar|por enviar/.test(await m.textContent('#ucSync')),'Sin permiso en el servidor: el movimiento queda guardado en el celular (no se pierde) y lo avisa');
+ rpc('cb_u_guardar',{p_clave:ADMIN,p_id:cid,p_nombre:'Bodega Ubic',p_area:'Bodega',p_permisos:['ubic_mover'],p_activo:true});
+ await m.click('#ucGo');await m.waitForTimeout(2500);
+ check(hay('A-02-1','140101')==='50'&&await m.evaluate(()=>JSON.parse(localStorage.getItem('inv_ucpend')||'[]').length)===0,'Al volver el permiso, "Enviar ahora" lo registra (2 sacos en A-02-1) y la cola queda vacía');
  // ---------- Panel ve todo ----------
  await a.click('#ubRef');await a.waitForTimeout(2500);
  check(/vacía/.test(await a.getAttribute('#ubMapa [data-ub="B-01-1"]','title'))&&!/\bocc\b/.test(await a.getAttribute('#ubMapa [data-ub="B-01-1"]','class'))&&/6 SACOS/.test(await a.getAttribute('#ubMapa [data-ub="A-01-1"]','title')),'Panel: A-01-1 con 6 SACOS (verde) y B-01-1 vacía (sin color)');
  const mvT=await a.textContent('#ubMovs');check(/Ingreso/.test(mvT)&&/Traslado/.test(mvT)&&/Salida/.test(mvT)&&/JUAN/.test(mvT),'Movimientos de hoy: ingreso, traslado y salida con quién');
  await a.fill('#ubQ','harina');await a.waitForTimeout(300);
- check(/A-01-1/.test(await a.textContent('#ubDonde'))&&/Total en bodega/.test(await a.textContent('#ubDonde'))&&(await a.$$('#ubMapa .ubCell.hit')).length===1,'Buscar "harina": dice dónde está y marca la ubicación en el mapa');
+ check(/A-01-1/.test(await a.textContent('#ubDonde'))&&/Total en bodega/.test(await a.textContent('#ubDonde'))&&(await a.$$('#ubMapa .ubCell.hit')).length===2,'Buscar "harina": dice dónde está y marca sus 2 ubicaciones en el mapa');
  await a.fill('#ubQ','');await a.click('#ubMapa [data-ub="A-01-1"]');await a.waitForTimeout(400);
  check(await a.isVisible('#ubDet')&&/150 kg/.test(await a.textContent('#ubDetTbl'))&&(await a.$$('#ubDetMov tbody tr')).length===2,'Detalle de A-01-1: 6 SACOS = 150 kg y su historial (ingreso y traslado)');
+ // Reemplazar la lista pide confirmación; al cancelar no cambia nada
+ let msgConf='';const h1=async d=>{msgConf=d.message();await d.dismiss()};a.once('dialog',h1);
+ await a.click('#ubCargaTog');await a.fill('#ubPaste','Z-01-1');await a.check('#ubReempl');await a.click('#ubPrev');await a.waitForTimeout(200);await a.click('#ubCargaOk');await a.waitForTimeout(800);
+ check(/REEMPLAZAR/.test(msgConf)&&/4 ubicaciones/.test(msgConf)&&sql("select count(*) from cb_ubic where activo")==='4','Reemplazar la lista pide confirmar (4 quedarían inactivas); al cancelar no cambia nada');
+ await a.uncheck('#ubReempl');await a.click('#ubCargaX');
  const [dl]=await Promise.all([a.waitForEvent('download',{timeout:5000}).catch(()=>null),a.click('#ubXls')]);
  check(!!dl&&/Almacenamiento_/.test(dl.suggestedFilename()),'Excel de stock por ubicación y movimientos');
  // anular la salida desde el panel
