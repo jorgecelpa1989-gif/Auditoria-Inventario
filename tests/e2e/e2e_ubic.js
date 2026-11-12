@@ -1,4 +1,4 @@
-// Módulo 8 · Almacenamiento y ubicaciones: servidor, panel y celular de bodega.
+// Módulo 6 · Almacenamiento y ubicaciones: servidor, panel y celular de bodega.
 const {chromium,devices}=require('playwright');const {execFileSync}=require('child_process');
 const PG=['-h','/var/lib/postgresql/cctest/sock','-p','55432','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'];
 const sql=q=>execFileSync('psql',[...PG,'-c',q],{encoding:'utf8'}).trim();
@@ -41,12 +41,12 @@ const hay=(u,k)=>sql(`select cb_ubic_hay('${u}','${k}')`);
  await a.goto(B+'#panel');await a.evaluate(([u,k])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:k,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
  await a.goto(B+'#ubic');await a.reload();await a.waitForTimeout(3000);
  const menu=await a.$$eval('#sideNav > *',els=>els.filter(e=>getComputedStyle(e).display!=='none').map(e=>e.textContent.replace(/\s+/g,' ').trim()).join(' | '));
- check(/Logística \| 3Inventario \| 4Logística inversa\d* \| 5Recepción proveedores \| 8Almacenamiento \| Producción/.test(menu),'Menú: "8 Almacenamiento" dentro de LOGÍSTICA');
+ check(/Logística \| 3Inventario \| 4Logística inversa\d* \| 5Recepción proveedores \| 6Almacenamiento \| Producción/.test(menu),'Menú: "6 Almacenamiento" dentro de LOGÍSTICA');
  check(await a.isVisible('#v-ubic')&&/Todavía no hay ubicaciones/.test(await a.textContent('#ubMapa')),'Sin ubicaciones: lo indica y ofrece cargarlas');
  await a.click('#ubCargaTog');await a.fill('#ubPaste','Ubicación\tPasillo\tRack\tNivel\nA-01-1\tA\t01\t1\nA-01-2\tA\t01\t2\nA-02-1\tA\t02\t1\nB-01-1\tB\t01\t1');await a.click('#ubPrev');await a.waitForTimeout(300);
- check(/4<\/b> ubicaciones · 2 pasillos · 4 nuevas/.test(await a.innerHTML('#ubCargaInfo')),'Revisar: 4 ubicaciones, 2 pasillos, 4 nuevas');
+ check(/4<\/b> ubicaciones · 2 hileras · 4 nuevas/.test(await a.innerHTML('#ubCargaInfo')),'Revisar: 4 ubicaciones, 2 hileras, 4 nuevas');
  await a.click('#ubCargaOk');await a.waitForTimeout(2500);
- check(sql("select count(*) from cb_ubic where activo")==='4'&&(await a.$$('#ubMapa [data-ub]')).length===4&&/Pasillo A/.test(await a.textContent('#ubMapa'))&&/Pasillo B/.test(await a.textContent('#ubMapa')),'Mapa: pasillos A y B con sus 4 ubicaciones');
+ check(sql("select count(*) from cb_ubic where activo")==='4'&&(await a.$$('#ubMapa [data-ub]')).length===4&&/Hilera A/.test(await a.textContent('#ubMapa'))&&/Hilera B/.test(await a.textContent('#ubMapa')),'Mapa: hileras A y B con sus 4 ubicaciones');
  await a.click('#ubMovTog');await a.selectOption('#ubMvTipo','ingreso');await a.fill('#ubMvHacia','a-01-1');await a.fill('#ubMvCod','140101');await a.fill('#ubMvQty','10');await a.waitForTimeout(200);
  check(/SACO HARINA/.test(await a.textContent('#ubMvInfo'))&&/sacos/.test(await a.textContent('#ubMvQL')),'Registrar desde el panel: reconoce el producto y pide sacos');
  await a.click('#ubMvOk');await a.waitForTimeout(2500);

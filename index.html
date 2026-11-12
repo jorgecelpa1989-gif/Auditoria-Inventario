@@ -213,13 +213,15 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .ubMapa{display:flex;flex-direction:column;gap:14px;margin-top:10px}
 .ubPasT{font:600 13px var(--font);margin-bottom:6px}
 .ubRacks{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px}
-.ubRack{display:flex;flex-direction:column;gap:4px;min-width:104px}
+.ubRack{display:flex;flex-direction:column;gap:3px;min-width:78px}
 .ubRackT{font:600 11px var(--mono);color:var(--muted);text-align:center}
-.ubCell{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:6px;text-align:left;cursor:pointer;min-height:62px;display:flex;flex-direction:column;gap:2px;font:12px var(--font);color:var(--ink)}
+.ubCell{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:6px;text-align:left;cursor:pointer;min-height:58px;display:flex;flex-direction:column;gap:1px;font:11px var(--font);color:var(--ink)}
 .ubCell .c{font:600 11px var(--mono);color:var(--muted)}
 .ubCell.occ{background:var(--info-bg);border-color:var(--primary)}
 .ubCell.hit{outline:3px solid var(--warn);outline-offset:-1px}
 .ubCell.sel{box-shadow:0 0 0 2px var(--accent) inset}
+.ubCell.pil{background:var(--chip);border-style:dashed;cursor:default;opacity:.7}
+.ubCell.off{opacity:.3}
 .ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
 .ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
 .ucTipos .btn[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -286,10 +288,10 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <button role="tab" data-v="resultado" aria-selected="false"><span class="num">3</span>Inventario</button>
   <button role="tab" data-v="devol" aria-selected="false"><span class="num">4</span>Logística inversa<span class="n alert" id="nDev" hidden>0</span></button>
   <button role="tab" data-v="prov" aria-selected="false"><span class="num">5</span>Recepción proveedores</button>
-  <button role="tab" data-v="ubic" aria-selected="false"><span class="num">8</span>Almacenamiento</button>
+  <button role="tab" data-v="ubic" aria-selected="false"><span class="num">6</span>Almacenamiento</button>
   <div class="navGrp">Producción</div>
-  <button role="tab" data-v="mp" aria-selected="false"><span class="num">6</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
-  <button role="tab" data-v="pt" aria-selected="false"><span class="num">7</span>Recepción PT</button>
+  <button role="tab" data-v="mp" aria-selected="false"><span class="num">7</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
+  <button role="tab" data-v="pt" aria-selected="false"><span class="num">8</span>Recepción PT</button>
 </nav>
 <div class="navScrim" id="navScrim" hidden></div>
 
@@ -843,7 +845,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
   <div class="ptMain">
   <div class="card">
-    <div class="eyebrow">7 · Recepción PT</div>
+    <div class="eyebrow">8 · Recepción PT</div>
     <div class="row"><h2 style="margin:0">Entrega de producción vs Recepción (bodega y retail)</h2><span class="sep"></span>
       <select id="ptDesde" style="flex:0 1 190px"><option value="d0" selected>Hoy</option></select>
       <button class="btn primary" id="ptTraer">Actualizar</button><button class="btn" id="ptExp">Excel</button><button class="btn" id="ptAddTog">＋ Agregar registro</button></div>
@@ -4337,17 +4339,17 @@ end $$;
 <!-- ============ 7 RECEPCIÓN DE PROVEEDORES ============ -->
 <section class="view" id="v-ubic" hidden>
   <div class="card">
-    <div class="row"><div class="eyebrow">8 · Almacenamiento y ubicaciones</div><span class="sep"></span><span class="small muted" id="ubAt"></span></div>
+    <div class="row"><div class="eyebrow">6 · Almacenamiento y ubicaciones</div><span class="sep"></span><span class="small muted" id="ubAt"></span></div>
     <div class="row"><h2 style="margin:0">Mapa de la bodega</h2><span class="sep"></span>
       <button class="btn primary" id="ubRef">Actualizar</button><button class="btn" id="ubXls">Excel</button><button class="btn" id="ubMovTog">＋ Registrar movimiento</button><button class="btn" id="ubCargaTog">Cargar ubicaciones</button></div>
     <div class="notice" id="ubNote" hidden></div>
     <div class="cbox" id="ubCarga" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Cargar las ubicaciones de la bodega</b>
-      <div class="small muted">Una ubicación por fila. Puede ser solo el código (ej. <b>A-01-2</b> = pasillo A, rack 01, nivel 2) o columnas <b>Ubicación · Pasillo · Rack · Nivel · Posición · Tipo</b> (con o sin encabezado).</div>
+      <div class="small muted">Una ubicación por fila. Puede ser solo el código (ej. <b>H0102</b> = hilera H, posición 01, nivel 2) o columnas <b>Ubicación · Hilera · Posición · Nivel · Tipo</b> (con o sin encabezado).</div>
       <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
         <label class="btn sm" style="cursor:pointer">📄 Cargar Excel o CSV<input id="ubFile" type="file" accept=".xlsx,.xls,.csv,.txt" hidden></label>
         <span class="small muted">o pega las filas copiadas desde Excel:</span></div>
-      <textarea id="ubPaste" rows="4" placeholder="A-01-1&#10;A-01-2&#10;B-01-1" style="width:100%;font:13px var(--mono)"></textarea>
+      <textarea id="ubPaste" rows="4" placeholder="H0101&#10;H0102&#10;H0103" style="width:100%;font:13px var(--mono)"></textarea>
       <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ubReempl"> Reemplazar la lista: las ubicaciones que no vengan quedan inactivas (solo si están vacías; su historial se guarda)</label>
       <div class="small" id="ubCargaInfo"></div>
       <div class="row" style="gap:8px"><button class="btn sm" id="ubPrev" type="button">Revisar</button><button class="btn primary" id="ubCargaOk" type="button" disabled>Guardar ubicaciones</button><button class="btn" id="ubCargaX" type="button">Cancelar</button></div>
@@ -8063,7 +8065,8 @@ const ubMsg=e=>({sin_stock:"No hay esa cantidad en la ubicación de origen.",ubi
   datos_invalidos:"Hay una fila sin código de ubicación o con datos inválidos.",sin_permiso:"Tu usuario no tiene permiso de Almacenamiento. Pídeselo al supervisor.",no_existe:"Ese movimiento ya no existe."}[e.message]
   ||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 22 (almacenamiento).":(typeof puestoMode==="function"&&puestoMode()?puMsg(e):movMsg(e))));
 /* A-01-2 → pasillo A, rack 01, nivel 2 (si la ubicación no trae sus columnas) */
-function ubPartes(cod){const p=String(cod||"").toUpperCase().split(/[-_. \/]+/).filter(Boolean);return {pasillo:p[0]||"",rack:p[1]||"",nivel:p[2]||"",pos:p.slice(3).join("-")}}
+function ubPartes(cod){const c=String(cod||"").toUpperCase(),m=c.match(/^([A-Z]{1,2})(\d{2})(\d{2})$/);if(m)return {pasillo:m[1],rack:m[2],nivel:String(+m[3]),pos:""};   // H0101 = hilera H, posición 01, nivel 1
+  const p=c.split(/[-_. \/]+/).filter(Boolean);return {pasillo:p[0]||"",rack:p[1]||"",nivel:p[2]||"",pos:p.slice(3).join("-")}}
 const ubNum=v=>{const n=parseFloat(String(v).replace(",","."));return isNaN(n)?null:n};
 const ubCmp=(a,b)=>{const x=ubNum(a),y=ubNum(b);return x!=null&&y!=null?x-y:String(a).localeCompare(String(b),"es",{numeric:true})};
 const ubCod=v=>norm(String(v||"")).toUpperCase().replace(/\s+/g,"");
@@ -8111,11 +8114,18 @@ function ubRender(){
   // mapa: pasillo → rack → niveles (el más alto arriba)
   const fn=F.find(f=>f[0]===ubF)[2],L=U.filter(fn);
   if(!U.length){$("#ubMapa").innerHTML='<p class="muted">Todavía no hay ubicaciones. Cárgalas con <b>Cargar ubicaciones</b> (Excel o pegando la lista).</p>'}
-  else{const pas=new Map();for(const u of L){const p=ubPartes(u.cod),P=u.pasillo||p.pasillo||"—",R=u.rack||p.rack||"—";const m=pas.get(P)||new Map();(m.get(R)||m.set(R,[]).get(R)).push(u);pas.set(P,m)}
-    $("#ubMapa").innerHTML=[...pas.keys()].sort(ubCmp).map(P=>{const racks=pas.get(P),all=[...racks.values()].flat(),no=all.filter(occ).length;
-      return `<div class="ubPas"><div class="ubPasT">Pasillo ${esc(P)} <span class="muted">· ${fmt(all.length)} ubicaciones · ${fmt(no)} ocupadas</span></div><div class="ubRacks">`+
-        [...racks.keys()].sort(ubCmp).map(R=>`<div class="ubRack"><div class="ubRackT">Rack ${esc(R)}</div>`+racks.get(R).sort((a,b)=>{const x=ubPartes(a.cod),y=ubPartes(b.cod);return ubCmp(b.nivel||y.nivel,a.nivel||x.nivel)||ubCmp(a.pos||x.pos,b.pos||y.pos)}).map(u=>{
-          const l=sm.get(u.cod)||[],s=(q&&l.find(x=>deacc(x.k+" "+(x.descr||"")).includes(q)))||l[0];return `<button class="ubCell${l.length?" occ":""}${hitU(u)?" hit":""}${u.cod===ubSel?" sel":""}" data-ub="${esc(u.cod)}" title="${esc(l.map(x=>x.k+" "+(x.descr||"")).join("\n"))}"><span class="c">${esc(u.cod)}</span>${s?`<span class="s"><b>${esc(s.k)}</b>${l.length>1?` +${l.length-1}`:""}</span><span class="s">${ubBul(s)}</span>`:'<span class="s muted">vacía</span>'}</button>`}).join("")+`</div>`).join("")+`</div></div>`}).join("")||'<p class="muted">Ninguna ubicación con este filtro.</p>';
+  else{// la grilla se arma con TODAS las ubicaciones (así los niveles quedan alineados); el filtro solo atenúa las que no aplican
+    const enL=new Set(L.map(u=>u.cod)),pas=new Map(),nivOf=u=>String(u.nivel||ubPartes(u.cod).nivel||"");
+    for(const u of U){const p=ubPartes(u.cod),P=u.pasillo||p.pasillo||"—",R=u.rack||p.rack||"—";const m=pas.get(P)||new Map();(m.get(R)||m.set(R,[]).get(R)).push(u);pas.set(P,m)}
+    const celda=u=>{if(!enL.has(u.cod))return `<button class="ubCell off" data-ub="${esc(u.cod)}"><span class="c">${esc(u.cod)}</span></button>`;
+      const l=sm.get(u.cod)||[],s=(q&&l.find(x=>deacc(x.k+" "+(x.descr||"")).includes(q)))||l[0];
+      return `<button class="ubCell${l.length?" occ":""}${hitU(u)?" hit":""}${u.cod===ubSel?" sel":""}" data-ub="${esc(u.cod)}" title="${esc(l.map(x=>x.k+" "+(x.descr||"")).join("\n"))}"><span class="c">${esc(u.cod)}</span>${s?`<span class="s"><b>${esc(s.k)}</b>${l.length>1?` +${l.length-1}`:""}</span><span class="s">${ubBul(s)}</span>`:'<span class="s muted">vacía</span>'}</button>`};
+    $("#ubMapa").innerHTML=[...pas.keys()].sort(ubCmp).map(P=>{const racks=pas.get(P),all=[...racks.values()].flat(),vis=all.filter(u=>enL.has(u.cod));if(!vis.length)return "";
+      const no=all.filter(occ).length,niv=[...new Set(all.map(nivOf).filter(Boolean))].sort((a,b)=>ubCmp(b,a));
+      return `<div class="ubPas"><div class="ubPasT">${P==="PISO"?"Zonas de piso":"Hilera "+esc(P)} <span class="muted">· ${fmt(all.length)} ubicaciones · ${fmt(no)} ocupadas</span></div><div class="ubRacks">`+
+        [...racks.keys()].sort(ubCmp).map(R=>{const us=racks.get(R);
+          const col=niv.length?niv.map(n=>{const u=us.find(x=>nivOf(x)===n);return u?celda(u):'<div class="ubCell pil" title="Pilar: sin ubicación en este nivel"><span class="c">pilar</span></div>'}).join("")+us.filter(x=>!nivOf(x)).map(celda).join(""):us.map(celda).join("");
+          return `<div class="ubRack"><div class="ubRackT">${P==="PISO"?"":esc(R)}</div>${col}</div>`}).join("")+`</div></div>`}).join("")||'<p class="muted">Ninguna ubicación con este filtro.</p>';
     $$("#ubMapa [data-ub]").forEach(b=>b.onclick=()=>ubAbrir(b.dataset.ub))}
   ubDetRender();ubMovsRender();
 }
@@ -8129,7 +8139,7 @@ function ubDetRender(){
   const u=(ub.ubic||[]).find(x=>x.cod===ubSel);$("#ubDet").hidden=!u;if(!u)return;
   const p=ubPartes(u.cod),l=ubStockMap().get(u.cod)||[];
   $("#ubDetT").textContent=u.cod;
-  $("#ubDetS").textContent=[`Pasillo ${u.pasillo||p.pasillo||"—"}`,`Rack ${u.rack||p.rack||"—"}`,`Nivel ${u.nivel||p.nivel||"—"}`,u.pos||p.pos?`Posición ${u.pos||p.pos}`:"",u.tipo||"",u.nota||""].filter(Boolean).join(" · ");
+  $("#ubDetS").textContent=[`Hilera ${u.pasillo||p.pasillo||"—"}`,`Posición ${u.rack||p.rack||"—"}`,`Nivel ${u.nivel||p.nivel||"—"}`,u.pos||p.pos?`Posición ${u.pos||p.pos}`:"",u.tipo||"",u.nota||""].filter(Boolean).join(" · ");
   $("#ubDetTbl").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th>Último movimiento</th></tr></thead><tbody>`+
     (l.length?l.map(s=>`<tr><td class="code">${esc(s.k)}</td><td>${esc(s.descr)}</td><td class="num">${qBC(+s.base,s.ce,s.f,s.um)}</td><td>${fmtDT(s.ult)}</td></tr>`).join(""):'<tr><td colspan="4" class="muted">Vacía.</td></tr>')+"</tbody>";
   const M=ub.movs.filter(m=>m.desde===u.cod||m.hacia===u.cod);
@@ -8149,7 +8159,7 @@ $("#ubRef").onclick=()=>ubRefresh(true);$("#ubQ").oninput=ubRender;$("#ubDia").o
 function ubFilasCarga(rows){
   const R=rows.map(r=>r.map(c=>String(c==null?"":c).trim())).filter(r=>r.some(Boolean));let h=-1,C={cod:0,pasillo:-1,rack:-1,nivel:-1,pos:-1,tipo:-1,nota:-1};
   for(let i=0;i<Math.min(R.length,10)&&h<0;i++){const r=R[i].map(c=>deacc(c));const f=re=>r.findIndex(x=>re.test(x));const c=f(/^(ubicacion|ubic|codigo|cod|location)/);
-    if(c>=0){h=i;C={cod:c,pasillo:f(/^(pasillo|calle|aisle)/),rack:f(/^(rack|estante|modulo)/),nivel:f(/^(nivel|altura|level|piso)/),pos:f(/^(posicion|pos\b|columna|hueco)/),tipo:f(/^tipo/),nota:f(/^(nota|obs)/)}}}
+    if(c>=0){h=i;C={cod:c,pasillo:f(/^(pasillo|hilera|calle|aisle)/),rack:f(/^(rack|posicion|estante|modulo)/),nivel:f(/^(nivel|altura|level|piso)/),pos:f(/^(pos\b|columna|hueco)/),tipo:f(/^tipo/),nota:f(/^(nota|obs)/)}}}
   if(h<0&&R.some(r=>r.length>=4))C=Object.assign(C,{pasillo:1,rack:2,nivel:3});
   const out=new Map(),cel=(r,k)=>C[k]>=0?(r[C[k]]||""):"";
   for(const r of (h>=0?R.slice(h+1):R)){const cod=ubCod(cel(r,"cod"));if(!cod||cod.length>40)continue;const p=ubPartes(cod);
@@ -8159,7 +8169,7 @@ function ubFilasCarga(rows){
 function ubCargaVer(L){ubCargaL=L;const ok=L&&L.length;$("#ubCargaOk").disabled=!ok;
   if(!ok){$("#ubCargaInfo").innerHTML='<span style="color:var(--bad)">No encontré ubicaciones. Pega una por fila o carga el Excel.</span>';return}
   const pas=new Set(L.map(u=>u.pasillo)),nuevas=L.filter(u=>!(ub.ubic||[]).some(x=>x.cod===u.cod)).length,quitar=$("#ubReempl").checked?(ub.ubic||[]).filter(x=>!L.some(u=>u.cod===x.cod)).length:0;
-  $("#ubCargaInfo").innerHTML=`<b>${fmt(L.length)}</b> ubicaciones · ${fmt(pas.size)} pasillo${pas.size===1?"":"s"} · ${fmt(nuevas)} nueva${nuevas===1?"":"s"}${quitar?` · <span style="color:var(--warn)">${fmt(quitar)} quedarían inactivas</span>`:""}<br><span class="muted">Ejemplo: ${L.slice(0,4).map(u=>`${esc(u.cod)} (pasillo ${esc(u.pasillo||"—")}, rack ${esc(u.rack||"—")}, nivel ${esc(u.nivel||"—")})`).join(" · ")}</span>`}
+  $("#ubCargaInfo").innerHTML=`<b>${fmt(L.length)}</b> ubicaciones · ${fmt(pas.size)} hilera${pas.size===1?"":"s"} · ${fmt(nuevas)} nueva${nuevas===1?"":"s"}${quitar?` · <span style="color:var(--warn)">${fmt(quitar)} quedarían inactivas</span>`:""}<br><span class="muted">Ejemplo: ${L.slice(0,4).map(u=>`${esc(u.cod)} (hilera ${esc(u.pasillo||"—")}, posición ${esc(u.rack||"—")}, nivel ${esc(u.nivel||"—")})`).join(" · ")}</span>`}
 $("#ubCargaTog").onclick=()=>{const b=$("#ubCarga");b.hidden=!b.hidden;if(!b.hidden)$("#ubPaste").focus()};
 $("#ubCargaX").onclick=()=>{$("#ubCarga").hidden=true;ubCargaL=null;$("#ubCargaInfo").innerHTML="";$("#ubCargaOk").disabled=true};
 $("#ubPrev").onclick=()=>{const t=$("#ubPaste").value;ubCargaVer(ubFilasCarga(t.split(/\r?\n/).map(l=>l.split(l.includes("\t")?"\t":l.includes(";")?";":/\s{2,}|,/))))};
@@ -8190,7 +8200,7 @@ $("#ubMvOk").onclick=async()=>{const t=$("#ubMvTipo").value,it=pvFind($("#ubMvCo
   catch(e){toast(ubMsg(e))}finally{b.disabled=false}};
 /* ---------- Excel: stock por ubicación (incluye las vacías) y movimientos ---------- */
 $("#ubXls").onclick=()=>{const sm=ubStockMap(),wb=XLSX.utils.book_new(),rows=[];
-  for(const u of ub.ubic||[]){const p=ubPartes(u.cod),base={"Ubicación":u.cod,"Pasillo":u.pasillo||p.pasillo,"Rack":u.rack||p.rack,"Nivel":u.nivel||p.nivel};const l=sm.get(u.cod)||[];
+  for(const u of ub.ubic||[]){const p=ubPartes(u.cod),base={"Ubicación":u.cod,"Hilera":u.pasillo||p.pasillo,"Posición":u.rack||p.rack,"Nivel":u.nivel||p.nivel};const l=sm.get(u.cod)||[];
     if(!l.length)rows.push(Object.assign({},base,{"Código":"","Descripción":"","Bulto":"","Cantidad (bultos)":"","Cantidad (unidad ERP)":"","Unidad ERP":"","Estado":"Vacía","Último movimiento":""}));
     for(const s of l)rows.push(Object.assign({},base,{"Código":s.k,"Descripción":s.descr,"Bulto":s.ce&&+s.f!==1?s.ce:umTxt(s.um),"Cantidad (bultos)":(+s.base)/(+s.f||1),"Cantidad (unidad ERP)":+s.base,"Unidad ERP":umTxt(s.um),"Estado":"Ocupada","Último movimiento":fmtDT(s.ult)}))}
   XLSX.utils.book_append_sheet(wb,sheetFrom(rows),"Stock por ubicación");
