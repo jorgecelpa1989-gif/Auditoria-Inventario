@@ -8217,7 +8217,7 @@ $("#ubXls").onclick=()=>{const sm=ubStockMap(),wb=XLSX.utils.book_new(),rows=[];
 /* =====================================================================
    6 · ALMACENAMIENTO en el celular de bodega (permiso "ubic_mover")
    ===================================================================== */
-var uc={tipo:store.get("inv_uctipo",null)}, ucData={ubic:[],stock:[],mis:[]}, ucSetU=new Set(), ucPend=store.get("inv_ucpend",[]), ucErr=store.get("inv_ucerr",[]), ucCamI=null, ucCamT=null, ucLast={c:"",miss:99}, ucHold=false, ucOkUnk="", ucBusy=false;
+var uc={tipo:store.get("inv_uctipo",null)}, ucData={ubic:[],stock:[],mis:[]}, ucSetU=new Set(), ucPend=store.get("inv_ucpend",[]), ucErr=store.get("inv_ucerr",[]).filter(m=>Date.now()-Date.parse(m.t||0)<36*3600e3), ucCamI=null, ucCamT=null, ucLast={c:"",miss:99}, ucHold=false, ucOkUnk="", ucBusy=false;
 const ucSave=()=>store.set("inv_ucpend",ucPend);
 const UCTXT={ingreso:"Llega producto a una ubicación: escanea la ubicación de destino, el producto y la cantidad.",traslado:"Cambias un pallet de ubicación: origen, destino, producto y cantidad.",salida:"Sale producto de una ubicación (despacho o consumo): origen, producto y cantidad."};
 async function ucAbrir(){puVista="ubic";puestoApply();await dvCatalogo().catch(()=>{});await ucRefresh();ucTipo(uc.tipo,true);ucRender();ucEnviar()}
@@ -8275,7 +8275,7 @@ function ucAdd(){const t=uc.tipo;if(!t)return toast("Elige Ingreso, Traslado o S
   ucRender();ucEnviar();if(ucCamI)ucSetCam(t==="ingreso"?"hacia":"desde");else setTimeout(()=>focusSel($(t==="ingreso"?"#ucHacia":"#ucDesde")),60)}
 const UC_RECHAZO=/^(sin_stock|ubicacion_no_existe|misma_ubicacion|cantidad_invalida|datos_invalidos|falta_ubicacion)$/;
 var ucAviso="",ucAvisoT=0;
-async function ucEnviar(){if(ucBusy||!ucPend.length)return;ucAviso="";if(navigator.onLine===false){ucRender();return}ucBusy=true;let n=0;
+async function ucEnviar(){if(ucBusy||!ucPend.length)return;ucAviso="";const e0=ucErr.length;if(navigator.onLine===false){ucRender();return}ucBusy=true;let n=0;
   try{while(ucPend.length){const m=ucPend[0];const d=Object.assign({},m);delete d.t;
       try{await prpc("cb_ubic_mover",{p_mov:d});ucPend.shift();ucSave();n++}
       catch(e){if(e.net)break;
@@ -8283,7 +8283,7 @@ async function ucEnviar(){if(ucBusy||!ucPend.length)return;ucAviso="";if(navigat
         // Sesión liberada, usuario inactivo, permiso quitado o error del servidor: el movimiento se QUEDA en la cola y se reintenta.
         if(!UC_RECHAZO.test(e.message||"")){ucAviso=ubMsg(e);if(!ucAvisoT||Date.now()-ucAvisoT>60000){ucAvisoT=Date.now();audio.beep(false);toast("⚠ Movimientos guardados en el celular, sin enviar: "+ucAviso)}break}
         ucPend.shift();ucSave();ucErr.unshift(Object.assign({},m,{err:ubMsg(e)}));ucErr=ucErr.slice(0,30);store.set("inv_ucerr",ucErr);audio.beep(false);toast("⚠ No se registró: "+ubMsg(e))}}}
-  finally{ucBusy=false;if(n||ucErr.length)await ucRefresh().catch(()=>{});ucRender()}}
+  finally{ucBusy=false;if(n||ucErr.length!==e0)await ucRefresh().catch(()=>{});ucRender()}}
 setInterval(()=>{if(puestoMode()&&ucPend.length)ucEnviar()},20000);
 setInterval(async()=>{if(puestoMode()&&puVista==="ubic"&&!document.hidden&&!ucPend.length&&!ucBusy){const a=document.activeElement;if(a&&a.closest&&a.closest("#ucForm"))return;await ucRefresh().catch(()=>{});ucRender()}},30000);
 addEventListener("online",()=>{if(puestoMode())ucEnviar()});
