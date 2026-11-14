@@ -44,8 +44,12 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  check(s5==='11.125','Al agregar, 10 kg + 1,125 kg del mismo código suman 11,125 kg (antes 1,125 quedaba en 1.125) → '+s5);
  await p.fill('#solPaste','');await p.click('#solClear');
  // Cargar el archivo Excel
- const xb=await p.evaluate(()=>{const ws=XLSX.utils.aoa_to_sheet([["Código","Descripción","Cantidad"],["230125","M. Jardin",4],["110107","Alambre",12]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Hoja1");return XLSX.write(wb,{type:'base64',bookType:'xlsx'})});
+ const xb=await p.evaluate(()=>{const ws=XLSX.utils.aoa_to_sheet([["Código","Descripción","Cantidad"],["230125","M. Jardin",4],["110107","Alambre",12],["221317","Mos.Gal",1.125],["221616","Hex",0.125]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Hoja1");return XLSX.write(wb,{type:'base64',bookType:'xlsx'})});
  require('fs').writeFileSync(S+'/sol.xlsx',Buffer.from(xb,'base64'));await p.setInputFiles('#solFile',S+'/sol.xlsx');await p.waitForTimeout(800);
  const pv4=(await p.textContent('#solPrev')).replace(/\s+/g,' ');console.log('PV4',pv4);
  check(/230125 · M. Jardin Verde 6x6 · 4 ROLLOS = 120 m/.test(pv4)&&/110107 · ALAMBRE · 12 kg/.test(pv4),'Botón "Cargar Excel": lee el archivo con encabezado y descripción (4 ROLLOS = 120 m, 12 kg)');
+ check(/221317 · Mos.Gal 14 BWG33 · 1,13 ROLLOS/.test(pv4)&&/221616 · Hex Gal 1 BWG 21 · 0,13 ROLLOS/.test(pv4)&&!/1\.125|125 ROLLOS/.test(pv4),'Excel con 3 decimales: 1,125 y 0,125 se leen como decimales (no 1.125 ni 125)');
+ await p.click('#solClear');await p.click('#solPasteBtn');await p.waitForTimeout(300);
+ const s6=await p.evaluate(()=>mpSol.filter(x=>x.cod==='221317'||x.cod==='221616').map(x=>x.cod+':'+x.qu).join(','));console.log('S6',s6);
+ check(/221317:1[.,]125/.test(s6)&&/221616:0[.,]125/.test(s6),'Al agregar desde Excel quedan 1,125 y 0,125 ROLLOS → '+s6);
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

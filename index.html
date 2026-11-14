@@ -6118,7 +6118,7 @@ $("#solPasteBtn").onclick=()=>{let n=0;const quedan=[];
 $("#solFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f)return;
   try{const buf=await f.arrayBuffer();let rows;
     if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf).replace(/^\uFEFF/,"");const l0=txt.split("\n")[0];rows=csvFilas(txt,l0.includes("\t")?"\t":l0.includes(";")?";":",")}
-    else{const wb=XLSX.read(buf,{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""})}
+    else{const wb=XLSX.read(buf,{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:""}).map(r=>r.map(c=>typeof c==="number"?String(+c.toFixed(6)).replace(".",","):c))}   // números como número: 1,125 no se vuelve 1.125 (mil veces más)
     $("#solPaste").value=rows.filter(r=>r.some(c=>String(c).trim())).map(r=>r.map(c=>String(c).replace(/[\t\r\n]+/g," ").trim()).join("\t")).join("\n");
     solPasteRender();toast("Revisa la vista previa y toca «Agregar lista»")}
   catch(er){toast("No se pudo leer el archivo. Prueba guardarlo como .xlsx o copia y pega las filas.")}});
