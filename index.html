@@ -8224,16 +8224,16 @@ $$("#ubVista .chip").forEach(b=>b.onclick=()=>{ubVista=b.dataset.vista;store.set
    sigue siendo un solo archivo y funciona sin señal. No guarda nada: solo muestra lo que ya trae cb_ubic_datos.
    UB_PLANO es el plano de la bodega (layout Grupo Vector 2024: 34 × 47 m). Medidas en metros, tomadas de la
    elevación de las estanterías: vano de 2 pallets cada 2,33 m (1,165 m por posición), fondo 1,0 m, niveles cada 1,4 m,
-   racks dobles separados 0,3 m. x = ancho de la bodega (izquierda → derecha del plano), z = largo (arriba → abajo).
+   racks dobles separados 0,3 m; todos los pasillos miden 3,2 m. x = ancho de la bodega (izquierda → derecha del plano), z = largo (arriba → abajo).
    Cada hilera: eje por el que avanzan sus posiciones, d = dónde parte su fondo, a = dónde parte la posición 1,
    s = hacia dónde crecen (1 o -1), f = lado del pasillo (1 o -1). Una hilera que no esté aquí se dibuja al costado. */
 const UB_PLANO={ancho:34,largo:47,paso:1.165,fondo:1,nivel:1.4,
-  hil:{I:{eje:"z",d:.3,a:44.61,s:-1,f:1},H:{eje:"z",d:5.1,a:42.28,s:-1,f:-1},G:{eje:"z",d:6.4,a:42.28,s:-1,f:1},F:{eje:"z",d:11.2,a:42.28,s:-1,f:-1},E:{eje:"z",d:12.5,a:42.28,s:-1,f:1},
-    D:{eje:"z",d:17.3,a:42.28,s:-1,f:-1},C:{eje:"z",d:18.6,a:42.28,s:-1,f:1},B:{eje:"z",d:23.4,a:32.96,s:-1,f:-1},A:{eje:"z",d:32.3,a:21.5,s:1,f:-1},
-    J:{eje:"x",d:.4,a:25.93,s:-1,f:1},K:{eje:"x",d:45.6,a:15.98,s:-1,f:-1}},
+  hil:{I:{eje:"z",d:.3,a:44.47,s:-1,f:1},H:{eje:"z",d:4.5,a:42.14,s:-1,f:-1},G:{eje:"z",d:5.8,a:42.14,s:-1,f:1},F:{eje:"z",d:10,a:42.14,s:-1,f:-1},E:{eje:"z",d:11.3,a:42.14,s:-1,f:1},
+    D:{eje:"z",d:15.5,a:42.14,s:-1,f:-1},C:{eje:"z",d:16.8,a:42.14,s:-1,f:1},B:{eje:"z",d:21,a:32.82,s:-1,f:-1},A:{eje:"z",d:32.3,a:21.5,s:1,f:-1},
+    J:{eje:"x",d:.66,a:25.93,s:-1,f:1},K:{eje:"x",d:45.34,a:15.98,s:-1,f:-1}},
   /* zonas de piso (k = código de la ubicación de piso que se guarda ahí), vías de evacuación y recintos */
   zonas:[{k:"PICKING-RETAIL",t:"Picking retail",x:26.6,z:.6,w:4.6,l:18.2},{k:"PICKING",t:"Picking",x:25.2,z:21.6,w:5.6,l:11.4},{t:"Picking",x:23.5,z:36.6,w:3.3,l:8},
-    {k:"MASIVO",t:"Masivo",x:27.2,z:36.6,w:6.5,l:8},{t:"Vía de evacuación",x:24.8,z:19.2,w:8.9,l:1.9,via:1},{t:"Vía de evacuación",x:19.95,z:21.1,w:3.1,l:25.5,via:1},
+    {k:"MASIVO",t:"Masivo",x:27.2,z:36.6,w:6.5,l:8},{t:"Vía de evacuación",x:22.3,z:19.2,w:11.4,l:1.9,via:1},{t:"Vía de evacuación",x:17.95,z:21.1,w:2.9,l:25.5,via:1},
     {t:"Casino",x:31.6,z:.6,w:2.1,l:5.6,sala:1},{t:"Baños",x:31.6,z:6.2,w:2.1,l:5.6,sala:1},{t:"Oficina logística",x:31.6,z:11.8,w:2.1,l:7,sala:1},{t:"Administración picking",x:23.5,z:45.2,w:10.2,l:1.4,sala:1}]};
 const UB3_FOV=40*Math.PI/180,UB3_GRIS=[203,212,218],UB3_HIT=[240,140,30];
 const UB3_SKU=[[214,186,140],[150,180,205],[176,200,150],[226,170,140],[190,170,210],[232,208,130],[140,195,190],[215,160,180],[205,190,165],[160,170,200]];   // un color por producto

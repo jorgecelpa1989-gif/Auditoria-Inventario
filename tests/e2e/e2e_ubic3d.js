@@ -25,7 +25,7 @@ const colores=a=>a.evaluate(()=>{ub3Pintar(performance.now());const gl=ub3.gl,w=
  check(await a.isVisible('#ub3C')&&await a.isHidden('#ubMapa')&&await a.evaluate(()=>ub3.slots.size)===27,'Modelo 3D: se muestra en lugar del mapa, con sus 27 ubicaciones');
  check(await colores(a)>12,'El modelo queda dibujado (piso, racks y pallets de distintos colores)');
  const g=await a.evaluate(()=>{const s=c=>ub3.slots.get(c),b=c=>s(c).box;return {h1:b('H0101'),h2:b('H0201'),h13:b('H0103'),i1:b('I0101'),z:b('Z0101'),m:b('MASIVO'),piso:!!s('MASIVO').piso,ancho:UB_PLANO.ancho}});
- check(g.i1[0]<1&&g.h1[0]>4&&g.h1[0]<6,'Plano de la bodega: la hilera I va contra el muro y la H al otro lado del pasillo');
+ check(g.i1[0]<1&&Math.abs((g.h1[0]-g.i1[3])-3.0)<.01,'Plano de la bodega: la hilera I va contra el muro y la H al otro lado de un pasillo de 3,2 m (3,0 m libres entre pallets)');
  check(g.h2[2]<g.h1[2]&&Math.abs((g.h1[2]-g.h2[2])-1.165)<.01&&Math.abs(g.h13[1]-2.8)<.01,'Medidas de la estantería: 1,165 m por posición y 1,4 m por nivel (nivel 3 a 2,8 m)');
  check(g.z[0]>g.ancho&&g.piso&&g.m[0]>20,'Una hilera que no está en el plano (Z) se dibuja al costado; MASIVO queda en su zona de piso');
  // globo al pasar el mouse y elegir con un clic
