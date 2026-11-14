@@ -16,7 +16,7 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  await p.fill('#solPaste','221317\t6\n221616 11\n221602\t56\n230125 27\n110107\t15\n999999 3\nCódigo\tCantidad');await p.waitForTimeout(300);
  const prev=await p.textContent('#solPrev');console.log('PREV',prev.replace(/\s+/g,' '));
  check(/221317 · Mos.Gal 14 BWG33 · 6 ROLLOS = 540 m/.test(prev)&&/230125 · M. Jardin Verde 6x6 · 27 ROLLOS = 810 m/.test(prev),'Vista previa: por defecto en bultos (6 ROLLOS = 540 m, 27 ROLLOS = 810 m)');
- check(/110107 · ALAMBRE · 15 kg/.test(prev)&&/999999 · 3 · no está en la lista/.test(prev)&&!/Código/.test(prev),'Vista previa (la fila de encabezado se salta): sin conversión en su unidad, código inexistente y encabezado marcados');
+ check(/110107 · ALAMBRE · 15 kg/.test(prev)&&/999999 · 3 · no está en la lista/.test(prev)&&/✕\s*Código\s+Cantidad\s*·\s*sin cantidad/.test(prev),'Vista previa: sin conversión en su unidad, código inexistente y un encabezado fuera de la 1ª fila marcado (no se descarta en silencio)');
  check(/Agregar lista \(6\)/.test(await p.textContent('#solPasteBtn')),'Botón indica cuántas líneas se agregan (6)');
  await p.screenshot({path:S+'/solpaste.png',clip:await p.evaluate(()=>{const r=document.querySelector('#solPaste').closest('details').getBoundingClientRect();return {x:r.x,y:r.y+scrollY,width:r.width,height:r.height+40}})});
  await p.check('input[name="solPU"][value="base"]');await p.waitForTimeout(200);check(/221317 · Mos.Gal 14 BWG33 · 6 m = 0,07 ROLLOS/.test(await p.textContent('#solPrev')),'Al elegir "unidad del ERP": 6 m = 0,07 ROLLOS');
@@ -32,6 +32,17 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  check(/221317 · Mos.Gal 14 BWG33 · 2 ROLLOS/.test(pv3)&&/999999 abc · sin cantidad/.test(pv3)&&/221616/.test(pv3),'Sin encabezado: columna extra (OT) y "3UN" se leen; lo que no tiene cantidad se marca');
  await p.click('#solPasteBtn');await p.waitForTimeout(300);
  check((await p.inputValue('#solPaste')).trim()==='999999  abc','Al agregar, la línea que falló queda en el cuadro para corregirla (no se pierde)');
+ // Casos de la revisión de riesgos: coma como separador, filas de datos que parecen encabezado, números extra y 3 decimales
+ await p.fill('#solPaste','221317,6\n221616, 2\n110107\tProducto X\t10\tUnidad\n221602\t10\t1.500\n110107\t1,125\tkg');await p.waitForTimeout(300);
+ const pv5=(await p.textContent('#solPrev')).replace(/\s+/g,' ');console.log('PV5',pv5);
+ check(/221317 · Mos.Gal 14 BWG33 · 6 ROLLOS/.test(pv5)&&/221616 · Hex Gal 1 BWG 21 · 2 ROLLOS/.test(pv5),'"código,cantidad" con coma se sigue leyendo como antes');
+ check(/110107 · ALAMBRE · 10 kg/.test(pv5),'Una fila con descripción "Producto X" y unidad "Unidad" NO se descarta (ya no se confunde con encabezado)');
+ check(/221602 10 1\.500 · varios números/.test(pv5),'Precio u OT al final (varios números sin encabezado): se marca para revisar, no se adivina la cantidad');
+ check(/110107 · ALAMBRE · 1,13 kg|110107 · ALAMBRE · 1,125 kg/.test(pv5),'1,125 kg se lee como 1,125 (no 1.125)');
+ await p.click('#solClear');await p.click('#solPasteBtn');await p.waitForTimeout(300);
+ const s5=await p.evaluate(()=>mpSol.filter(x=>x.cod==='110107').map(x=>x.q).join(','));console.log('S5',s5);
+ check(s5==='11.125','Al agregar, 10 kg + 1,125 kg del mismo código suman 11,125 kg (antes 1,125 quedaba en 1.125) → '+s5);
+ await p.fill('#solPaste','');await p.click('#solClear');
  // Cargar el archivo Excel
  const xb=await p.evaluate(()=>{const ws=XLSX.utils.aoa_to_sheet([["Código","Descripción","Cantidad"],["230125","M. Jardin",4],["110107","Alambre",12]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Hoja1");return XLSX.write(wb,{type:'base64',bookType:'xlsx'})});
  require('fs').writeFileSync(S+'/sol.xlsx',Buffer.from(xb,'base64'));await p.setInputFiles('#solFile',S+'/sol.xlsx');await p.waitForTimeout(800);

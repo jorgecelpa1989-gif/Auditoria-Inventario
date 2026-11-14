@@ -6075,22 +6075,25 @@ $("#solQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault
    (código = la primera celda que es un producto; cantidad = el último número después del código; unidad = la celda siguiente). */
 const SOL_ENC=/^(c[oó]d(igo)?|sku|item|art[ií]culo|material|producto|descripci[oó]n|cantidad|cant\.?|unidad|um)\b/i;
 function solCeldas(r){r=r.map(c=>String(c==null?"":c).replace(/\u00a0/g," ").trim());if(!r.some(Boolean))return null;
-  if(r.filter(c=>SOL_ENC.test(c)).length>=2)return null;   // fila de encabezado: se salta
   let ci=r.findIndex(c=>c&&solFind(codeStr(c)));if(ci<0)ci=r.findIndex(Boolean);
-  for(let i=r.length-1;i>ci;i--){const c=r[i];if(!c)continue;const m=c.replace(/\s+(?=\d{3}\b)/g,"").match(/^([\d.,]+)\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.()\/]{0,11})?$/);
+  const NUM=/^([\d.,]+)\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.()\/]{0,11})?$/,nums=r.slice(ci+1).filter(c=>{const m=c&&c.replace(/\s+(?=\d{3}\b)/g,"").match(NUM);return m&&num(m[1])!=null});
+  if(nums.length>1)return {raw:r.filter(Boolean).join("  "),bad:"varios números: agrega encabezado (Código, Cantidad)"};
+  for(let i=r.length-1;i>ci;i--){const c=r[i];if(!c)continue;const m=c.replace(/\s+(?=\d{3}\b)/g,"").match(NUM);
     if(m&&num(m[1])!=null){const nx=r[i+1]||"",u=m[2]||(/^[A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.()\/]{0,11}$/.test(nx)?nx:"");return {cod:r[ci],qs:m[1],u,raw:r.filter(Boolean).join("  ")}}}
   return {raw:r.filter(Boolean).join("  "),bad:"sin cantidad"}}
 function solFilas(texto){const lineas=texto.split(/\r?\n/).filter(l=>l.trim());if(!lineas.length)return [];
   // cada línea se separa por su cuenta: tabulación (copiado de Excel), ";" o espacios
-  const rows=lineas.map(l=>l.includes("\t")?l.split("\t"):l.includes(";")?l.split(";"):(/\S\s{2,}\S/.test(l)?l.trim().split(/\s{2,}/):l.trim().split(/\s+/)));
+  const SIMPLE=/^(\S+?)[\s;,\t]+([\d.,]+)(?:[\s;,\t]+([A-Za-zÁÉÍÓÚÑáéíóúñ.]+))?\s*$/;   // el formato de siempre: código, cantidad y unidad opcional
+  const rows=lineas.map(l=>{const t=l.replace(/\u00a0/g," ").trim(),m=!l.includes("\t")&&t.match(SIMPLE);if(m)return m[3]?[m[1],m[2],m[3]]:[m[1],m[2]];
+    return l.includes("\t")?l.split("\t"):l.includes(";")?l.split(";"):(/\S\s{2,}\S/.test(t)?t.split(/\s{2,}/):t.split(/\s+/))});
   // encabezado en la PRIMERA fila: se usan sus columnas (código, cantidad y, si viene, unidad)
   const h=rows[0].map(c=>deacc(String(c).trim()));
-  if(h.filter(c=>SOL_ENC.test(c)).length>=2){
+  if(h.filter(c=>SOL_ENC.test(c)).length>=2&&!rows[0].some(c=>solFind(codeStr(String(c).trim())))){
     const ci=h.findIndex(c=>/^(sku|c[oó]d|item|art[ií]culo|material)/.test(c)),qi=h.findIndex(c=>/^(cant|qty|un\.? ?en cont|unidades$|bultos$)/.test(c)),ui=h.findIndex(c=>/^(unidad$|u\.?m\.?$|um$|bulto$)/.test(c));
     if(ci>=0&&qi>=0)return rows.slice(1).map(r=>{const cel=k=>k>=0?String(r[k]==null?"":r[k]).replace(/\u00a0/g," ").trim():"";const raw=r.map(c=>String(c).trim()).filter(Boolean).join("  ");
       if(!raw)return null;const cod=cel(ci),qs=cel(qi).replace(/\s+(?=\d{3}\b)/g,"");
       if(!cod||num(qs)==null)return {raw,bad:"sin cantidad"};return {cod,qs,u:cel(ui),raw}}).filter(Boolean)}
-  return rows.map(solCeldas).filter(Boolean)}
+  return rows.map(solCeldas).filter(Boolean)}   // sin encabezado: ninguna fila se descarta en silencio
 function solPasteParse(){const pu=(document.querySelector('input[name="solPU"]:checked')||{}).value||"ce",L=[];
   for(const x of solFilas($("#solPaste").value)){
     if(x.bad){L.push(x);continue}const q=num(x.qs);if(q==null||q<=0){L.push({raw:x.raw,bad:"cantidad inválida"});continue}
@@ -6109,7 +6112,7 @@ $("#solPaste").addEventListener("input",solPasteRender);
 $$('input[name="solPU"]').forEach(r=>r.onchange=solPasteRender);
 $("#solPasteBtn").onclick=()=>{let n=0;const quedan=[];
   for(const x of solPasteParse()){if(x.bad){quedan.push(x.raw);continue}
-    if(solAdd(x.cod,String(x.q),true,x.enCe?x.it.ce:(x.it&&conv(x.it)?umTxt(x.it.um):"")))n++;else quedan.push(x.raw)}
+    if(solAdd(x.cod,String(x.q).replace(".",","),true,x.enCe?x.it.ce:(x.it&&conv(x.it)?umTxt(x.it.um):"")))n++;else quedan.push(x.raw)}
   $("#solPaste").value=quedan.join("\n");solPasteRender();renderSol();   // las líneas que no se pudieron agregar quedan en el cuadro para corregirlas
   toast(`${fmt(n)} productos agregados${quedan.length?` · ${fmt(quedan.length)} línea${quedan.length>1?"s":""} sin agregar (quedan en el cuadro)`:""}`)};
 $("#solFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f)return;
