@@ -8338,7 +8338,7 @@ function ub3Rotulos(m,w,h,k){const x=ub3.lc.getContext("2d"),th=Math.tan(UB3_FOV
 function ub3Volar(a,ms){const c=ub3.cam;if(a.yaw!=null){const T=2*Math.PI;c.yaw=((c.yaw%T)+T)%T;if(a.yaw-c.yaw>Math.PI)c.yaw+=T;else if(c.yaw-a.yaw>Math.PI)c.yaw-=T}
   if(!ms){Object.assign(c,a);ub3.anim=null}else ub3.anim={de:Object.assign({},c),a,t0:performance.now(),ms};ub3Pedir()}
 function ub3Vista(v,ms){const l=ub3.lim,R=Math.hypot(l[2]-l[0],l[3]-l[1])/2,cx=(l[0]+l[2])/2,cz=(l[1]+l[3])/2,c=ub3.cam;
-  if(v==="gen")ub3Volar({x:cx,y:0,z:cz,d:R*1.75+4,yaw:.5,pitch:.72},ms);else if(v==="planta")ub3Volar({x:cx,y:0,z:cz,d:R*2.1+4,yaw:0,pitch:1.555},ms);
+  if(v==="gen")ub3Volar({x:cx,y:0,z:cz,d:R*1.75+4,yaw:.5,pitch:.72},ms);else if(v==="planta")ub3Volar({x:cx,y:0,z:cz,d:R*2.4+4,yaw:0,pitch:1.555},ms);
   else ub3Volar({d:Math.max(2.5,c.d*(v==="mas"?.7:1.4))},200)}
 /* acerca la cámara a una ubicación, mirándola desde su pasillo */
 function ub3Ir(cod){const s=ub3&&ub3.slots&&ub3.slots.get(cod);if(!s)return;const b=s.box,x=(b[0]+b[3])/2,z=(b[2]+b[5])/2;
