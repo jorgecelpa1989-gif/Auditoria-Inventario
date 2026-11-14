@@ -225,6 +225,18 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .ubCell.sel{box-shadow:0 0 0 2px var(--accent) inset}
 .ubCell.pil{background:var(--chip);border-style:dashed;cursor:default;opacity:.7}
 .ubCell.off{opacity:.3}
+.ubMapa[hidden],.ub3[hidden],.ub3 [hidden]{display:none}
+#ubVista{margin-right:10px;padding-right:12px;border-right:1px solid var(--line)}
+.ub3{position:relative;height:clamp(360px,calc(100vh - 290px),820px);margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
+.ub3 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#ub3C{touch-action:none;cursor:grab;outline:0}#ub3L{pointer-events:none}
+.ub3Bar{position:absolute;top:8px;right:8px;display:flex;gap:4px}.ub3Bar .btn{background:rgba(248,251,253,.94)}
+.ub3Sel,.ub3Tip{position:absolute;background:rgba(248,251,253,.96);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.35;color:var(--ink);box-shadow:0 2px 8px rgba(38,70,92,.14)}
+.ub3Sel{top:8px;left:8px;max-width:min(340px,calc(100% - 16px));border-color:var(--primary)}
+.ub3Tip{pointer-events:none;width:236px}
+.ub3Sel .l,.ub3Tip .l{margin-top:3px}.ub3Sel .code,.ub3Tip .code{font-family:var(--mono);font-weight:600}.ub3Sel .sub,.ub3Tip .sub{display:inline;margin-left:4px;font-size:11.5px;color:var(--muted)}
+.ub3Help{position:absolute;left:8px;right:8px;bottom:6px;font-size:11.5px;color:var(--muted);pointer-events:none;text-shadow:0 0 3px var(--bg),0 0 3px var(--bg)}
+@media (max-width:640px){.ub3{height:62vh}.ub3Bar{top:auto;bottom:34px}}
 .ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
 .ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
 .ucTipos .btn[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -4372,9 +4384,16 @@ end $$;
       <datalist id="ubDl"></datalist>
     </div>
     <div class="kpis" id="ubKpis"></div>
-    <div class="row"><div class="chips" id="ubChips"></div><span class="sep"></span><input id="ubQ" placeholder="Buscar producto (SKU o nombre) o ubicación" style="flex:0 1 300px"></div>
+    <div class="row"><div class="chips" id="ubVista" role="group" aria-label="Vista"><button class="chip" data-vista="2d" aria-pressed="true">Mapa</button><button class="chip" data-vista="3d" aria-pressed="false">Modelo 3D</button></div><div class="chips" id="ubChips"></div><span class="sep"></span><input id="ubQ" placeholder="Buscar producto (SKU o nombre) o ubicación" style="flex:0 1 300px"></div>
     <div id="ubDonde"></div>
     <div id="ubMapa" class="ubMapa"></div>
+    <div id="ub3" class="ub3" hidden>
+      <canvas id="ub3C" aria-label="Modelo 3D de la bodega: racks y pallets por ubicación"></canvas><canvas id="ub3L" aria-hidden="true"></canvas>
+      <div class="ub3Bar"><button class="btn sm" data-v3="gen" type="button">Vista general</button><button class="btn sm" data-v3="planta" type="button">Planta</button><button class="btn sm" data-v3="mas" type="button" title="Acercar">＋</button><button class="btn sm" data-v3="menos" type="button" title="Alejar">−</button></div>
+      <div class="ub3Sel" id="ub3Sel" hidden></div>
+      <div class="ub3Tip" id="ub3Tip" hidden></div>
+      <div class="ub3Help">Arrastra para girar · rueda o pellizco para acercar · Shift, clic derecho o dos dedos para desplazar · clic en una ubicación para ver qué tiene · doble clic para ir a ella · cada color es un producto</div>
+    </div>
   </div>
   <div class="card" id="ubDet" hidden>
     <div class="row"><div class="eyebrow">Ubicación</div><span class="sep"></span><button class="btn sm" id="ubDetX">Cerrar vista</button></div>
@@ -8096,7 +8115,7 @@ $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
    ingreso, traslado o salida con ubicación, código y cantidad en bultos (con su conversión).
    El stock de cada ubicación lo calcula el servidor sumando los movimientos.
    ===================================================================== */
-var ub={ubic:[],stock:[],movs:[]}, ubAt=null, ubBusy=false, ubSel=store.get("inv_ubsel",null), ubF=store.get("inv_ubf","todas"), ubCargaL=null;
+var ub={ubic:[],stock:[],movs:[]}, ubAt=null, ubBusy=false, ubSel=store.get("inv_ubsel",null), ubF=store.get("inv_ubf","todas"), ubCargaL=null, ubVista=store.get("inv_ubvista","2d"), ub3=null;
 const UBT={ingreso:["Ingreso","p-ok"],traslado:["Traslado","p-info"],salida:["Salida","p-warn"]};
 const ubMsg=e=>({sin_stock:"No hay esa cantidad en la ubicación de origen.",ubicacion_no_existe:"Esa ubicación no está cargada.",misma_ubicacion:"El origen y el destino son la misma ubicación.",
   falta_ubicacion:"Falta la ubicación.",cantidad_invalida:"Escribe una cantidad mayor que 0.",ubicacion_con_stock:"Hay ubicaciones con producto que no vienen en la lista: vacíalas antes de quitarlas.",
@@ -8165,9 +8184,15 @@ function ubRender(){
           const col=niv.length?niv.map(n=>{const u=us.find(x=>nivOf(x)===n);return u?celda(u):'<div class="ubCell pil" title="Pilar: sin ubicación en este nivel"><span class="c">—</span></div>'}).join("")+us.filter(x=>!nivOf(x)).map(celda).join(""):us.map(celda).join("");
           return `<div class="ubRack"><div class="ubRackT">${P==="PISO"?"":esc(R)}</div>${col}</div>`}).join("")+`</div></div>`}).join("")||'<p class="muted">Ninguna ubicación con este filtro.</p>';
     $$("#ubMapa [data-ub]").forEach(b=>b.onclick=()=>ubAbrir(b.dataset.ub))}
+  // modelo 3D: las mismas ubicaciones, búsqueda y filtro; si el equipo no tiene WebGL se vuelve al mapa
+  let en3=ubVista==="3d"&&U.length>0;
+  if(en3&&!ub3Render(sm,U,new Set(L.map(u=>u.cod)),hitU,q)){en3=false;ubVista="2d";store.set("inv_ubvista","2d");toast("Este equipo o navegador no permite el modelo 3D. Se muestra el mapa.")}
+  $("#ub3").hidden=!en3;$("#ubMapa").hidden=en3;$$("#ubVista .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.vista===ubVista));
   ubDetRender();ubMovsRender();
 }
-function ubAbrir(u){ubSel=u;store.set("inv_ubsel",u);ubRender();$("#ubDet").scrollIntoView({behavior:"smooth",block:"start"})}
+function ubAbrir(u){ubSel=u;store.set("inv_ubsel",u);ubRender();
+  if(ubVista==="3d"&&!$("#ub3").hidden){ub3Ir(u);$("#ub3").scrollIntoView({behavior:"smooth",block:"nearest"})}   // en 3D: la cámara va a la ubicación
+  else $("#ubDet").scrollIntoView({behavior:"smooth",block:"start"})}
 function ubMovRow(m,acc){const [t,c]=UBT[m.tipo]||[m.tipo,"p-mut"],an=!!m.anulado;
   return `<tr${an?' style="opacity:.55"':""}><td style="white-space:nowrap">${fechaCL(ymd(new Date(m.t)))} ${hm24(m.t)}</td><td><span class="pill ${c}">${t}</span></td><td class="code">${esc(m.desde||"—")}</td><td class="code">${esc(m.hacia||"—")}</td><td class="code">${esc(m.k)}</td><td>${esc(m.descr||(pvFind(m.k)||{}).desc||"")}</td>
     <td class="num">${an?"<s>":""}${qBC((+m.qty||0)*(+m.f||1),m.ce,m.f,m.um)}${an?"</s>":""}</td><td>${esc(m.persona||"")}${m.origen==="panel"?' <span class="small muted">(panel)</span>':""}</td>
@@ -8192,7 +8217,182 @@ function ubMovsRender(){
     $("#ubConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
 }
 $("#ubDetX").onclick=()=>{ubSel=null;store.set("inv_ubsel",null);ubRender()};
-$("#ubRef").onclick=()=>ubRefresh(true);$("#ubQ").oninput=ubRender;$("#ubDia").onchange=()=>{store.set("inv_ubdia",$("#ubDia").value);ubMovsRender()};
+$("#ubRef").onclick=()=>ubRefresh(true);$("#ubQ").oninput=ubRender;
+$$("#ubVista .chip").forEach(b=>b.onclick=()=>{ubVista=b.dataset.vista;store.set("inv_ubvista",ubVista);ubRender()});$("#ubDia").onchange=()=>{store.set("inv_ubdia",$("#ubDia").value);ubMovsRender()};
+/* ---------- Modelo 3D de la bodega ----------
+   Dibuja las mismas ubicaciones del mapa como racks y pallets en 3D. No usa librerías (WebGL directo), así la app
+   sigue siendo un solo archivo y funciona sin señal. No guarda nada: solo muestra lo que ya trae cb_ubic_datos.
+   UB_PLANO es el plano de la bodega (layout Grupo Vector 2024: 34 × 47 m). Medidas en metros, tomadas de la
+   elevación de las estanterías: vano de 2 pallets cada 2,33 m (1,165 m por posición), fondo 1,0 m, niveles cada 1,4 m,
+   racks dobles separados 0,3 m. x = ancho de la bodega (izquierda → derecha del plano), z = largo (arriba → abajo).
+   Cada hilera: eje por el que avanzan sus posiciones, d = dónde parte su fondo, a = dónde parte la posición 1,
+   s = hacia dónde crecen (1 o -1), f = lado del pasillo (1 o -1). Una hilera que no esté aquí se dibuja al costado. */
+const UB_PLANO={ancho:34,largo:47,paso:1.165,fondo:1,nivel:1.4,
+  hil:{I:{eje:"z",d:.3,a:44.61,s:-1,f:1},H:{eje:"z",d:5.1,a:42.28,s:-1,f:-1},G:{eje:"z",d:6.4,a:42.28,s:-1,f:1},F:{eje:"z",d:11.2,a:42.28,s:-1,f:-1},E:{eje:"z",d:12.5,a:42.28,s:-1,f:1},
+    D:{eje:"z",d:17.3,a:42.28,s:-1,f:-1},C:{eje:"z",d:18.6,a:42.28,s:-1,f:1},B:{eje:"z",d:23.4,a:32.96,s:-1,f:-1},A:{eje:"z",d:32.3,a:21.5,s:1,f:-1},
+    J:{eje:"x",d:.4,a:25.93,s:-1,f:1},K:{eje:"x",d:45.6,a:15.98,s:-1,f:-1}},
+  /* zonas de piso (k = código de la ubicación de piso que se guarda ahí), vías de evacuación y recintos */
+  zonas:[{k:"PICKING-RETAIL",t:"Picking retail",x:26.6,z:.6,w:4.6,l:18.2},{k:"PICKING",t:"Picking",x:25.2,z:21.6,w:5.6,l:11.4},{t:"Picking",x:23.5,z:36.6,w:3.3,l:8},
+    {k:"MASIVO",t:"Masivo",x:27.2,z:36.6,w:6.5,l:8},{t:"Vía de evacuación",x:24.8,z:19.2,w:8.9,l:1.9,via:1},{t:"Vía de evacuación",x:19.95,z:21.1,w:3.1,l:25.5,via:1},
+    {t:"Casino",x:31.6,z:.6,w:2.1,l:5.6,sala:1},{t:"Baños",x:31.6,z:6.2,w:2.1,l:5.6,sala:1},{t:"Oficina logística",x:31.6,z:11.8,w:2.1,l:7,sala:1},{t:"Administración picking",x:23.5,z:45.2,w:10.2,l:1.4,sala:1}]};
+const UB3_FOV=40*Math.PI/180,UB3_GRIS=[203,212,218],UB3_HIT=[240,140,30];
+const UB3_SKU=[[214,186,140],[150,180,205],[176,200,150],[226,170,140],[190,170,210],[232,208,130],[140,195,190],[215,160,180],[205,190,165],[160,170,200]];   // un color por producto
+const ub3Hash=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return h};
+/* malla: cajas de caras planas con la luz ya aplicada (posición xyz + color rgba por vértice) */
+function ub3Malla(){let cap=4096,buf=new ArrayBuffer(cap*16),F=new Float32Array(buf),B=new Uint8Array(buf),n=0;
+  const v=(p,r,g,b,a)=>{if(n===cap){cap*=2;const nb=new ArrayBuffer(cap*16);new Uint8Array(nb).set(B);buf=nb;F=new Float32Array(buf);B=new Uint8Array(buf)}
+    F[n*4]=p[0];F[n*4+1]=p[1];F[n*4+2]=p[2];const o=n*16+12;B[o]=r;B[o+1]=g;B[o+2]=b;B[o+3]=a;n++};
+  const q=(p,c,k,a)=>{for(const i of [0,1,2,0,2,3])v(p[i],c[0]*k,c[1]*k,c[2]*k,a)};
+  return {box(x0,y0,z0,x1,y1,z1,c,a=255){if(x0>x1)[x0,x1]=[x1,x0];if(z0>z1)[z0,z1]=[z1,z0];
+      q([[x0,y1,z0],[x0,y1,z1],[x1,y1,z1],[x1,y1,z0]],c,1,a);q([[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]],c,.88,a);q([[x1,y0,z0],[x0,y0,z0],[x0,y1,z0],[x1,y1,z0]],c,.68,a);
+      q([[x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1]],c,.8,a);q([[x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0]],c,.74,a)},
+    get n(){return n},datos:()=>new Uint8Array(buf,0,n*16)}}
+function ub3Marco(M,b,c){const [x0,y0,z0,x1,y1,z1]=b,t=.05;
+  for(const y of [y0,y1-t]){for(const z of [z0,z1-t])M.box(x0,y,z,x1,y+t,z+t,c);for(const x of [x0,x1-t])M.box(x,y,z0,x+t,y+t,z1,c)}
+  for(const x of [x0,x1-t])for(const z of [z0,z1-t])M.box(x,y0,z,x+t,y1,z+t,c)}
+function ub3Pallet(M,x0,z0,x1,z1,y,cols,rx){const W=[196,160,108],hT=1.05,n=cols.length;M.box(x0,y+.1,z0,x1,y+.14,z1,W);
+  for(const t of [0,.45,.9])rx?M.box(x0,y,z0+(z1-z0)*t,x1,y+.1,z0+(z1-z0)*(t+.1),W):M.box(x0+(x1-x0)*t,y,z0,x0+(x1-x0)*(t+.1),y+.1,z1,W);
+  cols.forEach((c,i)=>M.box(x0+.03,y+.14+hT*i/n,z0+.03,x1-.03,y+.14+hT*(i+1)/n-(i<n-1?.015:0),z1-.03,c))}
+/* estructura fija: piso, zonas, racks y la lista de espacios (uno por ubicación) con su caja para tocar */
+function ub3Armar(U){const P=UB_PLANO,p=P.paso,M=ub3Malla(),slots=new Map(),rot=[],pas=new Map(),lim=[1e9,1e9,-1e9,-1e9];
+  const ext=(x0,z0,x1,z1)=>{lim[0]=Math.min(lim[0],x0,x1);lim[1]=Math.min(lim[1],z0,z1);lim[2]=Math.max(lim[2],x0,x1);lim[3]=Math.max(lim[3],z0,z1)};
+  const zona=z=>{ext(z.x,z.z,z.x+z.w,z.z+z.l);rot.push({c:"z",t:z.t,s:z.sala,x:z.x+z.w/2,y:z.sala?1.3:.1,z:z.z+z.l/2});
+    if(z.sala)return M.box(z.x,0,z.z,z.x+z.w,1.2,z.z+z.l,[206,219,229]);
+    M.box(z.x,0,z.z,z.x+z.w,.03,z.z+z.l,z.via?[203,232,211]:[247,238,220]);const e=z.via?[150,200,165]:[214,190,140],t=.1;
+    M.box(z.x,.03,z.z,z.x+z.w,.045,z.z+t,e);M.box(z.x,.03,z.z+z.l-t,z.x+z.w,.045,z.z+z.l,e);M.box(z.x,.03,z.z,z.x+t,.045,z.z+z.l,e);M.box(z.x+z.w-t,.03,z.z,z.x+z.w,.045,z.z+z.l,e)};
+  for(const u of U){const k=u.pasillo||ubPartes(u.cod).pasillo||"—";(pas.get(k)||pas.set(k,[]).get(k)).push(u)}
+  const plano=[...pas.keys()].some(k=>P.hil[k]);let autoN=0;const ax=plano?P.ancho+4:0;
+  if(plano){ext(0,0,P.ancho,P.largo);M.box(0,-.25,0,P.ancho,0,P.largo,[226,233,238]);const m=[176,196,208],g=.18,a=.5;
+    M.box(-g,0,-g,P.ancho+g,a,0,m);M.box(-g,0,P.largo,P.ancho+g,a,P.largo+g,m);M.box(-g,0,0,0,a,P.largo,m);M.box(P.ancho,0,0,P.ancho+g,a,P.largo,m);
+    P.zonas.forEach(zona);rot.push({c:"z",t:P.ancho+" m",x:P.ancho/2,y:.1,z:P.largo+1.2},{c:"z",t:P.largo+" m",x:P.ancho+1.4,y:.1,z:P.largo/2})}
+  const AZ=[74,110,138],NA=[222,138,62];
+  for(const k of [...pas.keys()].sort(ubCmp)){if(k==="PISO")continue;const us=pas.get(k),R=u=>String(u.rack||ubPartes(u.cod).rack||""),NV=u=>String(u.nivel||ubPartes(u.cod).nivel||"");
+    const rs=[...new Set(us.map(R))].sort(ubCmp),ns=[...new Set(us.map(NV).filter(Boolean))].sort(ubCmp),rNum=rs.every(r=>/^\d+$/.test(r)&&+r>0&&+r<400),nNum=ns.every(n=>/^\d+$/.test(n)&&+n>0&&+n<30);
+    const h=plano&&rNum&&P.hil[k]?P.hil[k]:{eje:"x",d:(autoN++)*(P.fondo+3.6),a:ax,s:1,f:1},X=h.eje==="x",tops=new Map();
+    const rb=(a0,a1,d0,d1,y0,y1,c)=>X?M.box(a0,y0,d0,a1,y1,d1,c):M.box(d0,y0,a0,d1,y1,a1,c),pt=(a,d,y)=>X?{x:a,y,z:d}:{x:d,y,z:a};
+    for(const u of us){const n=rNum?+R(u):rs.indexOf(R(u))+1,nv=NV(u),li=!nv?0:nNum?+nv-1:ns.indexOf(nv),a0=h.a+h.s*(n-1)*p,a1=h.a+h.s*n*p,lo=Math.min(a0,a1),hi=Math.max(a0,a1),y0=li*P.nivel,d0=h.d-.1,d1=h.d+P.fondo+.1;
+      tops.set(n,Math.max(tops.get(n)??0,li));
+      slots.set(u.cod,{cod:u.cod,u,k,n,li,h,lo,hi,y0,box:X?[lo,y0,d0,hi,y0+1.36,d1]:[d0,y0,lo,d1,y0+1.36,hi]});
+      if(li>0){rb(lo,hi,h.d,h.d+.05,y0-.12,y0,NA);rb(lo,hi,h.d+P.fondo-.05,h.d+P.fondo,y0-.12,y0,NA)}}
+    const N=Math.max(...tops.keys()),tope=Math.max(...tops.values())*P.nivel+.35;
+    for(let j=0;j<=N;j++){if(j%2&&j!==N)continue;const t=Math.max(tops.get(j)??-1,tops.get(j+1)??-1);if(t<0)continue;const c=h.a+h.s*j*p,alto=Math.max(t*P.nivel+.35,1.5);   // un marco cada 2 pallets
+      rb(c-.04,c+.04,h.d,h.d+.08,0,alto,AZ);rb(c-.04,c+.04,h.d+P.fondo-.08,h.d+P.fondo,0,alto,AZ);
+      for(const y of [alto-.07,alto/2,.15])rb(c-.03,c+.03,h.d+.08,h.d+P.fondo-.08,y,y+.06,AZ)}
+    for(const s of slots.values())if(s.h===h)s.tope=tope;
+    const e0=h.a-h.s*.9,e1=h.a+h.s*(N*p+.9),dc=h.d+P.fondo/2+h.f*.45,dn=h.f>0?h.d+P.fondo+.6:h.d-.6;
+    rot.push(Object.assign({c:"h",t:k},pt(e0,dc,tope+.5)),Object.assign({c:"h",t:k},pt(e1,dc,tope+.5)));
+    for(const n of tops.keys())rot.push(Object.assign({c:"n",t:String(n),n},pt(h.a+h.s*(n-.5)*p,dn,.05)));
+    X?ext(e0,h.d-.6,e1,h.d+P.fondo+.6):ext(h.d-.6,e0,h.d+P.fondo+.6,e1)}
+  let zi=0;for(const u of pas.get("PISO")||[]){let z=plano&&P.zonas.find(z=>z.k===u.cod);
+    if(!z){z={t:u.cod,x:ax+(zi++)*6.5,z:autoN*(P.fondo+3.6)+1,w:5.5,l:5.5};zona(z)}
+    slots.set(u.cod,{cod:u.cod,u,k:"PISO",piso:z,box:[z.x,0,z.z,z.x+z.w,1.5,z.z+z.l]})}
+  if(lim[0]>lim[2])ext(0,0,10,10);
+  M.box(lim[0]-3,-.3,lim[1]-3,lim[2]+3,-.26,lim[3]+3,[220,229,235]);   // suelo bajo todo (también lo que queda fuera del plano)
+  ub3.slots=slots;ub3.rot=rot;ub3.lim=lim;ub3Subir(ub3.est,M)}
+/* lo que cambia: pallets (un color por producto), búsqueda, filtro y ubicación elegida */
+function ub3Dinamica(sm,enL,hitU,q){const M=ub3Malla(),T=ub3Malla(),P=UB_PLANO,marc=new Set();
+  const es=s=>deacc(s.k+" "+(s.descr||"")).includes(q),col=(s,ok)=>!ok?UB3_GRIS:q?(es(s)?UB3_HIT:UB3_GRIS):UB3_SKU[ub3Hash(s.k)%UB3_SKU.length];
+  const pin=(x,z,y0,k)=>{if(marc.has(k))return;marc.add(k);M.box(x-.03,y0,z-.03,x+.03,y0+1.3,z+.03,UB3_HIT);M.box(x-.28,y0+1.3,z-.28,x+.28,y0+1.86,z+.28,UB3_HIT)};
+  for(const s of ub3.slots.values()){const l=sm.get(s.cod)||[],ok=enL.has(s.cod),b=s.box,hit=ok&&hitU(s.u);
+    s.sol=s.piso?true:l.length>0||(ubF==="vac"&&ok);s.pk=l.length&&!s.piso?[b[0],b[1],b[2],b[3],b[1]+1.19,b[5]]:b;
+    if(s.piso){const z=s.piso,nc=Math.max(1,Math.floor((z.w-.6)/1.4)),nf=Math.max(1,Math.floor((z.l-.6)/1.5));   // en el piso: un pallet por producto
+      l.slice(0,nc*nf).forEach((x,i)=>{const px=z.x+.5+(i%nc)*1.4,pz=z.z+.5+Math.floor(i/nc)*1.5;ub3Pallet(M,px,pz,px+1,pz+1.2,.03,[col(x,ok)],false)});
+      if(hit)pin(z.x+z.w/2,z.z+z.l/2,1.4,s.cod)}
+    else{const c=(s.lo+s.hi)/2,d0=s.h.d-.1,d1=s.h.d+P.fondo+.1,X=s.h.eje==="x";
+      if(l.length){const cols=l.slice(0,3).map(x=>col(x,ok));X?ub3Pallet(M,c-.5,d0,c+.5,d1,s.y0,cols,false):ub3Pallet(M,d0,c-.5,d1,c+.5,s.y0,cols,true)}
+      else if(ubF==="vac"&&ok)T.box(b[0]+.12,b[1]+.06,b[2]+.12,b[3]-.12,b[4]-.2,b[5]-.12,[61,134,97],95);
+      if(hit){T.box(b[0],b[1],b[2],b[3],b[4],b[5],UB3_HIT,60);const dc=s.h.d+P.fondo/2;pin(X?c:dc,X?dc:c,s.tope+1.1,s.k+":"+s.n)}}
+    if(s.cod===ubSel)ub3Marco(M,[b[0]-.04,b[1]-.02,b[2]-.04,b[3]+.04,b[4]+.04,b[5]+.04],[20,70,170])}
+  ub3Subir(ub3.din,M);ub3Subir(ub3.tra,T)}
+function ub3Subir(m,M){const gl=ub3.gl;gl.bindBuffer(gl.ARRAY_BUFFER,m.b);gl.bufferData(gl.ARRAY_BUFFER,M.datos(),gl.DYNAMIC_DRAW);m.n=M.n}
+/* cámara: gira alrededor de un punto (x,z en el piso; y = altura a la que mira) a distancia d */
+function ub3Cam(){const c=ub3.cam,cp=Math.cos(c.pitch),e=[c.x+c.d*cp*Math.sin(c.yaw),c.y+c.d*Math.sin(c.pitch),c.z+c.d*cp*Math.cos(c.yaw)];
+  let f=[c.x-e[0],c.y-e[1],c.z-e[2]];const fl=Math.hypot(...f);f=f.map(v=>v/fl);const rl=Math.hypot(f[2],f[0]),r=[-f[2]/rl,0,f[0]/rl],u=[r[1]*f[2]-r[2]*f[1],r[2]*f[0]-r[0]*f[2],r[0]*f[1]-r[1]*f[0]];return {e,f,r,u}}
+function ub3Matriz(asp){const {e,f,r,u}=ub3Cam(),t=1/Math.tan(UB3_FOV/2),near=1,far=900,A=(far+near)/(near-far),B=2*far*near/(near-far),dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const r0=[r[0],r[1],r[2],-dot(r,e)].map(v=>v*t/asp),r1=[u[0],u[1],u[2],-dot(u,e)].map(v=>v*t),v2=[-f[0],-f[1],-f[2],dot(f,e)],r2=[v2[0]*A,v2[1]*A,v2[2]*A,v2[3]*A+B],r3=v2.map(v=>-v);
+  return new Float32Array([r0[0],r1[0],r2[0],r3[0],r0[1],r1[1],r2[1],r3[1],r0[2],r1[2],r2[2],r3[2],r0[3],r1[3],r2[3],r3[3]])}
+function ub3Rayo(px,py){const b=ub3.caja,w=b.clientWidth,h=b.clientHeight,{e,f,r,u}=ub3Cam(),th=Math.tan(UB3_FOV/2),nx=(px/w*2-1)*th*w/h,ny=(1-py/h*2)*th;return {o:e,d:[f[0]+r[0]*nx+u[0]*ny,f[1]+r[1]*nx+u[1]*ny,f[2]+r[2]*nx+u[2]*ny]}}
+function ub3Tocar(px,py){const {o,d}=ub3Rayo(px,py);let mejor=null,tm=1e9;
+  for(const sol of [true,false]){if(mejor)break;for(const s of ub3.slots.values()){if(!!s.sol!==sol)continue;const b=s.pk||s.box;let t0=0,t1=1e9;
+    for(let i=0;i<3&&t0<=t1;i++){if(Math.abs(d[i])<1e-9){if(o[i]<b[i]||o[i]>b[i+3])t0=2e9;continue}let a=(b[i]-o[i])/d[i],c=(b[i+3]-o[i])/d[i];if(a>c)[a,c]=[c,a];t0=Math.max(t0,a);t1=Math.min(t1,c)}
+    if(t0<=t1&&t0<tm){tm=t0;mejor=s}}}
+  return mejor}
+function ub3Suelo(px,py){const {o,d}=ub3Rayo(px,py);if(d[1]>-1e-3)return null;const t=-o[1]/d[1];return t>600?null:[o[0]+d[0]*t,o[2]+d[2]*t]}
+function ub3Limites(){const c=ub3.cam,l=ub3.lim,R=Math.hypot(l[2]-l[0],l[3]-l[1])/2;c.x=Math.max(l[0]-2,Math.min(l[2]+2,c.x));c.z=Math.max(l[1]-2,Math.min(l[3]+2,c.z));c.y=Math.max(0,Math.min(12,c.y||0));c.d=Math.max(2.5,Math.min(R*4+10,c.d));c.pitch=Math.max(.1,Math.min(1.555,c.pitch))}
+function ub3Pedir(){if(ub3&&!ub3.raf)ub3.raf=requestAnimationFrame(ub3Pintar)}
+function ub3Pintar(now){ub3.raf=0;const gl=ub3.gl,cv=ub3.cv,b=ub3.caja,w=b.clientWidth,h=b.clientHeight;if(!w||!h||gl.isContextLost())return;
+  const k=Math.min(2,window.devicePixelRatio||1);if(cv.width!==Math.round(w*k)||cv.height!==Math.round(h*k)){cv.width=ub3.lc.width=Math.round(w*k);cv.height=ub3.lc.height=Math.round(h*k)}
+  if(ub3.anim){const a=ub3.anim,t=Math.min(1,(now-a.t0)/a.ms),s=t*t*(3-2*t);for(const i in a.a)ub3.cam[i]=a.de[i]+(a.a[i]-a.de[i])*s;if(t>=1)ub3.anim=null;else ub3Pedir()}
+  ub3Limites();const m=ub3Matriz(w/h);
+  gl.viewport(0,0,cv.width,cv.height);gl.clearColor(.914,.949,.969,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.useProgram(ub3.pr);gl.uniformMatrix4fv(ub3.um,false,m);
+  const dib=x=>{if(!x.n)return;gl.bindBuffer(gl.ARRAY_BUFFER,x.b);gl.enableVertexAttribArray(0);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(0,3,gl.FLOAT,false,16,0);gl.vertexAttribPointer(1,4,gl.UNSIGNED_BYTE,true,16,12);gl.drawArrays(gl.TRIANGLES,0,x.n)};
+  dib(ub3.est);dib(ub3.din);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);dib(ub3.tra);dib(ub3.hov);gl.depthMask(true);gl.disable(gl.BLEND);
+  ub3Rotulos(m,w,h,k)}
+function ub3Proy(m,x,y,z,w,h){const cw=m[3]*x+m[7]*y+m[11]*z+m[15];if(cw<1)return null;return [((m[0]*x+m[4]*y+m[8]*z+m[12])/cw*.5+.5)*w,(.5-(m[1]*x+m[5]*y+m[9]*z+m[13])/cw*.5)*h,cw]}
+/* rótulos sobre el modelo: letra de cada hilera, zonas y números de posición (aparecen al acercarse) */
+function ub3Rotulos(m,w,h,k){const x=ub3.lc.getContext("2d"),th=Math.tan(UB3_FOV/2),F='"IBM Plex Sans",system-ui,sans-serif';x.setTransform(k,0,0,k,0,0);x.clearRect(0,0,w,h);x.textAlign="center";x.textBaseline="middle";
+  for(const r of ub3.rot){const p=ub3Proy(m,r.x,r.y,r.z,w,h);if(!p||p[0]<-30||p[0]>w+30||p[1]<-12||p[1]>h+12)continue;const ppm=h/(2*th*p[2]);
+    if(r.c==="n"){const e=ppm*UB_PLANO.paso;if(p[2]>32||!(e>=20||(e*5>=38&&r.n%5===0)))continue;x.font="600 10px "+F;x.fillStyle="#6b8799";x.fillText(r.t,p[0],p[1])}
+    else if(r.c==="z"){if(ppm<(r.s?11:4.5))continue;x.font="600 11px "+F;x.fillStyle="#557386";x.fillText(r.t.toUpperCase(),p[0],p[1])}
+    else{x.font="700 13px "+F;const tw=Math.max(22,x.measureText(r.t).width+12);x.fillStyle="rgba(248,251,253,.94)";x.strokeStyle="#4a7fa0";x.lineWidth=1.5;x.beginPath();x.rect(p[0]-tw/2,p[1]-11,tw,22);x.fill();x.stroke();x.fillStyle="#26465c";x.fillText(r.t,p[0],p[1]+.5)}}}
+function ub3Volar(a,ms){const c=ub3.cam;if(a.yaw!=null){const T=2*Math.PI;c.yaw=((c.yaw%T)+T)%T;if(a.yaw-c.yaw>Math.PI)c.yaw+=T;else if(c.yaw-a.yaw>Math.PI)c.yaw-=T}
+  if(!ms){Object.assign(c,a);ub3.anim=null}else ub3.anim={de:Object.assign({},c),a,t0:performance.now(),ms};ub3Pedir()}
+function ub3Vista(v,ms){const l=ub3.lim,R=Math.hypot(l[2]-l[0],l[3]-l[1])/2,cx=(l[0]+l[2])/2,cz=(l[1]+l[3])/2,c=ub3.cam;
+  if(v==="gen")ub3Volar({x:cx,y:0,z:cz,d:R*1.75+4,yaw:.5,pitch:.72},ms);else if(v==="planta")ub3Volar({x:cx,y:0,z:cz,d:R*2.1+4,yaw:0,pitch:1.555},ms);
+  else ub3Volar({d:Math.max(2.5,c.d*(v==="mas"?.7:1.4))},200)}
+/* acerca la cámara a una ubicación, mirándola desde su pasillo */
+function ub3Ir(cod){const s=ub3&&ub3.slots&&ub3.slots.get(cod);if(!s)return;const b=s.box,x=(b[0]+b[3])/2,z=(b[2]+b[5])/2;
+  if(s.piso)return ub3Volar({x,y:0,z,d:16,pitch:.7},500);ub3Volar({x,y:(b[1]+b[4])/2,z,d:8,pitch:.95,yaw:s.h.eje==="x"?(s.h.f>0?0:Math.PI):(s.h.f>0?Math.PI/2:-Math.PI/2)},500)}
+function ub3Pantalla(cod){const s=ub3&&ub3.slots&&ub3.slots.get(cod),bx=ub3&&ub3.caja;if(!s||!bx)return null;const b=s.pk||s.box,r=bx.getBoundingClientRect(),p=ub3Proy(ub3Matriz(r.width/r.height),(b[0]+b[3])/2,(b[1]+b[4])/2,(b[2]+b[5])/2,r.width,r.height);return p&&{x:r.left+p[0],y:r.top+p[1]}}
+function ub3Info(cod,sm){const s=ub3.slots.get(cod),l=sm.get(cod)||[],u=s.u,p=ubPartes(cod);
+  return `<b>${esc(cod)}</b> <span class="muted">${s.piso?"Zona de piso":`Hilera ${esc(u.pasillo||p.pasillo||"—")} · posición ${esc(u.rack||p.rack||"—")} · nivel ${esc(u.nivel||p.nivel||"—")}`}</span>`+
+    (l.length?l.slice(0,5).map(x=>`<div class="l"><span class="code">${esc(x.k)}</span> ${esc(x.descr)} · ${qBC(+x.base,x.ce,x.f,x.um)}</div>`).join("")+(l.length>5?`<div class="l muted">+${fmt(l.length-5)} productos más</div>`:""):'<div class="l muted">Vacía</div>')}
+function ub3Flotar(s,px,py){const t=$("#ub3Tip");if(ub3.hover===(s&&s.cod)){if(s){t.style.left=Math.min(px+14,ub3.caja.clientWidth-250)+"px";t.style.top=(py+16)+"px"}return}
+  ub3.hover=s?s.cod:null;const M=ub3Malla();if(s){const b=s.box;M.box(b[0]-.02,b[1],b[2]-.02,b[3]+.02,b[4],b[5]+.02,[31,66,88],70)}ub3Subir(ub3.hov,M);
+  t.hidden=!s;if(s){t.innerHTML=ub3Info(s.cod,ub3.sm);t.style.left=Math.min(px+14,ub3.caja.clientWidth-250)+"px";t.style.top=(py+16)+"px"}ub3.cv.style.cursor=s?"pointer":"grab";ub3Pedir()}
+function ub3Elegir(cod){ubSel=cod;store.set("inv_ubsel",cod);ubRender()}
+function ub3Ini(){if(ub3)return ub3.gl?true:false;const caja=$("#ub3"),cv=$("#ub3C");ub3={gl:null};
+  const gl=cv.getContext("webgl",{antialias:true,alpha:false})||cv.getContext("experimental-webgl");if(!gl)return false;
+  const prep=()=>{const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o},pr=gl.createProgram(),mk=()=>({b:gl.createBuffer(),n:0});
+    gl.attachShader(pr,sh(gl.VERTEX_SHADER,"attribute vec3 p;attribute vec4 c;uniform mat4 m;varying vec4 v;void main(){v=c;gl_Position=m*vec4(p,1.);}"));
+    gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,"precision mediump float;varying vec4 v;void main(){gl_FragColor=v;}"));
+    gl.bindAttribLocation(pr,0,"p");gl.bindAttribLocation(pr,1,"c");gl.linkProgram(pr);if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return false;
+    Object.assign(ub3,{pr,um:gl.getUniformLocation(pr,"m"),est:mk(),din:mk(),tra:mk(),hov:mk(),firma:null,hover:null});return true};
+  ub3={gl,caja,cv,lc:$("#ub3L"),cam:{x:0,y:0,z:0,d:60,yaw:.5,pitch:.72},slots:new Map(),rot:[],lim:[0,0,10,10],raf:0,anim:null,sm:new Map(),vista:false};
+  if(!prep()){ub3={gl:null};return false}
+  /* mouse y dedos: arrastrar gira · Shift, clic derecho o dos dedos desplazan · rueda o pellizco acercan · clic elige */
+  const pts=new Map(),pos=e=>{const r=caja.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};let arr=null,pz=null;
+  const mover=(dx,dy)=>{const c=ub3.cam,k=2*c.d*Math.tan(UB3_FOV/2)/caja.clientHeight,sy=Math.sin(c.yaw),cy=Math.cos(c.yaw),q=dy*k/Math.max(.35,Math.sin(c.pitch));c.x-=cy*dx*k+sy*q;c.z+=sy*dx*k-cy*q};
+  const zoom=(f,px,py)=>{const c=ub3.cam,g=ub3Suelo(px,py),nd=Math.max(2.5,Math.min(400,c.d*f));if(g){const t=1-nd/c.d;c.x+=(g[0]-c.x)*t;c.z+=(g[1]-c.z)*t}c.d=nd};
+  cv.addEventListener("contextmenu",e=>e.preventDefault());
+  cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);const [x,y]=pos(e);pts.set(e.pointerId,[x,y]);ub3.anim=null;
+    if(pts.size===1)arr={x,y,mov:0,pan:e.button!==0||e.shiftKey};else{arr=null;pz=null}ub3Flotar(null)});
+  cv.addEventListener("pointermove",e=>{const [x,y]=pos(e);
+    if(!pts.has(e.pointerId)){if(e.pointerType==="mouse"&&!e.buttons)ub3Flotar(ub3Tocar(x,y),x,y);return}
+    pts.set(e.pointerId,[x,y]);
+    if(pts.size===2){const [a,b]=[...pts.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;if(pz){mover(mx-pz.mx,my-pz.my);if(d>8&&pz.d>8)zoom(pz.d/d,mx,my)}pz={d,mx,my};ub3Pedir();return}
+    if(!arr)return;const dx=x-arr.x,dy=y-arr.y;arr.x=x;arr.y=y;arr.mov+=Math.abs(dx)+Math.abs(dy);if(arr.mov<5)return;
+    if(arr.pan)mover(dx,dy);else{ub3.cam.yaw-=dx*.006;ub3.cam.pitch+=dy*.005}cv.style.cursor="grabbing";ub3Pedir()});
+  const fin=e=>{if(!pts.has(e.pointerId))return;pts.delete(e.pointerId);pz=null;cv.style.cursor="grab";
+    if(arr&&arr.mov<5&&e.type==="pointerup"&&e.button===0){const s=ub3Tocar(arr.x,arr.y);if(s)ub3Elegir(s.cod)}arr=null};
+  cv.addEventListener("pointerup",fin);cv.addEventListener("pointercancel",fin);
+  cv.addEventListener("pointerleave",()=>{if(!pts.size)ub3Flotar(null)});
+  cv.addEventListener("dblclick",e=>{const [x,y]=pos(e),s=ub3Tocar(x,y);if(s)ub3Ir(s.cod)});
+  cv.addEventListener("wheel",e=>{e.preventDefault();const [x,y]=pos(e);ub3.anim=null;zoom(Math.exp(Math.max(-1.2,Math.min(1.2,e.deltaY*(e.deltaMode===1?33:1)*.0015))),x,y);ub3Flotar(null);ub3Pedir()},{passive:false});
+  cv.addEventListener("webglcontextlost",e=>{e.preventDefault();cancelAnimationFrame(ub3.raf);ub3.raf=0});
+  cv.addEventListener("webglcontextrestored",()=>{if(prep())ubRender()});   // el navegador soltó la memoria gráfica: se arma de nuevo
+  $$("#ub3 [data-v3]").forEach(b=>b.onclick=()=>ub3Vista(b.dataset.v3,450));
+  addEventListener("resize",ub3Pedir);if(window.ResizeObserver)new ResizeObserver(ub3Pedir).observe(caja);
+  return true}
+/* lo llama ubRender cuando está elegida la vista 3D; devuelve false si el equipo no tiene WebGL */
+function ub3Render(sm,U,enL,hitU,q){if(!ub3Ini())return false;ub3.sm=sm;
+  const firma=U.map(u=>[u.cod,u.pasillo,u.rack,u.nivel].join("|")).join("\n");
+  if(firma!==ub3.firma){ub3.firma=firma;ub3Armar(U);ub3.hover=null;$("#ub3Tip").hidden=true;ub3Subir(ub3.hov,ub3Malla());if(!ub3.vista){ub3.vista=true;ub3Vista("gen",0)}}
+  ub3Dinamica(sm,enL,hitU,q);
+  const e=$("#ub3Sel"),s=ubSel&&ub3.slots.get(ubSel);e.hidden=!s;
+  if(s){e.innerHTML=ub3Info(ubSel,sm)+'<div class="l"><button class="linkBtn" id="ub3Ver">Ver detalle e historial ↓</button> · <button class="linkBtn" id="ub3Acer">Acercar</button> · <button class="linkBtn" id="ub3Cer">Cerrar</button></div>';
+    $("#ub3Ver").onclick=()=>$("#ubDet").scrollIntoView({behavior:"smooth",block:"start"});$("#ub3Acer").onclick=()=>ub3Ir(ubSel);$("#ub3Cer").onclick=()=>$("#ubDetX").click()}
+  ub3Pedir();return true}
 /* ---------- cargar ubicaciones ---------- */
 function ubFilasCarga(rows){
   const R=rows.map(r=>r.map(c=>String(c==null?"":c).trim())).filter(r=>r.some(Boolean));let h=-1,C={cod:0,pasillo:-1,rack:-1,nivel:-1,pos:-1,tipo:-1,nota:-1};
