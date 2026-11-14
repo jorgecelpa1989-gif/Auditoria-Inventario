@@ -29,5 +29,5 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await m.goto(`${B}?puesto=${uid}&t=${tk}&u=${encodeURIComponent(SBU)}&k=anon`);await m.waitForTimeout(2000);await m.fill('#puPersona','FELIPE');await m.dispatchEvent('#puPersona','change');await m.waitForTimeout(300);
  await m.click('#puMenu [data-pk="pt"]');await m.waitForTimeout(2500);
  const pl=(await m.textContent('#ptPrevList')).replace(/\s+/g,' ');
- check(/ROMBO PLAST/.test(pl)&&/ROLLOS/.test(pl)&&!/\bun\b/.test(pl),'Celular, Mis pallets por día: el "10 un" antiguo se muestra en ROLLOS → '+pl.slice(0,120));
+ check(/ROMBO PLAST/.test(pl)&&/120125/.test(pl)&&/ROLLOS/.test(pl)&&/= 250 m/.test(pl)&&!/\bun\b/.test(pl),'Celular, Mis pallets por día: con código del producto y el "10 un" antiguo en ROLLOS = 250 m → '+pl.slice(0,120));
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();
