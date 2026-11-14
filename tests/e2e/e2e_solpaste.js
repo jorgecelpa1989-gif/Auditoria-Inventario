@@ -49,7 +49,7 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  const pv4=(await p.textContent('#solPrev')).replace(/\s+/g,' ');console.log('PV4',pv4);
  check(/230125 · M. Jardin Verde 6x6 · 4 ROLLOS = 120 m/.test(pv4)&&/110107 · ALAMBRE · 12 kg/.test(pv4),'Botón "Cargar Excel": lee el archivo con encabezado y descripción (4 ROLLOS = 120 m, 12 kg)');
  check(/221317 · Mos.Gal 14 BWG33 · 1,13 ROLLOS/.test(pv4)&&/221616 · Hex Gal 1 BWG 21 · 0,13 ROLLOS/.test(pv4)&&!/1\.125|125 ROLLOS/.test(pv4),'Excel con 3 decimales: 1,125 y 0,125 se leen como decimales (no 1.125 ni 125)');
- await p.click('#solClear');await p.click('#solPasteBtn');await p.waitForTimeout(300);
+ await p.evaluate(()=>{mpSol=[];renderSol()});await p.click('#solPasteBtn');await p.waitForTimeout(300);
  const s6=await p.evaluate(()=>mpSol.filter(x=>x.cod==='221317'||x.cod==='221616').map(x=>x.cod+':'+x.qu).join(','));console.log('S6',s6);
  check(/221317:1[.,]125/.test(s6)&&/221616:0[.,]125/.test(s6),'Al agregar desde Excel quedan 1,125 y 0,125 ROLLOS → '+s6);
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();
