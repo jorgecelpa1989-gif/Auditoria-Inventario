@@ -468,8 +468,10 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="seg solUnit" id="solUnit" hidden></div>
     <div class="small" id="solHint"></div>
     <div class="sugg" id="solSugg" hidden></div>
-    <details><summary class="small" style="cursor:pointer;font-weight:600">Pegar varios desde Excel</summary>
-      <textarea id="solPaste" rows="4" placeholder="Código[tab]Cantidad, una línea por producto (copiado desde Excel)" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
+    <details><summary class="small" style="cursor:pointer;font-weight:600">Cargar o pegar varios desde Excel</summary>
+      <div class="row small" style="gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap"><label class="btn sm" style="cursor:pointer">📄 Cargar Excel o CSV<input id="solFile" type="file" accept=".xlsx,.xls,.xlsm,.csv,.txt" hidden></label>
+        <span class="muted">o pega las filas copiadas desde Excel (con o sin encabezado; puede traer descripción u otras columnas)</span></div>
+      <textarea id="solPaste" rows="4" placeholder="Código[tab]Descripción[tab]Cantidad   ·   o   Código[tab]Cantidad" style="width:100%;margin-top:6px;font:13px var(--mono)"></textarea>
       <div class="row small" style="gap:10px;margin-top:4px;flex-wrap:wrap"><span class="muted">Las cantidades vienen en:</span>
         <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="solPU" value="ce" checked> bultos (rollos, cajas, sacos…)</label>
         <label style="display:flex;gap:4px;align-items:center"><input type="radio" name="solPU" value="base"> unidad del ERP (m, kg, un…)</label></div>
@@ -6069,24 +6071,54 @@ $("#solQty").addEventListener("input",solQtyHint);
 $("#solQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#solAddBtn").click()}});
 /* Pegar desde Excel: cada línea "código cantidad [unidad]". Sin unidad escrita, se usa la opción elegida (por defecto bultos,
    igual que al agregar uno a uno). Antes de agregar se muestra cómo se interpretó cada línea. */
+/* Filas de la solicitud desde Excel: con encabezado (SKU/Código + Cantidad, como el packing list) o sin él
+   (código = la primera celda que es un producto; cantidad = el último número después del código; unidad = la celda siguiente). */
+const SOL_ENC=/^(c[oó]d(igo)?|sku|item|art[ií]culo|material|producto|descripci[oó]n|cantidad|cant\.?|unidad|um)\b/i;
+function solCeldas(r){r=r.map(c=>String(c==null?"":c).replace(/\u00a0/g," ").trim());if(!r.some(Boolean))return null;
+  if(r.filter(c=>SOL_ENC.test(c)).length>=2)return null;   // fila de encabezado: se salta
+  let ci=r.findIndex(c=>c&&solFind(codeStr(c)));if(ci<0)ci=r.findIndex(Boolean);
+  for(let i=r.length-1;i>ci;i--){const c=r[i];if(!c)continue;const m=c.replace(/\s+(?=\d{3}\b)/g,"").match(/^([\d.,]+)\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.()\/]{0,11})?$/);
+    if(m&&num(m[1])!=null){const nx=r[i+1]||"",u=m[2]||(/^[A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.()\/]{0,11}$/.test(nx)?nx:"");return {cod:r[ci],qs:m[1],u,raw:r.filter(Boolean).join("  ")}}}
+  return {raw:r.filter(Boolean).join("  "),bad:"sin cantidad"}}
+function solFilas(texto){const lineas=texto.split(/\r?\n/).filter(l=>l.trim());if(!lineas.length)return [];
+  // cada línea se separa por su cuenta: tabulación (copiado de Excel), ";" o espacios
+  const rows=lineas.map(l=>l.includes("\t")?l.split("\t"):l.includes(";")?l.split(";"):(/\S\s{2,}\S/.test(l)?l.trim().split(/\s{2,}/):l.trim().split(/\s+/)));
+  // encabezado en la PRIMERA fila: se usan sus columnas (código, cantidad y, si viene, unidad)
+  const h=rows[0].map(c=>deacc(String(c).trim()));
+  if(h.filter(c=>SOL_ENC.test(c)).length>=2){
+    const ci=h.findIndex(c=>/^(sku|c[oó]d|item|art[ií]culo|material)/.test(c)),qi=h.findIndex(c=>/^(cant|qty|un\.? ?en cont|unidades$|bultos$)/.test(c)),ui=h.findIndex(c=>/^(unidad$|u\.?m\.?$|um$|bulto$)/.test(c));
+    if(ci>=0&&qi>=0)return rows.slice(1).map(r=>{const cel=k=>k>=0?String(r[k]==null?"":r[k]).replace(/\u00a0/g," ").trim():"";const raw=r.map(c=>String(c).trim()).filter(Boolean).join("  ");
+      if(!raw)return null;const cod=cel(ci),qs=cel(qi).replace(/\s+(?=\d{3}\b)/g,"");
+      if(!cod||num(qs)==null)return {raw,bad:"sin cantidad"};return {cod,qs,u:cel(ui),raw}}).filter(Boolean)}
+  return rows.map(solCeldas).filter(Boolean)}
 function solPasteParse(){const pu=(document.querySelector('input[name="solPU"]:checked')||{}).value||"ce",L=[];
-  for(const ln of $("#solPaste").value.split(/\r?\n/)){const t=ln.replace(/\u00a0/g," ").trim();if(!t)continue;const m=t.match(/^(\S+)[\s;,\t]+([\d.,]+)(?:[\s;,\t]+([A-Za-zÁÉÍÓÚÑáéíóúñ.]+))?\s*$/);
-    if(!m){L.push({raw:t,bad:"sin cantidad"});continue}const q=num(m[2]);if(q==null||q<=0){L.push({raw:t,bad:"cantidad inválida"});continue}
-    const it=solFind(codeStr(m[1])),u=m[3]?(it&&conv(it)&&esUnidadCe(it,m[3])?"ce":"base"):pu,enCe=!!(it&&conv(it)&&u==="ce");
-    L.push({cod:m[1],q,unidad:m[3]||(enCe?it.ce:""),it,enCe,base:enCe?q*(+it.f):q})}
+  for(const x of solFilas($("#solPaste").value)){
+    if(x.bad){L.push(x);continue}const q=num(x.qs);if(q==null||q<=0){L.push({raw:x.raw,bad:"cantidad inválida"});continue}
+    const it=solFind(codeStr(x.cod));let u=pu,uWarn=false;
+    if(x.u&&it){if(conv(it)&&esUnidadCe(it,x.u))u="ce";else if(UMN(x.u)===UMN(it.um)||deacc(x.u)===deacc(umTxt(it.um)))u="base";else uWarn=true}   // unidad que no calza: se usa la opción elegida y se avisa
+    const enCe=!!(it&&conv(it)&&u==="ce");
+    L.push({cod:x.cod,raw:x.raw,q,unidad:x.u&&!uWarn?x.u:(enCe?it.ce:""),uWarn:uWarn?x.u:"",it,enCe,base:enCe?q*(+it.f):q})}
   return L}
 function solPasteRender(){const L=solPasteParse(),box=$("#solPrev");if(!L.length){box.innerHTML="";$("#solPasteBtn").textContent="Agregar lista";return}
   const ok=L.filter(x=>!x.bad);
   box.innerHTML=`<div class="muted" style="margin-bottom:2px">Así se va a agregar:</div>`+L.map(x=>x.bad?`<div style="color:var(--bad)">✕ ${esc(x.raw)} · ${x.bad}</div>`
     :!x.it?`<div style="color:var(--warn)">⚠ <b>${esc(x.cod)}</b> · ${fmt2(x.q)} · no está en la lista de productos</div>`
-    :`<div>✓ <b>${esc(x.it.cod)}</b> · ${esc(x.it.desc)} · <b>${x.enCe?`${fmt2(x.q)} ${esc(x.q===1?x.it.ce:plural(x.it.ce))}`:`${fmt2(x.q)} ${esc(umTxt(x.it.um))}`}</b>${conv(x.it)?` <span class="muted">= ${x.enCe?`${fmt2(x.base)} ${esc(umTxt(x.it.um))}`:`${fmt2(x.base/x.it.f)} ${esc(plural(x.it.ce))}`}</span>`:""}</div>`).join("");
+    :`<div>${x.uWarn?`<span style="color:var(--warn)">⚠ unidad "${esc(x.uWarn)}" no reconocida: se toma en ${x.enCe?"bultos":"unidad del ERP"}</span><br>`:""}✓ <b>${esc(x.it.cod)}</b> · ${esc(x.it.desc)} · <b>${x.enCe?`${fmt2(x.q)} ${esc(x.q===1?x.it.ce:plural(x.it.ce))}`:`${fmt2(x.q)} ${esc(umTxt(x.it.um))}`}</b>${conv(x.it)?` <span class="muted">= ${x.enCe?`${fmt2(x.base)} ${esc(umTxt(x.it.um))}`:`${fmt2(x.base/x.it.f)} ${esc(plural(x.it.ce))}`}</span>`:""}</div>`).join("");
   $("#solPasteBtn").textContent=`Agregar lista (${fmt(ok.length)})`}
 $("#solPaste").addEventListener("input",solPasteRender);
 $$('input[name="solPU"]').forEach(r=>r.onchange=solPasteRender);
-$("#solPasteBtn").onclick=()=>{let n=0,bad=0;const pu=(document.querySelector('input[name="solPU"]:checked')||{}).value||"ce";
-  for(const x of solPasteParse()){if(x.bad){bad++;continue}
-    if(solAdd(x.cod,String(x.q),true,x.enCe?x.it.ce:(x.it&&conv(x.it)?umTxt(x.it.um):"")))n++;else bad++}
-  $("#solPaste").value="";solPasteRender();renderSol();toast(`${fmt(n)} productos agregados${bad?` · ${fmt(bad)} líneas sin cantidad`:""}`)};
+$("#solPasteBtn").onclick=()=>{let n=0;const quedan=[];
+  for(const x of solPasteParse()){if(x.bad){quedan.push(x.raw);continue}
+    if(solAdd(x.cod,String(x.q),true,x.enCe?x.it.ce:(x.it&&conv(x.it)?umTxt(x.it.um):"")))n++;else quedan.push(x.raw)}
+  $("#solPaste").value=quedan.join("\n");solPasteRender();renderSol();   // las líneas que no se pudieron agregar quedan en el cuadro para corregirlas
+  toast(`${fmt(n)} productos agregados${quedan.length?` · ${fmt(quedan.length)} línea${quedan.length>1?"s":""} sin agregar (quedan en el cuadro)`:""}`)};
+$("#solFile").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f)return;
+  try{const buf=await f.arrayBuffer();let rows;
+    if(/\.(csv|txt)$/i.test(f.name)){const txt=new TextDecoder().decode(buf).replace(/^\uFEFF/,"");const l0=txt.split("\n")[0];rows=csvFilas(txt,l0.includes("\t")?"\t":l0.includes(";")?";":",")}
+    else{const wb=XLSX.read(buf,{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:""})}
+    $("#solPaste").value=rows.filter(r=>r.some(c=>String(c).trim())).map(r=>r.map(c=>String(c).replace(/[\t\r\n]+/g," ").trim()).join("\t")).join("\n");
+    solPasteRender();toast("Revisa la vista previa y toca «Agregar lista»")}
+  catch(er){toast("No se pudo leer el archivo. Prueba guardarlo como .xlsx o copia y pega las filas.")}});
 $("#solClear").onclick=()=>{mpSol=[];solSave();renderSol()};
 renderSol();
 function mpShowCreated(m){
@@ -6728,7 +6760,7 @@ function renderPuesto(){
   if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
   if(can("ubic_mover"))items.push({k:"ubic",ic:"📍",t:"Almacenamiento y ubicaciones",s:"Registra ingresos, traslados y salidas de pallets en sus ubicaciones"});
   if(can("prov_recibir"))items.push({k:"prov",ic:"🚚",t:"Recepción de proveedores",s:"Recibe lo que llega de proveedores, con o sin packing list"});
-  if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
+  if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Retiro de PT para despacho",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
   if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
   if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía o de factura, fecha y productos"});
   if(can("dev_recibir"))items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} devolución${devN>1?"es":""} por recibir`:"Sin devoluciones por recibir",dot:devN});
@@ -6975,10 +7007,10 @@ async function ptPrevLoad(){const dia=$("#ptPrevDia").value,tb=$("#ptPrevList");
   try{const L=await prpc("cb_pt_dia",{p_dia:dia})||[];
     for(const l of L)if(!(l.ce&&+l.f>0&&+l.f!==1)){const it=ptFind(l.k||l.code);if(conv(it)){l.ce=it.ce;l.f=+it.f;if(!l.um||UMN(l.um)==="un")l.um=umTxt(it.um);l.convAp=true}}   // registro antiguo sin bulto: se muestra con el de la lista de productos
     const ya=new Set(L.map(l=>l.lid)),pend=dia===ymd(new Date())?ptCel.lect.filter(l=>!l.sync&&!ya.has(l.lid)&&ymd(new Date(l.t))===dia).reverse():[];
-    tb.innerHTML=pend.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)} · ⏳ por enviar</div></td><td style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span></td><td></td></tr>`).join("")+
+    tb.innerHTML=pend.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)} · ⏳ por enviar</div></td><td style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td><td></td></tr>`).join("")+
     (L.length?L.slice().reverse().map(l=>{const u=l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um),ed=Array.isArray(l.ed)&&l.ed.length;
-      return `<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${hm24(l.rt||l.t)}${ed?` · <span style="color:var(--warn)">corregido</span>`:""}</div></td>
-        <td style="white-space:nowrap"><input data-pq="${esc(l.lid)}" value="${fmt2(l.qty)}" inputmode="decimal" style="width:72px;text-align:right"> <span class="small muted">${esc(u)}</span></td>
+      return `<tr><td style="white-space:normal;width:100%"><div style="font-weight:700;font-size:14px">${ptSN(l)?'Pallet <span class="muted" style="font-weight:500">sin número</span>':"Pallet "+esc(l.pallet)}</div><div style="font-weight:600;font-size:13px">${esc(l.desc||l.code)}</div><div class="small muted">${esc(l.k||l.code)} · ${hm24(l.rt||l.t)}${ed?` · <span style="color:var(--warn)">corregido</span>`:""}</div></td>
+        <td style="white-space:nowrap"><input data-pq="${esc(l.lid)}" value="${fmt2(l.qty)}" inputmode="decimal" style="width:72px;text-align:right"> <span class="small muted">${esc(u)}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td>
         <td><button class="btn sm primary" data-ps="${esc(l.lid)}">Guardar</button></td></tr>`}).join(""):pend.length?"":'<tr><td class="muted">No registraste pallets ese día.</td></tr>');
     $$("#ptPrevList [data-ps]").forEach(b=>b.onclick=async()=>{const lid=b.dataset.ps,q=num($(`#ptPrevList [data-pq="${CSS.escape(lid)}"]`).value);
       if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
@@ -6999,7 +7031,7 @@ async function ptPalletRead(v){
     $("#ptPalletInfo").innerHTML='<span class="muted">Buscando lo que declaró producción…</span>';
     try{const d=await prpc("cb_pt_buscar",{p_pallet:v});ptDecl=d||null;
       if(d){const it=ptFind(d.k||d.code)||{cod:d.k||d.code,desc:d.desc,um:d.um,ce:d.ce,f:d.f};ptProducto(it.cod,true);$("#ptQty").value=String(d.qty);
-        $("#ptPalletInfo").innerHTML=`<span style="color:var(--ok);font-weight:600">Producción declaró ${fmt2(d.qty)} ${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))} de ${esc(String(d.desc||d.code).replace(/\.+$/,""))}.</span> <span class="muted">Revisa y toca OK, o corrige la cantidad.</span>`;
+        $("#ptPalletInfo").innerHTML=`<span style="color:var(--ok);font-weight:600">Producción declaró ${fmt2(d.qty)} ${esc(d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um))} de ${esc(d.k||d.code)} · ${esc(String(d.desc||d.code).replace(/\.+$/,""))}.</span> <span class="muted">Revisa y toca OK, o corrige la cantidad.</span>`;
         if(ptCamI){ptHold=true;$("#ptCamMsg").textContent="Pallet encontrado. Revisa la cantidad y toca OK."}
         $("#ptQty").focus();try{$("#ptQty").select()}catch(e){}return}
       $("#ptPalletInfo").innerHTML='<span style="color:var(--warn);font-weight:600">Producción no ha registrado este pallet.</span> <span class="muted">Regístralo igual: queda marcado para revisar.</span>'}

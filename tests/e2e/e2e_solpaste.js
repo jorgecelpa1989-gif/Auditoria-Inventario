@@ -16,11 +16,25 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  await p.fill('#solPaste','221317\t6\n221616 11\n221602\t56\n230125 27\n110107\t15\n999999 3\nCódigo\tCantidad');await p.waitForTimeout(300);
  const prev=await p.textContent('#solPrev');console.log('PREV',prev.replace(/\s+/g,' '));
  check(/221317 · Mos.Gal 14 BWG33 · 6 ROLLOS = 540 m/.test(prev)&&/230125 · M. Jardin Verde 6x6 · 27 ROLLOS = 810 m/.test(prev),'Vista previa: por defecto en bultos (6 ROLLOS = 540 m, 27 ROLLOS = 810 m)');
- check(/110107 · ALAMBRE · 15 kg/.test(prev)&&/999999 · 3 · no está en la lista/.test(prev)&&/Código\s+Cantidad · sin cantidad/.test(prev),'Vista previa: sin conversión en su unidad, código inexistente y encabezado marcados');
+ check(/110107 · ALAMBRE · 15 kg/.test(prev)&&/999999 · 3 · no está en la lista/.test(prev)&&!/Código/.test(prev),'Vista previa (la fila de encabezado se salta): sin conversión en su unidad, código inexistente y encabezado marcados');
  check(/Agregar lista \(6\)/.test(await p.textContent('#solPasteBtn')),'Botón indica cuántas líneas se agregan (6)');
  await p.screenshot({path:S+'/solpaste.png',clip:await p.evaluate(()=>{const r=document.querySelector('#solPaste').closest('details').getBoundingClientRect();return {x:r.x,y:r.y+scrollY,width:r.width,height:r.height+40}})});
  await p.check('input[name="solPU"][value="base"]');await p.waitForTimeout(200);check(/221317 · Mos.Gal 14 BWG33 · 6 m = 0,07 ROLLOS/.test(await p.textContent('#solPrev')),'Al elegir "unidad del ERP": 6 m = 0,07 ROLLOS');
  await p.check('input[name="solPU"][value="ce"]');await p.click('#solPasteBtn');await p.waitForTimeout(400);
  const sol=await p.evaluate(()=>mpSol.map(x=>x.cod+':'+x.q+':'+x.u));console.log('SOL',sol.join(' '));
  check(sol.includes('221317:540:ce')&&sol.includes('221602:2800:ce')&&sol.includes('230125:810:ce')&&sol.includes('110107:15:base'),'Solicitud: guarda 540 m (6 rollos), 2800 m (56 rollos), 810 m (27 rollos), 15 kg');
+ // Formatos reales de Excel (auditoría): con descripción, con encabezado arriba, columnas extra, miles con espacio, unidad pegada y unidad abreviada
+ await p.fill('#solPaste','Código\tDescripción\tCantidad\tUnidad\n221317\tMos.Gal 14 BWG33\t6\tROLLOS\n110107\tALAMBRE\t1 000\tkg\n221602\tHex Gal\t2\tCJ');await p.waitForTimeout(300);
+ const pv2=(await p.textContent('#solPrev')).replace(/\s+/g,' ');console.log('PV2',pv2);
+ check(/221317 · Mos.Gal 14 BWG33 · 6 ROLLOS = 540 m/.test(pv2)&&/110107 · ALAMBRE · 1\.000 kg/.test(pv2)&&/unidad "CJ" no reconocida/.test(pv2)&&/Agregar lista \(3\)/.test(await p.textContent('#solPasteBtn')),'Excel con encabezado y descripción: 3 filas leídas (6 ROLLOS, 1.000 kg con miles, unidad "CJ" avisada)');
+ await p.fill('#solPaste','221317\tMos.Gal\t2\tOT-55\n999999 abc\n221616\t3UN');await p.waitForTimeout(300);
+ const pv3=(await p.textContent('#solPrev')).replace(/\s+/g,' ');console.log('PV3',pv3);
+ check(/221317 · Mos.Gal 14 BWG33 · 2 ROLLOS/.test(pv3)&&/999999 abc · sin cantidad/.test(pv3)&&/221616/.test(pv3),'Sin encabezado: columna extra (OT) y "3UN" se leen; lo que no tiene cantidad se marca');
+ await p.click('#solPasteBtn');await p.waitForTimeout(300);
+ check((await p.inputValue('#solPaste')).trim()==='999999  abc','Al agregar, la línea que falló queda en el cuadro para corregirla (no se pierde)');
+ // Cargar el archivo Excel
+ const xb=await p.evaluate(()=>{const ws=XLSX.utils.aoa_to_sheet([["Código","Descripción","Cantidad"],["230125","M. Jardin",4],["110107","Alambre",12]]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Hoja1");return XLSX.write(wb,{type:'base64',bookType:'xlsx'})});
+ require('fs').writeFileSync(S+'/sol.xlsx',Buffer.from(xb,'base64'));await p.setInputFiles('#solFile',S+'/sol.xlsx');await p.waitForTimeout(800);
+ const pv4=(await p.textContent('#solPrev')).replace(/\s+/g,' ');console.log('PV4',pv4);
+ check(/230125 · M. Jardin Verde 6x6 · 4 ROLLOS = 120 m/.test(pv4)&&/110107 · ALAMBRE · 12 kg/.test(pv4),'Botón "Cargar Excel": lee el archivo con encabezado y descripción (4 ROLLOS = 120 m, 12 kg)');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();
