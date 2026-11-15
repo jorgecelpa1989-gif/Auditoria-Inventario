@@ -18,9 +18,14 @@ const usr=(nom,area,perm)=>{const id=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMI
  // eliminar entrega
  const mv=JSON.parse(rpc('cb_mov_crear',{p_clave:ADMIN,p_nombre:'Solicitud mala',p_vence:new Date(Date.now()+3600e3).toISOString(),p_items:null,p_meta:{sol:[["221317",24]],puestos:true}}).body);
  await s.evaluate(()=>{const d=document.querySelector('#mpListBox');if(d)d.open=true});await s.click('#btnMpRefresh');await s.waitForTimeout(2000);
- check(await s.isVisible('#mpTbl [data-mx]'),'Panel: cada entrega tiene "Eliminar…"');
+ check(await s.isVisible('#mpTbl [data-mx]')&&/Anular/.test(await s.textContent('#mpTbl [data-mx]')),'Panel: cada entrega tiene "Anular…" (ya no "Eliminar")');
  await s.click('#mpTbl [data-mx]');await s.waitForTimeout(300);await s.click('#cYes');await s.waitForTimeout(1500);
- check(sql(`select count(*) from cb_mov where id='${mv.id}'`)==='0','Eliminar: la entrega se borra de Supabase');
+ check(sql(`select count(*) from cb_mov where id='${mv.id}' and anulado is not null`)==='1'&&!/Solicitud mala/.test(await s.textContent('#mpTbl')),'Anular: la entrega NO se borra de Supabase; queda anulada y sale de la lista');
+ await s.click('#mpAnul summary');await s.waitForTimeout(1200);
+ check(/Anuladas · 1/.test(await s.textContent('#mpAnul summary'))&&/Solicitud mala/.test(await s.textContent('#mpAnul'))&&/Administrador/.test(await s.textContent('#mpAnul')),'«Anuladas»: aparece con fecha y quién la anuló');
+ await s.click('#mpAnul [data-rest]');await s.waitForTimeout(2000);
+ check(sql(`select count(*) from cb_mov where id='${mv.id}' and anulado is null`)==='1'&&/Solicitud mala/.test(await s.textContent('#mpTbl')),'Restaurar: vuelve a la lista de entregas');
+ await s.click('#mpTbl [data-mx]');await s.waitForTimeout(300);await s.click('#cYes');await s.waitForTimeout(1500);
  // celular bodega: lista se actualiza sola + panel avisa entrega directa
  const [bId,bT]=usr('Felipe','Bodega',['mp_entregar']);
  const cp=await b.newContext({...devices['iPhone 13']});await cp.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
