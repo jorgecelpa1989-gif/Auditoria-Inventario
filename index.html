@@ -4310,6 +4310,88 @@ begin
   return v_id;
 end $$;
 
+-- =====================================================================
+--  RECEPCIÓN ENTRE VARIAS PERSONAS (proveedores y devoluciones)
+--  Antes, cada celular mandaba su lista completa y el servidor la REEMPLAZABA: si dos personas
+--  recibían el mismo documento, el último en guardar borraba las líneas del otro.
+--  Ahora cada línea queda marcada con el usuario que la registró ("pu") y cada celular solo
+--  reemplaza SUS líneas; las del otro se conservan tal como están en el servidor.
+--  Líneas antiguas sin "pu": se comportan como antes (las reemplaza quien guarda).
+--  Compatible con la app anterior: los parámetros no cambian; la respuesta suma "rec".
+-- =====================================================================
+create or replace function public.cb_rec_mezclar(p_old jsonb, p_new jsonb, p_pu text) returns jsonb
+language sql immutable set search_path = public as $$
+  with otros as (   -- líneas de otras personas: se quedan como están en el servidor
+    select e from jsonb_array_elements(coalesce(p_old, '[]'::jsonb)) e
+     where coalesce(e->>'pu', '') <> '' and e->>'pu' <> p_pu),
+  mias as (         -- lo que manda este celular (sin las copias de líneas ajenas que pudo traer)
+    select n.e || jsonb_build_object('pu', p_pu) e from jsonb_array_elements(coalesce(p_new, '[]'::jsonb)) n(e)
+     where not exists (select 1 from otros o where o.e->>'lid' = n.e->>'lid'))
+  select coalesce(jsonb_agg(e order by e->>'t', e->>'lid'), '[]'::jsonb) from (select e from otros union all select e from mias) x
+$$;
+revoke execute on function public.cb_rec_mezclar(jsonb, jsonb, text) from public, anon, authenticated;
+
+create or replace function public.cb_prov_recibir(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; v_fecha date; v_rec jsonb; v_pers text := left(p_doc->>'persona', 80);
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then raise exception 'sin_permiso'; end if;
+  if p_id is null then raise exception 'datos_invalidos'; end if;
+  perform cb_prov_lineas_ok(p_rec);
+  select * into p from cb_prov where id = p_id for update;
+  if not found then
+    insert into cb_prov(id, origen, persona, fecha) values (p_id, p_puesto, v_pers, (now() at time zone 'America/Santiago')::date)
+    returning * into p;
+  end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if p.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p.origen = p_puesto then
+    begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then v_fecha := null; end;
+    update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+           proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+           referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), contenedor = left(trim(coalesce(p_doc->>'contenedor','')), 40), fecha = coalesce(v_fecha, fecha), nota = left(p_doc->>'nota', 300)
+     where id = p_id
+    returning * into p;
+  else
+    -- Recepción cargada en el panel: bodega solo completa lo que quedó vacío (no cambia lo que escribió el supervisor).
+    update cb_prov set guia = case when coalesce(guia, '') = '' then left(trim(coalesce(p_doc->>'guia','')), 40) else guia end,
+           referencia = case when coalesce(referencia, '') = '' then left(trim(coalesce(p_doc->>'referencia','')), 60) else referencia end,
+           contenedor = case when coalesce(contenedor, '') = '' then left(trim(coalesce(p_doc->>'contenedor','')), 40) else contenedor end
+     where id = p_id
+    returning * into p;
+  end if;
+  v_rec := cb_rec_mezclar(p.rec, p_rec, p_puesto);
+  if p_terminar then
+    if jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
+    if coalesce(p.guia, '') = '' and coalesce(p.referencia, '') = '' then raise exception 'falta_documento'; end if;
+  end if;
+  update cb_prov set rec = v_rec, rec_persona = v_pers, rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end, 'rec', v_rec);
+end $$;
+
+create or replace function public.cb_dev_recibir(p_puesto text, p_ses text, p_id uuid, p_persona text, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev; v_rec jsonb;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'dev_recibir') then raise exception 'sin_permiso'; end if;
+  if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
+  select * into d from cb_dev where id = p_id for update;
+  if not found or d.enviado is null then raise exception 'no_existe'; end if;
+  if d.finalizado is not null then raise exception 'finalizado'; end if;
+  if d.recibido is not null then raise exception 'ya_recibida'; end if;
+  v_rec := cb_rec_mezclar(d.rec, p_rec, p_puesto);
+  if p_terminar and jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
+  update cb_dev set rec = v_rec, rec_persona = left(p_persona, 80), rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end, 'rec', v_rec);
+end $$;
+
 </script>
   </div>
 
@@ -7209,11 +7291,18 @@ function dvHomeRender(){
 }
 async function dvNueva(){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
-  if(dv&&dv.dirty)await dvSync(false);
+  if(await dvPendiente(null))return;
   dv={id:uuid4(),puesto:PST.puesto,modo:"carga",doc:{guia:"",factura:"",fecha:hoyISO(),nota:""},lect:[],dirty:false,ver:0};dvSave();dvWork();
 }
-function dvElegir(id){
+async function dvPendiente(id){   // true = hay lecturas sin guardar de otra recepción (o de esta): se retoma esa
+  if(!dv||dv.fin||!dv.dirty||dv.puesto!==PST.puesto)return false;
+  if(dv.id!==id&&await dvSync(false))return false;
+  if(dv.modo!==dvModo){toast(`Tienes lecturas sin guardar en ${dv.modo==="rec"?"Recepción de devoluciones":"Devolución a bodega"}. Ábrela y guárdala con señal.`);return true}
+  if(dv.id!==id)toast("Tienes lecturas sin guardar en esta devolución. Guárdala con señal antes de abrir otra.");
+  dvWork();return true}
+async function dvElegir(id){
   const d=(puDev||[]).find(x=>x.id===id);if(!d)return;
+  if(await dvPendiente(id))return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(dvModoRec()){
     if(d.recibido)return toast("Esta devolución ya fue recibida");
@@ -7311,10 +7400,16 @@ function dvDeclRender(){
     const quit=dv.lect.filter(l=>key(l.k||l.code)===r.k);if(quit.length){dv.lect=dv.lect.filter(l=>key(l.k||l.code)!==r.k);dvDirty();dvRender()}
     $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
 }
+/* fila de lo registrado en el celular (devoluciones y proveedores): código primero, bulto y su conversión;
+   las líneas de otra persona (varias reciben el mismo documento) muestran su nombre y no se quitan desde aquí */
+function recFila(l,attr){const ajena=l.pu&&l.pu!==PST.puesto,f=+l.f||1,cv=l.ce&&f!==1;
+  return `<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px"><span class="code">${esc(l.k||l.code)}</span> · ${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${hhmm(l.t)}${ajena&&l.user?" · registró "+esc(l.user):""}</div></td>`+
+    `<td class="num" style="font-weight:700;white-space:nowrap">${fmt2(l.qty)} <span class="small muted">${esc(cv?plural(l.ce):l.ce?plural(l.ce):umTxt(l.um||""))}</span>${cv?`<div class="small muted">= ${fmt2((+l.qty||0)*f)} ${esc(umTxt(l.um||""))}</div>`:""}</td>`+
+    `<td>${ajena?"":`<button class="btn sm" ${attr}="${esc(l.lid)}" aria-label="Quitar">✕</button>`}</td></tr>`}
 function dvRender(){
   if(!dv)return;if(dvRec())dvDeclRender();const ls=[...dv.lect].reverse();
   $("#dvInfo").textContent=`${fmt(dv.lect.length)} líneas · ${fmt(new Set(dv.lect.map(l=>key(l.k||l.code))).size)} productos`;
-  $("#dvList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-dl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $("#dvList").innerHTML=ls.length?ls.map(l=>recFila(l,"data-dl")).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#dvList [data-dl]").forEach(b=>b.onclick=()=>{const l=dv.lect.find(z=>z.lid===b.dataset.dl);if(!l)return;
     confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{dv.lect=dv.lect.filter(z=>z.lid!==l.lid);dvDirty();dvRender();toast("Línea quitada")},"#dvConfirm")});
 }
@@ -7332,7 +7427,8 @@ async function dvSync(final){
   if(navigator.onLine===false&&!final){dvRenderSync();return false}
   dvSyncing=true;dvRenderSync();const v=dv.ver||0;
   try{
-    if(dvRec())await prpc("cb_dev_recibir",{p_id:dv.id,p_persona:PST.persona||"",p_rec:dv.lect,p_terminar:!!final});
+    if(dvRec()){const r=await prpc("cb_dev_recibir",{p_id:dv.id,p_persona:PST.persona||"",p_rec:dv.lect,p_terminar:!!final});
+      if(r&&Array.isArray(r.rec)&&(dv.ver||0)===v&&!final){dv.lect=r.rec;dvRender()}}   // lista unida: también lo que registró otra persona
     else{const r=await prpc("cb_dev_guardar",{p_id:dv.id,p_doc:Object.assign({persona:PST.persona||""},dv.doc),p_lect:dv.lect,p_enviar:!!final});if(r&&r.enviado)dv.enviado=r.enviado}
     if((dv.ver||0)===v)dv.dirty=false;dv.err="";dv.syncAt=new Date().toISOString();dvSave();return true;
   }catch(e){if(final)toast(dvMsg(e));else if(!e.net)dv.err=dvMsg(e);dvSave();return false}
@@ -7720,12 +7816,19 @@ function pcHomeRender(){
   $("#pcNew").onclick=pcNueva;
   $$("#pcHome [data-pc]").forEach(b=>b.onclick=()=>pcElegir(b.dataset.pc));
 }
-function pcNueva(){
+async function pcNueva(){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  if(await pcPendiente(null))return;
   pc={id:uuid4(),puesto:PST.puesto,propia:true,doc:{tipo:"nacional",proveedor:"",guia:"",referencia:"",contenedor:"",fecha:hoyISO(),nota:""},decl:[],lect:[],dirty:false,ver:0};pcSave();pcWork();
 }
-function pcElegir(id){
+async function pcPendiente(id){   // true = hay lecturas sin guardar de otra recepción (o de esta): se retoma esa
+  if(!pc||pc.fin||!pc.dirty||pc.puesto!==PST.puesto)return false;
+  if(pc.id!==id&&await pcSync(false))return false;
+  if(pc.id!==id)toast("Tienes lecturas sin guardar en esta recepción. Guárdala con señal antes de abrir otra.");
+  pcWork();return true}
+async function pcElegir(id){
   const d=pcList.find(x=>x.id===id);if(!d)return;
+  if(await pcPendiente(id))return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(d.recibido)return toast("Esta recepción ya se terminó");
   pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",contenedor:d.contenedor||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
@@ -7828,7 +7931,7 @@ function pcDeclRender(){
 function pcRender(){
   if(!pc)return;pcDeclRender();const ls=[...pc.lect].reverse();
   $("#pcInfo").textContent=`${fmt(pc.lect.length)} líneas · ${fmt(new Set(pc.lect.map(l=>key(l.k||l.code))).size)} productos`;
-  $("#pcList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-pcdl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $("#pcList").innerHTML=ls.length?ls.map(l=>recFila(l,"data-pcdl")).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#pcList [data-pcdl]").forEach(b=>b.onclick=()=>{const l=pc.lect.find(z=>z.lid===b.dataset.pcdl);if(!l)return;
     confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{pc.lect=pc.lect.filter(z=>z.lid!==l.lid);pcDirty();pcRender();toast("Línea quitada")},"#pcConfirm")});
 }
@@ -7845,7 +7948,8 @@ async function pcSync(final){
   if(!pc||pcSyncing)return false;if(!final&&!pc.dirty)return true;
   if(navigator.onLine===false&&!final){pcRenderSync();return false}
   pcSyncing=true;pcRenderSync();const v=pc.ver||0;
-  try{await prpc("cb_prov_recibir",{p_id:pc.id,p_doc:Object.assign({},pc.doc,{persona:PST.persona||""}),p_rec:pc.lect,p_terminar:!!final});
+  try{const r=await prpc("cb_prov_recibir",{p_id:pc.id,p_doc:Object.assign({},pc.doc,{persona:PST.persona||""}),p_rec:pc.lect,p_terminar:!!final});
+    if(r&&Array.isArray(r.rec)&&(pc.ver||0)===v&&!final){pc.lect=r.rec;pcRender()}   // lista unida: también lo que registró otra persona
     if((pc.ver||0)===v)pc.dirty=false;pc.err="";pc.syncAt=new Date().toISOString();pcSave();return true}
   catch(e){if(final)toast(pcMsg(e));else if(!e.net)pc.err=pcMsg(e);pcSave();return false}
   finally{pcSyncing=false;pcRenderSync()}
