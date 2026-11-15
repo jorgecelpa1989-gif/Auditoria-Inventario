@@ -5040,7 +5040,7 @@ function renderRecent(){
   const rows=scans.slice(-40).reverse();
   $("#recent").innerHTML=`<thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Total</th><th></th></tr></thead><tbody>`+
    (rows.length?rows.map(s=>{const it=erp&&findItem(s.code);const i=scans.indexOf(s);return `<tr>
-   <td class="rprod"><div class="rd">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está en la lista</span>':esc(s.code))}</div><div class="small muted">${esc(s.code)} · ${esc(s.ubic||"sin ubicación")} · ${new Date(s.t).toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div></td>
+   <td class="rprod"><div class="rd"><span class="code">${esc(s.code)}</span>${it?" · "+esc(it.desc):(erp?' <span class="pill p-bad">No está en la lista</span>':"")}</div><div class="small muted">${esc(s.ubic||"sin ubicación")} · ${new Date(s.t).toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div></td>
    <td class="num"><input type="text" inputmode="decimal" value="${String(s.qty).replace(".",",")}" data-i="${i}" class="eq" aria-label="Cantidad"><div class="small muted">${s.f?esc(plural(s.ce)):esc(s.um||"")}</div></td>
    <td class="num tot">${fmt2(sq(s))} <span class="small">${esc(s.um||"")}</span>${s.f?`<div class="small muted" style="font-weight:400">${fmt2(s.qty)} × ${fmt2(s.f)}</div>`:""}</td>
    <td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="4" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
@@ -6645,7 +6645,7 @@ function omRender(){
   $$("#omHead [data-sc]").forEach(b=>b.onclick=()=>omRead(b.dataset.sc));
   $("#omInfo").textContent=`${fmt(om.lect.length)} lecturas`;
   const ls=[...om.lect].reverse();
-  $("#omList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td>
+  $("#omList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px"><span class="code">${esc(l.k||l.code)}</span> · ${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${hhmm(l.t)}</div></td>
      <td class="num" style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td>
      <td><button class="btn sm" data-ol="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#omList [data-ol]").forEach(b=>b.onclick=()=>{const lid=b.dataset.ol,l=om.lect.find(z=>z.lid===lid);if(!l)return;
@@ -8633,7 +8633,7 @@ addEventListener("online",()=>{if(puestoMode())ucEnviar()});
 function ucRender(){
   const P=ucPend.map(m=>Object.assign({},m,{pend:true})),E=ucErr.slice(0,10),M=(ucData.mis||[]).filter(m=>!ucPend.some(p=>p.lid===m.lid));
   const fila=(m,est)=>{const f=+m.f||1,[tt,c]=UBT[m.tipo]||[m.tipo,"p-mut"],it=ptFind(m.k)||{};return `<tr${m.anulado?' style="opacity:.55"':""}><td style="white-space:normal;width:100%"><div><span class="pill ${c}">${tt}</span> <b>${esc(m.desde||"")}${m.desde&&m.hacia?" → ":""}${esc(m.hacia||"")}</b></div>
-    <div style="font-weight:600;font-size:13px">${esc(m.descr||m.desc||it.desc||m.k)}</div><div class="small muted">${esc(m.k)} · ${hm24(m.t)}${est}</div></td>
+    <div style="font-weight:600;font-size:13px"><span class="code">${esc(m.k)}</span> · ${esc(m.descr||m.desc||it.desc||"")}</div><div class="small muted">${hm24(m.t)}${est}</div></td>
     <td class="num" style="white-space:nowrap"><b>${fmt2(+m.qty)}</b> <span class="small muted">${esc(m.ce&&f!==1?plural(m.ce):umTxt(m.um))}</span>${m.ce&&f!==1?`<span class="sub">= ${fmt2(m.qty*f)} ${esc(umTxt(m.um))}</span>`:""}</td></tr>`};
   $("#ucInfo").textContent=`${fmt(M.filter(m=>!m.anulado&&new Date(m.t).toDateString()===new Date().toDateString()).length+P.length)} hoy`;
   $("#ucList").innerHTML=(P.map(m=>fila(m," · ⏳ por enviar")).join("")+E.map(m=>fila(m,` · <span style="color:var(--bad)">no se registró: ${esc(m.err)}</span>`)).join("")+M.map(m=>fila(m,m.anulado?" · anulado por el supervisor":" · ✓ registrado")).join(""))||'<tr><td class="muted">Todavía no registras movimientos hoy.</td></tr>';
