@@ -14,7 +14,8 @@ language sql immutable set search_path = public as $$
      where coalesce(e->>'pu', '') <> '' and e->>'pu' <> p_pu),
   mias as (         -- lo que manda este celular (sin las copias de líneas ajenas que pudo traer)
     select n.e || jsonb_build_object('pu', p_pu) e from jsonb_array_elements(coalesce(p_new, '[]'::jsonb)) n(e)
-     where not exists (select 1 from otros o where o.e->>'lid' = n.e->>'lid'))
+     where coalesce(n.e->>'pu', '') in ('', p_pu)   -- una línea marcada de otra persona nunca se toma como propia (no revive lo que el otro quitó)
+       and not exists (select 1 from otros o where o.e->>'lid' = n.e->>'lid'))
   select coalesce(jsonb_agg(e order by e->>'t', e->>'lid'), '[]'::jsonb) from (select e from otros union all select e from mias) x
 $$;
 revoke execute on function public.cb_rec_mezclar(jsonb, jsonb, text) from public, anon, authenticated;

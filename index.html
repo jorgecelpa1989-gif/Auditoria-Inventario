@@ -4329,7 +4329,8 @@ language sql immutable set search_path = public as $$
      where coalesce(e->>'pu', '') <> '' and e->>'pu' <> p_pu),
   mias as (         -- lo que manda este celular (sin las copias de líneas ajenas que pudo traer)
     select n.e || jsonb_build_object('pu', p_pu) e from jsonb_array_elements(coalesce(p_new, '[]'::jsonb)) n(e)
-     where not exists (select 1 from otros o where o.e->>'lid' = n.e->>'lid'))
+     where coalesce(n.e->>'pu', '') in ('', p_pu)   -- una línea marcada de otra persona nunca se toma como propia (no revive lo que el otro quitó)
+       and not exists (select 1 from otros o where o.e->>'lid' = n.e->>'lid'))
   select coalesce(jsonb_agg(e order by e->>'t', e->>'lid'), '[]'::jsonb) from (select e from otros union all select e from mias) x
 $$;
 revoke execute on function public.cb_rec_mezclar(jsonb, jsonb, text) from public, anon, authenticated;
@@ -7547,6 +7548,8 @@ async function dvNueva(){
 async function dvPendiente(id){   // true = hay lecturas sin guardar de otra recepción (o de esta): se retoma esa
   if(!dv||dv.fin||!dv.dirty||dv.puesto!==PST.puesto)return false;
   if(dv.id!==id&&await dvSync(false))return false;
+  if(dv.id!==id&&/^(ya_recibida|anulado|finalizado|no_existe|en_recepcion|ya_enviada|recibida)$/.test(dv.errCode||"")){const n=dv.lect.length;dvWork();
+    confirmBox(`Esta devolución ya no se puede guardar (${esc(dv.err)}). ¿Descartar lo que quedó sin guardar en este celular y continuar?`,()=>{dv=null;dvSave();id?dvElegir(id):dvNueva()},"#dvConfirm");return true}
   if(dv.modo!==dvModo){toast(`Tienes lecturas sin guardar en ${dv.modo==="rec"?"Recepción de devoluciones":"Devolución a bodega"}. Ábrela y guárdala con señal.`);return true}
   if(dv.id!==id)toast("Tienes lecturas sin guardar en esta devolución. Guárdala con señal antes de abrir otra.");
   dvWork();return true}
@@ -7680,8 +7683,8 @@ async function dvSync(final){
     if(dvRec()){const r=await prpc("cb_dev_recibir",{p_id:dv.id,p_persona:PST.persona||"",p_rec:dv.lect,p_terminar:!!final});
       if(r&&Array.isArray(r.rec)&&(dv.ver||0)===v&&!final){dv.lect=r.rec;dvRender()}}   // lista unida: también lo que registró otra persona
     else{const r=await prpc("cb_dev_guardar",{p_id:dv.id,p_doc:Object.assign({persona:PST.persona||""},dv.doc),p_lect:dv.lect,p_enviar:!!final});if(r&&r.enviado)dv.enviado=r.enviado}
-    if((dv.ver||0)===v)dv.dirty=false;dv.err="";dv.syncAt=new Date().toISOString();dvSave();return true;
-  }catch(e){if(final)toast(dvMsg(e));else if(!e.net)dv.err=dvMsg(e);dvSave();return false}
+    if((dv.ver||0)===v)dv.dirty=false;dv.err="";dv.errCode="";dv.syncAt=new Date().toISOString();dvSave();return true;
+  }catch(e){if(final)toast(dvMsg(e));else if(!e.net){dv.err=dvMsg(e);dv.errCode=e.message}dvSave();return false}
   finally{dvSyncing=false;dvRenderSync()}
 }
 function dvFinalizar(){
@@ -8074,6 +8077,8 @@ async function pcNueva(){
 async function pcPendiente(id){   // true = hay lecturas sin guardar de otra recepción (o de esta): se retoma esa
   if(!pc||pc.fin||!pc.dirty||pc.puesto!==PST.puesto)return false;
   if(pc.id!==id&&await pcSync(false))return false;
+  if(pc.id!==id&&/^(ya_recibida|anulado|finalizado|no_existe|en_recepcion|ya_enviada|recibida)$/.test(pc.errCode||"")){pcWork();
+    confirmBox(`Esta recepción ya no se puede guardar (${esc(pc.err)}). ¿Descartar lo que quedó sin guardar en este celular y continuar?`,()=>{pc=null;pcSave();id?pcElegir(id):pcNueva()},"#pcConfirm");return true}
   if(pc.id!==id)toast("Tienes lecturas sin guardar en esta recepción. Guárdala con señal antes de abrir otra.");
   pcWork();return true}
 async function pcElegir(id){
@@ -8200,8 +8205,8 @@ async function pcSync(final){
   pcSyncing=true;pcRenderSync();const v=pc.ver||0;
   try{const r=await prpc("cb_prov_recibir",{p_id:pc.id,p_doc:Object.assign({},pc.doc,{persona:PST.persona||""}),p_rec:pc.lect,p_terminar:!!final});
     if(r&&Array.isArray(r.rec)&&(pc.ver||0)===v&&!final){pc.lect=r.rec;pcRender()}   // lista unida: también lo que registró otra persona
-    if((pc.ver||0)===v)pc.dirty=false;pc.err="";pc.syncAt=new Date().toISOString();pcSave();return true}
-  catch(e){if(final)toast(pcMsg(e));else if(!e.net)pc.err=pcMsg(e);pcSave();return false}
+    if((pc.ver||0)===v)pc.dirty=false;pc.err="";pc.errCode="";pc.syncAt=new Date().toISOString();pcSave();return true}
+  catch(e){if(final)toast(pcMsg(e));else if(!e.net){pc.err=pcMsg(e);pc.errCode=e.message}pcSave();return false}
   finally{pcSyncing=false;pcRenderSync()}
 }
 function pcFinalizar(){

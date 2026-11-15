@@ -40,8 +40,24 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  await cJ.setOffline(false);await J.evaluate(()=>window.dispatchEvent(new Event('online')));await J.waitForTimeout(500);
  if(await J.isVisible('#pcGo'))await J.tap('#pcGo');await J.waitForTimeout(2500);
  r=rec(idA);check(r.length===3&&r.some(l=>l.code==='110107'&&l.pu===jId&&+l.qty===7),'Vuelve la señal: se guarda la lectura de Jorge (7 kg) y siguen las de Felipe → '+r.map(l=>l.code+':'+l.qty).join(','));
- // Terminar: el que termina incluye todo; el otro celular recibe "ya recibida"
- await F.waitForTimeout(500);
+ // Felipe quita una línea suya mientras Jorge todavía tiene la copia: no debe "revivir" cuando Jorge guarde
+ const lidF=rec(idA).find(l=>l.code==='221317').lid;
+ check(await J.evaluate(l=>pc.lect.some(x=>x.lid===l),lidF),'Jorge tiene en su celular la copia de la línea de Felipe (221317)');
+ await F.evaluate(()=>{pc.lect=pc.lect.filter(x=>x.code!=='221317');pcDirty()});await F.waitForTimeout(2500);
+ check(!rec(idA).some(l=>l.lid===lidF),'Felipe quita su línea 221317');
+ await leer(J,'140101',1);await J.waitForTimeout(2500);r=rec(idA);
+ check(!r.some(l=>l.code==='221317')&&r.filter(l=>l.code==='140101').length===2,'Jorge guarda de nuevo: la línea que quitó Felipe NO vuelve a aparecer (no se anota como de Jorge) → '+r.map(l=>l.code).join(','));
+ // Documento que ya no se puede guardar (anulado) con lecturas pendientes: el celular no queda trabado
+ await cJ.setOffline(true);await leer(J,'110107',9);await J.waitForTimeout(1800);
+ rpc('cb_prov_eliminar',{p_clave:ADMIN,p_id:idA});
+ await cJ.setOffline(false);await J.evaluate(()=>window.dispatchEvent(new Event('online')));if(await J.isVisible('#pcGo'))await J.tap('#pcGo');await J.waitForTimeout(2000);
+ check(await J.evaluate(()=>pc.errCode)==='anulado','El servidor rechaza guardar en la recepción anulada');
+ await J.tap('#pcBack');await J.waitForTimeout(800);await J.evaluate(()=>pcList.some(d=>d.id)||0);
+ const idC=nueva('Aceros Tres','G-3');await J.evaluate(()=>pcRefresh().then(pcHomeRender));await J.waitForTimeout(800);
+ await J.tap(`#pcHome [data-pc="${idC}"]`);await J.waitForTimeout(800);
+ check(/ya no se puede guardar/.test(await J.textContent('#pcConfirm')),'Al abrir otra: ofrece descartar lo que no se puede guardar (en vez de trabar el celular)');
+ await J.tap('#pcConfirm #cYes');await J.waitForTimeout(800);
+ check(await J.evaluate(()=>pc&&pc.id)===idC,'Tras descartar, abre la recepción elegida');
  // Devoluciones: la misma regla en el servidor (dos personas reciben la misma devolución)
  const did=JSON.parse(rpc('cb_dev_crear_panel',{p_clave:ADMIN,p_area:'Clientes',p_doc:{guia:'D-1',factura:'',fecha:'2026-11-15'},p_lect:[{code:'110107',k:'110107',qty:5,lid:'d0',t:'2026-11-15T10:00:00Z'}]}).body);const dId=did.id||did;
  const ses=(id,t)=>JSON.parse(rpc('cb_puesto_vincular',{p_puesto:id,p_token:t,p_equipo:'x'+id}).body);
