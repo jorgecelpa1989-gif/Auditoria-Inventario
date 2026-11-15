@@ -236,7 +236,8 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .ub3Tip{pointer-events:none;width:236px}
 .ub3Sel .l,.ub3Tip .l{margin-top:3px}.ub3Sel .code,.ub3Tip .code{font-family:var(--mono);font-weight:600}.ub3Sel .sub,.ub3Tip .sub{display:inline;margin-left:4px;font-size:11.5px;color:var(--muted)}
 .ub3Help{position:absolute;left:8px;right:8px;bottom:6px;font-size:11.5px;color:var(--muted);pointer-events:none;text-shadow:0 0 3px var(--bg),0 0 3px var(--bg)}
-@media (max-width:640px){.ub3{height:62vh}.ub3Bar{top:auto;bottom:34px}}
+.ub3{scroll-margin-top:120px}.ub3Help .cel{display:none}
+@media (max-width:640px){.ub3{height:62vh}.ub3Sel{top:48px}.ub3Help .pc{display:none}.ub3Help .cel{display:inline}}
 .ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
 .ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
 .ucTipos .btn[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -4392,7 +4393,7 @@ end $$;
       <div class="ub3Bar"><button class="btn sm" data-v3="gen" type="button">Vista general</button><button class="btn sm" data-v3="planta" type="button">Planta</button><button class="btn sm" data-v3="mas" type="button" title="Acercar">＋</button><button class="btn sm" data-v3="menos" type="button" title="Alejar">−</button></div>
       <div class="ub3Sel" id="ub3Sel" hidden></div>
       <div class="ub3Tip" id="ub3Tip" hidden></div>
-      <div class="ub3Help">Arrastra para girar · rueda o pellizco para acercar · Shift, clic derecho o dos dedos para desplazar · clic en una ubicación para ver qué tiene · doble clic para ir a ella · cada color es un producto</div>
+      <div class="ub3Help"><span class="pc">Arrastra para girar · rueda o pellizco para acercar · Shift, clic derecho o dos dedos para desplazar · clic en una ubicación para ver qué tiene · doble clic para ir a ella · cada color es un producto</span><span class="cel">Arrastra para girar · pellizca para acercar · dos dedos para mover · toca una ubicación</span></div>
     </div>
   </div>
   <div class="card" id="ubDet" hidden>
@@ -8170,7 +8171,8 @@ function ubRender(){
   else $("#ubDonde").innerHTML=q?'<div class="small muted" style="margin:6px 0">Ningún producto con ese código o nombre está en una ubicación.</div>':"";
   // mapa: pasillo → rack → niveles (el más alto arriba)
   const fn=F.find(f=>f[0]===ubF)[2],L=U.filter(fn);
-  if(!U.length){$("#ubMapa").innerHTML='<p class="muted">Todavía no hay ubicaciones. Cárgalas con <b>Cargar ubicaciones</b> (Excel o pegando la lista).</p>'}
+  if(ubVista==="3d"&&U.length){}   // en 3D el mapa 2D no se ve: no se arma (se arma al volver a «Mapa»)
+  else if(!U.length){$("#ubMapa").innerHTML='<p class="muted">Todavía no hay ubicaciones. Cárgalas con <b>Cargar ubicaciones</b> (Excel o pegando la lista).</p>'}
   else{// la grilla se arma con TODAS las ubicaciones (así los niveles quedan alineados); el filtro solo atenúa las que no aplican
     const enL=new Set(L.map(u=>u.cod)),pas=new Map(),nivOf=u=>String(u.nivel||ubPartes(u.cod).nivel||"");
     for(const u of U){const p=ubPartes(u.cod),P=u.pasillo||p.pasillo||"—",R=u.rack||p.rack||"—";const m=pas.get(P)||new Map();(m.get(R)||m.set(R,[]).get(R)).push(u);pas.set(P,m)}
@@ -8186,7 +8188,8 @@ function ubRender(){
     $$("#ubMapa [data-ub]").forEach(b=>b.onclick=()=>ubAbrir(b.dataset.ub))}
   // modelo 3D: las mismas ubicaciones, búsqueda y filtro; si el equipo no tiene WebGL se vuelve al mapa
   let en3=ubVista==="3d"&&U.length>0;
-  if(en3&&!ub3Render(sm,U,new Set(L.map(u=>u.cod)),hitU,q)){en3=false;ubVista="2d";store.set("inv_ubvista","2d");toast("Este equipo o navegador no permite el modelo 3D. Se muestra el mapa.")}
+  if(en3){let ok=false,err=null;try{ok=ub3Render(sm,U,new Set(L.map(u=>u.cod)),hitU,q)}catch(e){err=e;console.error(e)}
+    if(!ok){ubVista="2d";store.set("inv_ubvista","2d");toast(err?"El modelo 3D tuvo un problema. Se muestra el mapa.":"Este equipo o navegador no permite el modelo 3D. Se muestra el mapa.");return ubRender()}}
   $("#ub3").hidden=!en3;$("#ubMapa").hidden=en3;$$("#ubVista .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.vista===ubVista));
   ubDetRender();ubMovsRender();
 }
@@ -8217,7 +8220,7 @@ function ubMovsRender(){
     $("#ubConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
 }
 $("#ubDetX").onclick=()=>{ubSel=null;store.set("inv_ubsel",null);ubRender()};
-$("#ubRef").onclick=()=>ubRefresh(true);$("#ubQ").oninput=ubRender;
+$("#ubRef").onclick=()=>ubRefresh(true);let ubQT=0;$("#ubQ").oninput=()=>{clearTimeout(ubQT);if(ubVista==="3d")ubQT=setTimeout(ubRender,150);else ubRender()};   // en 3D se redibuja al dejar de escribir
 $$("#ubVista .chip").forEach(b=>b.onclick=()=>{ubVista=b.dataset.vista;store.set("inv_ubvista",ubVista);ubRender()});$("#ubDia").onchange=()=>{store.set("inv_ubdia",$("#ubDia").value);ubMovsRender()};
 /* ---------- Modelo 3D de la bodega ----------
    Dibuja las mismas ubicaciones del mapa como racks y pallets en 3D. No usa librerías (WebGL directo), así la app
@@ -8379,13 +8382,14 @@ function ub3Ini(){if(ub3)return ub3.gl?true:false;const caja=$("#ub3"),cv=$("#ub
   cv.addEventListener("pointerleave",()=>{if(!pts.size)ub3Flotar(null)});
   cv.addEventListener("dblclick",e=>{const [x,y]=pos(e),s=ub3Tocar(x,y);if(s)ub3Ir(s.cod)});
   cv.addEventListener("wheel",e=>{e.preventDefault();const [x,y]=pos(e);ub3.anim=null;zoom(Math.exp(Math.max(-1.2,Math.min(1.2,e.deltaY*(e.deltaMode===1?33:1)*.0015))),x,y);ub3Flotar(null);ub3Pedir()},{passive:false});
-  cv.addEventListener("webglcontextlost",e=>{e.preventDefault();cancelAnimationFrame(ub3.raf);ub3.raf=0});
-  cv.addEventListener("webglcontextrestored",()=>{if(prep())ubRender()});   // el navegador soltó la memoria gráfica: se arma de nuevo
+  cv.addEventListener("webglcontextlost",e=>{e.preventDefault();cancelAnimationFrame(ub3.raf);ub3.raf=0;clearTimeout(ub3.perdido);
+    ub3.perdido=setTimeout(()=>{if(ub3.gl.isContextLost()&&ubVista==="3d"&&!$("#ub3").hidden)ubRender()},3000)});   // si no se recupera en 3 s, ubRender vuelve al mapa con aviso
+  cv.addEventListener("webglcontextrestored",()=>{clearTimeout(ub3.perdido);ub3.firma=null;if(prep())ubRender()});   // el navegador soltó la memoria gráfica: se arma de nuevo
   $$("#ub3 [data-v3]").forEach(b=>b.onclick=()=>ub3Vista(b.dataset.v3,450));
   addEventListener("resize",ub3Pedir);if(window.ResizeObserver)new ResizeObserver(ub3Pedir).observe(caja);
   return true}
 /* lo llama ubRender cuando está elegida la vista 3D; devuelve false si el equipo no tiene WebGL */
-function ub3Render(sm,U,enL,hitU,q){if(!ub3Ini())return false;ub3.sm=sm;
+function ub3Render(sm,U,enL,hitU,q){if(!ub3Ini()||ub3.gl.isContextLost())return false;ub3.sm=sm;
   const firma=U.map(u=>[u.cod,u.pasillo,u.rack,u.nivel].join("|")).join("\n");
   if(firma!==ub3.firma){ub3.firma=firma;ub3Armar(U);ub3.hover=null;$("#ub3Tip").hidden=true;ub3Subir(ub3.hov,ub3Malla());if(!ub3.vista){ub3.vista=true;ub3Vista("gen",0)}}
   ub3Dinamica(sm,enL,hitU,q);

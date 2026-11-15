@@ -65,5 +65,18 @@ const colores=a=>a.evaluate(()=>{ub3Pintar(performance.now());const gl=ub3.gl,w=
  await c2.addInitScript(()=>{const g=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(t,...x){return /webgl/.test(t)?null:g.call(this,t,...x)}});
  const s=await entrar(c2,errs);await s.click('#ubVista [data-vista="3d"]');await s.waitForTimeout(500);
  check(await s.isVisible('#ubMapa')&&await s.isHidden('#ub3')&&/no permite el modelo 3D/.test(await s.textContent('#toast'))&&await s.evaluate(()=>ubVista)==='2d','Equipo sin WebGL: avisa y se queda en el mapa');
+ // si el 3D falla con algún dato, vuelve al mapa y el módulo sigue funcionando
+ const f=await entrar(await b.newContext({viewport:{width:1400,height:950},timezoneId:'America/Santiago'}),errs);await f.evaluate(()=>{window._r=ub3Armar;ub3Armar=()=>{throw new Error('prueba')}});
+ const ce=[];f.on('console',m=>{if(m.type()==='error')ce.push(m.text())});
+ await f.click('#ubVista [data-vista="3d"]');await f.waitForTimeout(500);
+ check(await f.isVisible('#ubMapa')&&await f.isHidden('#ub3')&&/tuvo un problema/.test(await f.textContent('#toast'))&&await f.evaluate(()=>ubVista)==='2d'&&(await f.$$('#ubMapa [data-ub]')).length===27,'Si el 3D falla: avisa, vuelve al mapa y el módulo sigue (27 ubicaciones)');
+ // celular: los botones del 3D no tapan el texto de ayuda; ayuda corta
+ const m=await entrar(await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,hasTouch:true,isMobile:true,timezoneId:'America/Santiago'}),errs);
+ await m.click('#ubVista [data-vista="3d"]');await m.waitForTimeout(700);
+ const ov=await m.evaluate(()=>{const a=document.querySelector('.ub3Bar').getBoundingClientRect(),h=[...document.querySelectorAll('.ub3Help span')].find(x=>x.offsetParent).getBoundingClientRect();return {cruza:!(a.bottom<=h.top||h.bottom<=a.top),txt:[...document.querySelectorAll('.ub3Help span')].find(x=>x.offsetParent).textContent}});
+ check(!ov.cruza&&/toca una ubicación/.test(ov.txt),'Celular: los botones del 3D no tapan el texto de ayuda (ayuda corta)');
+ await m.evaluate(()=>ubAbrir('H0202'));await m.waitForTimeout(900);
+ const top=await m.evaluate(()=>{const s=document.querySelector('#ub3Sel').getBoundingClientRect(),h=document.querySelector('header,.top,.appbar');return {s:s.top,h:h?h.getBoundingClientRect().bottom:0}});
+ check(top.s>=top.h-1,'Celular: al ir a una ubicación, su recuadro queda visible bajo el encabezado ('+Math.round(top.s)+' ≥ '+Math.round(top.h)+')');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));
  await b.close();console.log(fail?'FALLAS: '+fail:'TODO OK')})();
