@@ -225,6 +225,20 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .ubCell.sel{box-shadow:0 0 0 2px var(--accent) inset}
 .ubCell.pil{background:var(--chip);border-style:dashed;cursor:default;opacity:.7}
 .ubCell.off{opacity:.3}
+.ubMapa[hidden],.ub3[hidden],.ub3 [hidden]{display:none}
+#ubVista{margin-right:10px;padding-right:12px;border-right:1px solid var(--line)}
+.ub3{position:relative;height:clamp(360px,calc(100vh - 290px),820px);margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
+.ub3 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#ub3C{touch-action:none;cursor:grab;outline:0}#ub3L{pointer-events:none}
+.ub3Bar{position:absolute;top:8px;right:8px;display:flex;gap:4px}.ub3Bar .btn{background:rgba(248,251,253,.94)}
+.ub3Sel,.ub3Tip{position:absolute;background:rgba(248,251,253,.96);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.35;color:var(--ink);box-shadow:0 2px 8px rgba(38,70,92,.14)}
+.ub3Sel{top:8px;left:8px;max-width:min(340px,calc(100% - 16px));border-color:var(--primary)}
+.ub3Tip{pointer-events:none;width:236px}
+.ub3Sel .l,.ub3Tip .l{margin-top:3px}.ub3Sel .code,.ub3Tip .code{font-family:var(--mono);font-weight:600}.ub3Sel .sub,.ub3Tip .sub{display:inline;margin-left:4px;font-size:11.5px;color:var(--muted)}
+.ub3Help{position:absolute;left:8px;right:8px;bottom:6px;font-size:11.5px;color:var(--muted);pointer-events:none;text-shadow:0 0 3px var(--bg),0 0 3px var(--bg)}
+.ub3{scroll-margin-top:120px}.ub3Help .cel{display:none}
+@media (max-width:640px){.ub3{height:62vh}.ub3Sel{top:48px}.ub3Help .pc{display:none}.ub3Help .cel{display:inline}}
+.anulBox{margin-top:10px;font-size:13px}.anulBox>summary{cursor:pointer;color:var(--muted);font-weight:600}
 .ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
 .ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
 .ucTipos .btn[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -495,6 +509,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <summary><b>Entregas creadas</b> <span class="small muted" id="mpListSum"></span></summary>
     <div class="row" style="margin-top:8px"><span class="small muted" id="mpAt"></span><span class="sep"></span><button class="btn sm" id="btnMpRefresh">Actualizar</button></div>
     <div class="mpList" id="mpTbl"></div>
+    <details class="anulBox" id="mpAnul"><summary>Anuladas</summary><div class="anulIn"></div></details>
     <div id="mpConfirm"></div>
   </details>
 
@@ -885,6 +900,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option></select></label>
       <label class="f" style="flex:1 1 200px">Buscar<input id="dvQ" placeholder="Guía, factura, persona o SKU"></label></div>
     <div class="tbl" style="max-height:460px"><table id="dvTbl"></table></div>
+    <details class="anulBox" id="devAnul"><summary>Anuladas</summary><div class="anulIn"></div></details>
   </div>
   <details class="card mpFold" id="dpCard" open hidden>
     <summary><b>＋ Nueva devolución desde el panel</b> <span class="small muted" id="dpInfo"></span></summary>
@@ -910,7 +926,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="small muted" id="dvDetS"></div>
     <div class="kpis" id="dvKpis"></div>
     <div class="tbl" style="max-height:520px"><table id="dvCmp"></table></div>
-    <div class="row"><button class="btn primary" id="dvXlsx">Descargar cuadre (.xlsx)</button><button class="btn" id="dvCerrar">Cerrar devolución</button><span class="sep"></span><button class="btn danger" id="dvDel">Eliminar…</button></div>
+    <div class="row"><button class="btn primary" id="dvXlsx">Descargar cuadre (.xlsx)</button><button class="btn" id="dvCerrar">Cerrar devolución</button><span class="sep"></span><button class="btn danger" id="dvDel">Anular…</button></div>
     <div id="dvConfirmS"></div>
   </div>
 </section>
@@ -4297,6 +4313,335 @@ begin
   return v_id;
 end $$;
 
+-- =====================================================================
+--  RECEPCIÓN ENTRE VARIAS PERSONAS (proveedores y devoluciones)
+--  Antes, cada celular mandaba su lista completa y el servidor la REEMPLAZABA: si dos personas
+--  recibían el mismo documento, el último en guardar borraba las líneas del otro.
+--  Ahora cada línea queda marcada con el usuario que la registró ("pu") y cada celular solo
+--  reemplaza SUS líneas; las del otro se conservan tal como están en el servidor.
+--  Líneas antiguas sin "pu": se comportan como antes (las reemplaza quien guarda).
+--  Compatible con la app anterior: los parámetros no cambian; la respuesta suma "rec".
+-- =====================================================================
+create or replace function public.cb_rec_mezclar(p_old jsonb, p_new jsonb, p_pu text) returns jsonb
+language sql immutable set search_path = public as $$
+  with otros as (   -- líneas de otras personas: se quedan como están en el servidor
+    select e from jsonb_array_elements(coalesce(p_old, '[]'::jsonb)) e
+     where coalesce(e->>'pu', '') <> '' and e->>'pu' <> p_pu),
+  mias as (         -- lo que manda este celular (sin las copias de líneas ajenas que pudo traer)
+    select n.e || jsonb_build_object('pu', p_pu) e from jsonb_array_elements(coalesce(p_new, '[]'::jsonb)) n(e)
+     where coalesce(n.e->>'pu', '') in ('', p_pu)   -- una línea marcada de otra persona nunca se toma como propia (no revive lo que el otro quitó)
+       and not exists (select 1 from otros o where o.e->>'lid' = n.e->>'lid'))
+  select coalesce(jsonb_agg(e order by e->>'t', e->>'lid'), '[]'::jsonb) from (select e from otros union all select e from mias) x
+$$;
+revoke execute on function public.cb_rec_mezclar(jsonb, jsonb, text) from public, anon, authenticated;
+
+create or replace function public.cb_prov_recibir(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; v_fecha date; v_rec jsonb; v_pers text := left(p_doc->>'persona', 80);
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then raise exception 'sin_permiso'; end if;
+  if p_id is null then raise exception 'datos_invalidos'; end if;
+  perform cb_prov_lineas_ok(p_rec);
+  select * into p from cb_prov where id = p_id for update;
+  if not found then
+    insert into cb_prov(id, origen, persona, fecha) values (p_id, p_puesto, v_pers, (now() at time zone 'America/Santiago')::date)
+    returning * into p;
+  end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if p.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p.origen = p_puesto then
+    begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then v_fecha := null; end;
+    update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+           proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+           referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), contenedor = left(trim(coalesce(p_doc->>'contenedor','')), 40), fecha = coalesce(v_fecha, fecha), nota = left(p_doc->>'nota', 300)
+     where id = p_id
+    returning * into p;
+  else
+    -- Recepción cargada en el panel: bodega solo completa lo que quedó vacío (no cambia lo que escribió el supervisor).
+    update cb_prov set guia = case when coalesce(guia, '') = '' then left(trim(coalesce(p_doc->>'guia','')), 40) else guia end,
+           referencia = case when coalesce(referencia, '') = '' then left(trim(coalesce(p_doc->>'referencia','')), 60) else referencia end,
+           contenedor = case when coalesce(contenedor, '') = '' then left(trim(coalesce(p_doc->>'contenedor','')), 40) else contenedor end
+     where id = p_id
+    returning * into p;
+  end if;
+  v_rec := cb_rec_mezclar(p.rec, p_rec, p_puesto);
+  if p_terminar then
+    if jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
+    if coalesce(p.guia, '') = '' and coalesce(p.referencia, '') = '' then raise exception 'falta_documento'; end if;
+  end if;
+  update cb_prov set rec = v_rec, rec_persona = v_pers, rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end, 'rec', v_rec);
+end $$;
+
+create or replace function public.cb_dev_recibir(p_puesto text, p_ses text, p_id uuid, p_persona text, p_rec jsonb, p_terminar boolean default false)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev; v_rec jsonb;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'dev_recibir') then raise exception 'sin_permiso'; end if;
+  if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
+  select * into d from cb_dev where id = p_id for update;
+  if not found or d.enviado is null then raise exception 'no_existe'; end if;
+  if d.finalizado is not null then raise exception 'finalizado'; end if;
+  if d.recibido is not null then raise exception 'ya_recibida'; end if;
+  v_rec := cb_rec_mezclar(d.rec, p_rec, p_puesto);
+  if p_terminar and jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
+  update cb_dev set rec = v_rec, rec_persona = left(p_persona, 80), rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end, 'rec', v_rec);
+end $$;
+
+-- =====================================================================
+--  ELIMINAR → ANULAR (Entrega MP, Recepción de proveedores, Devoluciones)
+--  Nada se borra: "Eliminar" ahora anula. Lo anulado deja de verse en las listas, los celulares y los
+--  Excel, no se puede modificar (lo bloquea el servidor) y se puede restaurar desde «Anuladas».
+--  Compatible con la app anterior: su botón «Eliminar» pasa a anular y sus listas ya no muestran lo anulado.
+-- =====================================================================
+alter table public.cb_mov  add column if not exists anulado timestamptz, add column if not exists anulado_por text;
+alter table public.cb_prov add column if not exists anulado timestamptz, add column if not exists anulado_por text;
+alter table public.cb_dev  add column if not exists anulado timestamptz, add column if not exists anulado_por text;
+
+-- Lo anulado no se modifica (solo se puede restaurar). Cubre todas las funciones que escriben.
+create or replace function public.cb_anulado_bloquea() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if old.anulado is not null and new.anulado is not null then raise exception 'anulado'; end if;
+  return new;
+end $$;
+create or replace function public.cb_mov_hijo_bloquea() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if exists (select 1 from cb_mov where id = coalesce(case when tg_op = 'DELETE' then null else new.mov end, old.mov) and anulado is not null) then raise exception 'anulado'; end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $$;
+revoke execute on function public.cb_anulado_bloquea(), public.cb_mov_hijo_bloquea() from public, anon, authenticated;
+drop trigger if exists cb_mov_anulado on public.cb_mov;
+create trigger cb_mov_anulado before update on public.cb_mov for each row execute function public.cb_anulado_bloquea();
+drop trigger if exists cb_prov_anulado on public.cb_prov;
+create trigger cb_prov_anulado before update on public.cb_prov for each row execute function public.cb_anulado_bloquea();
+drop trigger if exists cb_dev_anulado on public.cb_dev;
+create trigger cb_dev_anulado before update on public.cb_dev for each row execute function public.cb_anulado_bloquea();
+drop trigger if exists cb_mov_lado_anulado on public.cb_mov_lado;
+create trigger cb_mov_lado_anulado before insert or update or delete on public.cb_mov_lado for each row execute function public.cb_mov_hijo_bloquea();
+drop trigger if exists cb_mov_lect_anulado on public.cb_mov_lect;
+create trigger cb_mov_lect_anulado before insert or update or delete on public.cb_mov_lect for each row execute function public.cb_mov_hijo_bloquea();
+
+create or replace function public.cb_mov_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin   -- ya no borra: anula (deja de verse en listas y celulares; se puede restaurar)
+  perform cb_puede(p_clave, 'mp_eliminar');
+  update cb_mov set anulado = now(), anulado_por = left(coalesce(cb_sup_nombre(p_clave), 'Administrador'), 80) where id = p_id and anulado is null;
+end $$;
+create or replace function public.cb_mov_restaurar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'mp_eliminar');
+  update cb_mov set anulado = null, anulado_por = null where id = p_id and anulado is not null;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+create or replace function public.cb_prov_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin   -- ya no borra: anula (deja de verse en listas y celulares; se puede restaurar)
+  perform cb_puede(p_clave, 'prov_eliminar');
+  update cb_prov set anulado = now(), anulado_por = left(coalesce(cb_sup_nombre(p_clave), 'Administrador'), 80) where id = p_id and anulado is null;
+end $$;
+create or replace function public.cb_prov_restaurar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'prov_eliminar');
+  update cb_prov set anulado = null, anulado_por = null where id = p_id and anulado is not null;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+create or replace function public.cb_dev_eliminar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin   -- ya no borra: anula (deja de verse en listas y celulares; se puede restaurar)
+  perform cb_puede(p_clave, 'dev_eliminar');
+  update cb_dev set anulado = now(), anulado_por = left(coalesce(cb_sup_nombre(p_clave), 'Administrador'), 80) where id = p_id and anulado is null;
+end $$;
+create or replace function public.cb_dev_restaurar(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'dev_eliminar');
+  update cb_dev set anulado = null, anulado_por = null where id = p_id and anulado is not null;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+-- Lo anulado (últimos 120 días), para la sección «Anuladas» del panel
+create or replace function public.cb_mov_anulados(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'mp_ver');
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'meta', m.meta, 'anulado', m.anulado, 'anulado_por', m.anulado_por,
+      'n', (select count(*) from cb_mov_lect l where l.mov = m.id)) order by m.anulado desc)
+    from cb_mov m where m.anulado is not null and m.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+create or replace function public.cb_prov_anulados(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'prov_ver');
+begin
+  return coalesce((select jsonb_agg(to_jsonb(p) order by p.anulado desc) from cb_prov p
+    where p.anulado is not null and p.creado > now() - interval '120 days'), '[]'::jsonb);
+end $$;
+create or replace function public.cb_dev_anulados(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'dev_ver'); v_todas boolean;
+begin
+  v_todas := r = 'admin' or cb_sup_tiene(p_clave, 'dev_todas');
+  return coalesce((select jsonb_agg(to_jsonb(d) order by d.anulado desc) from cb_dev d
+    where d.anulado is not null and d.creado > now() - interval '120 days' and (v_todas or d.area ilike 'producci_n%')), '[]'::jsonb);
+end $$;
+
+-- Listas del panel y de los celulares: sin lo anulado
+CREATE OR REPLACE FUNCTION public.cb_mov_listar(p_clave text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare r text := cb_puede(p_clave, 'mp_ver');
+begin
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', m.id, 'nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'finalizado', m.finalizado, 'meta', m.meta, 'token', case when r = 'admin' then m.link_token end,
+      'lados', coalesce((select jsonb_object_agg(l.rol, jsonb_build_object(
+          'persona', l.persona, 'abierto', l.abierto, 'visto', l.visto, 'terminado', l.terminado,
+          'ultimo_envio', l.ultimo_envio, 'n_lecturas', l.n_lecturas, 'bloqueado', l.device = '__bloqueado__')) from cb_mov_lado l where l.mov = m.id), '{}'::jsonb)
+    ) order by m.creado desc)
+    from cb_mov m where m.creado > now() - interval '120 days' and m.anulado is null), '[]'::jsonb);
+end $function$;
+CREATE OR REPLACE FUNCTION public.cb_prov_listar(p_clave text, p_desde timestamp with time zone DEFAULT NULL::timestamp with time zone)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare r text := cb_puede(p_clave, 'prov_ver');
+begin
+  return coalesce((select jsonb_agg(to_jsonb(p) order by p.creado desc) from cb_prov p
+    where p.creado > coalesce(p_desde, now() - interval '120 days') and p.anulado is null), '[]'::jsonb);
+end $function$;
+CREATE OR REPLACE FUNCTION public.cb_dev_listar(p_clave text, p_desde timestamp with time zone DEFAULT NULL::timestamp with time zone)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare r text := cb_puede(p_clave, 'dev_ver'); v_todas boolean;
+begin
+  v_todas := r = 'admin' or cb_sup_tiene(p_clave, 'dev_todas');
+  return coalesce((select jsonb_agg(to_jsonb(d) order by d.creado desc) from cb_dev d
+    where d.creado > coalesce(p_desde, now() - interval '120 days') and d.anulado is null
+      and (v_todas or d.area ilike 'producci_n%')), '[]'::jsonb);
+end $function$;
+CREATE OR REPLACE FUNCTION public.cb_dev_mis(p_puesto text, p_ses text, p_modo text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare v_rec boolean;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  v_rec := case p_modo when 'rec' then true when 'carga' then false else cb_u_tiene(p_puesto, 'dev_recibir') end;
+  if v_rec then
+    if not cb_u_tiene(p_puesto, 'dev_recibir') then return '[]'::jsonb; end if;
+    return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'origen', d.origen, 'area', d.area, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura,
+        'fecha', d.fecha, 'nota', d.nota, 'enviado', d.enviado, 'lect', d.lect, 'rec', d.rec, 'rec_persona', d.rec_persona, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido) order by d.enviado)
+      from cb_dev d where d.anulado is null and d.enviado is not null and d.finalizado is null and (d.recibido is null or d.recibido > now() - interval '18 hours')), '[]'::jsonb);
+  end if;
+  if not cb_u_tiene(p_puesto, 'dev_cargar') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'area', d.area, 'persona', d.persona, 'guia', d.guia, 'factura', d.factura, 'fecha', d.fecha, 'nota', d.nota,
+      'creado', d.creado, 'enviado', d.enviado, 'lect', d.lect, 'rec_inicio', d.rec_inicio, 'recibido', d.recibido, 'finalizado', d.finalizado) order by d.creado desc)
+    from cb_dev d where d.anulado is null and d.origen = p_puesto and d.creado > now() - interval '30 days'), '[]'::jsonb);
+end $function$;
+CREATE OR REPLACE FUNCTION public.cb_prov_mis(p_puesto text, p_ses text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'tipo', p.tipo, 'proveedor', p.proveedor, 'guia', p.guia, 'referencia', p.referencia, 'contenedor', p.contenedor,
+      'fecha', p.fecha, 'nota', p.nota, 'origen', p.origen, 'persona', p.persona, 'esperado', p.esperado, 'rec', p.rec,
+      'rec_persona', p.rec_persona, 'rec_inicio', p.rec_inicio, 'recibido', p.recibido) order by p.creado)
+    from cb_prov p where p.anulado is null and p.finalizado is null and (p.recibido is null or p.recibido > now() - interval '18 hours')), '[]'::jsonb);
+end $function$;
+CREATE OR REPLACE FUNCTION public.cb_puesto_tareas(p_puesto text, p_ses text, p_persona text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare a cb_puesto; v_rol text;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_persona is not null and p_persona <> '' then update cb_puesto set persona = left(p_persona, 80) where id = p_puesto; end if;
+  select * into a from cb_puesto where id = p_puesto;
+  v_rol := case when 'mp_entregar' = any(a.permisos) then 'E' when 'mp_recibir' = any(a.permisos) then 'R' end;
+  return jsonb_build_object(
+    'yo', jsonb_build_object('id', a.id, 'nombre', a.nombre, 'area', a.area, 'permisos', to_jsonb(a.permisos)),
+    'mp', case when v_rol is null then '[]'::jsonb else coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'nombre', m.nombre, 'ref', m.meta->>'ref', 'por', m.meta->>'por', 'token', m.link_token,
+              'creado', m.creado, 'vence', m.vence, 'productos', jsonb_array_length(coalesce(m.meta->'sol','[]'::jsonb)),
+              'terminado', (select l.terminado from cb_mov_lado l where l.mov = m.id and l.rol = v_rol)) order by m.creado)
+            from cb_mov m where m.anulado is null and coalesce(m.meta->>'estado','activa') = 'activa' and m.meta->>'puestos' = 'true' and m.finalizado is null
+              and m.link_token is not null and (m.vence is null or m.vence > now())), '[]'::jsonb) end,
+    'conteos', case when 'conteo' = any(a.permisos) then coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'nombre', c.nombre, 'token', c.link_token,
+              'creado', c.creado, 'vence', c.vence, 'productos', jsonb_array_length(c.items), 'terminado', c.terminado) order by c.creado)
+            from cb_conteos c where c.puesto = p_puesto and c.finalizado is null and c.link_token is not null and (c.vence is null or c.vence > now())), '[]'::jsonb)
+            else '[]'::jsonb end,
+    'pt_cierre', (select max(t) from cb_pt_cierre where puesto = p_puesto));
+end $function$;
+CREATE OR REPLACE FUNCTION public.cb_mov_abrir(p_id uuid, p_token text, p_device text, p_rol text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare m cb_mov; l cb_mov_lado; v_secret text := encode(extensions.gen_random_bytes(16), 'hex'); v_mio text; v_stock jsonb; v_at timestamptz;
+begin
+  select * into m from cb_mov where id = p_id;
+  if not found or m.token_hash <> extensions.crypt(coalesce(p_token,''), m.token_hash) then
+    perform pg_sleep(0.5); raise exception 'no_existe';
+  end if;
+  if coalesce(m.meta ->> 'estado', 'activa') = 'solicitada' then perform pg_sleep(0.5); raise exception 'no_existe'; end if;
+  if m.anulado is not null then raise exception 'anulado'; end if;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() then raise exception 'vencido'; end if;
+  select rol into v_mio from cb_mov_lado where mov = p_id and device = p_device limit 1;
+  if p_rol is null then
+    return jsonb_build_object('nombre', m.nombre, 'meta', m.meta, 'mio', v_mio,
+      'tomados', coalesce((select jsonb_object_agg(rol, coalesce(persona,'')) from cb_mov_lado where mov = p_id), '{}'::jsonb));
+  end if;
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if v_mio is not null and v_mio <> p_rol then raise exception 'otro_rol'; end if;
+  select * into l from cb_mov_lado where mov = p_id and rol = p_rol for update;
+  if found and l.device = '__bloqueado__' then raise exception 'bloqueado'; end if;
+  if found and l.device <> p_device then raise exception 'rol_tomado'; end if;
+  if found then
+    update cb_mov_lado set secret_hash = extensions.crypt(v_secret, extensions.gen_salt('bf')), visto = now(), terminado = null where mov = p_id and rol = p_rol;
+  else
+    insert into cb_mov_lado(mov, rol, device, secret_hash, visto) values (p_id, p_rol, p_device, extensions.crypt(v_secret, extensions.gen_salt('bf')), now());
+  end if;
+  if p_rol = 'E' then
+    select c.actualizado,
+           (select jsonb_object_agg(k, c.stock -> k) from (select s ->> 0 as k from jsonb_array_elements(coalesce(m.meta -> 'sol', '[]'::jsonb)) s) q where c.stock ? k)
+      into v_at, v_stock from cb_catalogo c where c.id = 1;
+  end if;
+  return jsonb_build_object('nombre', m.nombre, 'creado', m.creado, 'vence', m.vence, 'items', m.items, 'meta', m.meta, 'secret', v_secret, 'rol', p_rol,
+    'stock', v_stock, 'stock_at', v_at,
+    'lect', coalesce((select jsonb_agg(data order by data->>'t') from cb_mov_lect where mov = p_id and rol = p_rol), '[]'::jsonb));
+end $function$;
+
+grant execute on function public.cb_mov_restaurar(text, uuid), public.cb_prov_restaurar(text, uuid), public.cb_dev_restaurar(text, uuid),
+  public.cb_mov_anulados(text), public.cb_prov_anulados(text), public.cb_dev_anulados(text) to anon, authenticated;
+
 </script>
   </div>
 
@@ -4372,9 +4717,16 @@ end $$;
       <datalist id="ubDl"></datalist>
     </div>
     <div class="kpis" id="ubKpis"></div>
-    <div class="row"><div class="chips" id="ubChips"></div><span class="sep"></span><input id="ubQ" placeholder="Buscar producto (SKU o nombre) o ubicación" style="flex:0 1 300px"></div>
+    <div class="row"><div class="chips" id="ubVista" role="group" aria-label="Vista"><button class="chip" data-vista="2d" aria-pressed="true">Mapa</button><button class="chip" data-vista="3d" aria-pressed="false">Modelo 3D</button></div><div class="chips" id="ubChips"></div><span class="sep"></span><input id="ubQ" placeholder="Buscar producto (SKU o nombre) o ubicación" style="flex:0 1 300px"></div>
     <div id="ubDonde"></div>
     <div id="ubMapa" class="ubMapa"></div>
+    <div id="ub3" class="ub3" hidden>
+      <canvas id="ub3C" aria-label="Modelo 3D de la bodega: racks y pallets por ubicación"></canvas><canvas id="ub3L" aria-hidden="true"></canvas>
+      <div class="ub3Bar"><button class="btn sm" data-v3="gen" type="button">Vista general</button><button class="btn sm" data-v3="planta" type="button">Planta</button><button class="btn sm" data-v3="mas" type="button" title="Acercar">＋</button><button class="btn sm" data-v3="menos" type="button" title="Alejar">−</button></div>
+      <div class="ub3Sel" id="ub3Sel" hidden></div>
+      <div class="ub3Tip" id="ub3Tip" hidden></div>
+      <div class="ub3Help"><span class="pc">Arrastra para girar · rueda o pellizco para acercar · Shift, clic derecho o dos dedos para desplazar · clic en una ubicación para ver qué tiene · doble clic para ir a ella · cada color es un producto</span><span class="cel">Arrastra para girar · pellizca para acercar · dos dedos para mover · toca una ubicación</span></div>
+    </div>
   </div>
   <div class="card" id="ubDet" hidden>
     <div class="row"><div class="eyebrow">Ubicación</div><span class="sep"></span><button class="btn sm" id="ubDetX">Cerrar vista</button></div>
@@ -4430,13 +4782,14 @@ end $$;
     <div class="kpis" id="pvKpis"></div>
     <div class="row"><div class="chips" id="pvChips"></div><span class="sep"></span><input id="pvQ" placeholder="Buscar proveedor, guía, referencia, contenedor o SKU" style="flex:0 1 280px"></div>
     <div class="tbl" style="max-height:460px"><table id="pvTbl"></table></div>
+    <details class="anulBox" id="provAnul"><summary>Anuladas</summary><div class="anulIn"></div></details>
   </div>
   <div class="card" id="pvDet" hidden>
     <div class="row"><div class="eyebrow">Cuadre packing list vs recibido</div><span class="sep"></span><button class="btn sm" id="pvX">Cerrar vista</button></div>
     <h2 id="pvDetT" style="margin:0"></h2>
     <div class="small muted" id="pvDetS"></div>
     <div class="kpis" id="pvDetK"></div>
-    <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvModTog">✎ Modificar recibido</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Eliminar…</button></div>
+    <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvModTog">✎ Modificar recibido</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Anular…</button></div>
     <div class="cbox" id="pvAdd" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Agregar un registro recibido que faltó</b>
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -4938,7 +5291,7 @@ function renderRecent(){
   const rows=scans.slice(-40).reverse();
   $("#recent").innerHTML=`<thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Total</th><th></th></tr></thead><tbody>`+
    (rows.length?rows.map(s=>{const it=erp&&findItem(s.code);const i=scans.indexOf(s);return `<tr>
-   <td class="rprod"><div class="rd">${it?esc(it.desc):(erp?'<span class="pill p-bad">No está en la lista</span>':esc(s.code))}</div><div class="small muted">${esc(s.code)} · ${esc(s.ubic||"sin ubicación")} · ${new Date(s.t).toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div></td>
+   <td class="rprod"><div class="rd"><span class="code">${esc(s.code)}</span>${it?" · "+esc(it.desc):(erp?' <span class="pill p-bad">No está en la lista</span>':"")}</div><div class="small muted">${esc(s.ubic||"sin ubicación")} · ${new Date(s.t).toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div></td>
    <td class="num"><input type="text" inputmode="decimal" value="${String(s.qty).replace(".",",")}" data-i="${i}" class="eq" aria-label="Cantidad"><div class="small muted">${s.f?esc(plural(s.ce)):esc(s.um||"")}</div></td>
    <td class="num tot">${fmt2(sq(s))} <span class="small">${esc(s.um||"")}</span>${s.f?`<div class="small muted" style="font-weight:400">${fmt2(s.qty)} × ${fmt2(s.f)}</div>`:""}</td>
    <td><button class="btn sm danger" data-del="${i}" aria-label="Eliminar">✕</button></td></tr>`}).join(""):`<tr><td colspan="4" class="muted">Sin lecturas todavía.</td></tr>`)+"</tbody>";
@@ -5468,10 +5821,10 @@ const sbRef=u=>{const m=String(u||"").match(/^https:\/\/([a-z0-9]{10,40})\.supab
 const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a-z0-9]{10,40}$/i.test(u))u="https://"+u+".supabase.co";return u};
 /* Permiso que exige cada función de panel (igual que en el servidor). "__admin" = solo el administrador. */
 const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
-  cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",
-  cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",
+  cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
+  cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
-  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
+  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
 async function rpc(conf,fn,args){
   if(SUP_FN[fn]&&args&&args.p_clave){let s=false;try{s=supOn()&&args.p_clave===SUPI.ses}catch(e){}
@@ -5485,7 +5838,7 @@ async function rpc(conf,fn,args){
   if(!r.ok)throw new Error((j&&(j.message||j.msg||j.error))||("error_"+r.status));
   return j;
 }
-const SBMSG={acceso_produccion:"La clave no es válida o fue cambiada. Pide un link nuevo al supervisor.",clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
+const SBMSG={anulado:"Este documento fue anulado por el supervisor. Si fue un error, pídele que lo restaure.",acceso_produccion:"La clave no es válida o fue cambiada. Pide un link nuevo al supervisor.",clave_supervisor:"La clave de supervisor no coincide con la que está guardada en Supabase.",clave_corta:"La clave de supervisor debe tener al menos 12 caracteres.",
   bloqueado:"El supervisor bloqueó este link. Habla con él para que lo desbloquee.",usado:"Este link ya se abrió en otro celular. Pide al supervisor que libere el celular (2 · Permisos) y vuelve a abrir el mismo link.",vencido:"Este conteo ya venció. Pide uno nuevo al supervisor.",finalizado:"El supervisor finalizó este conteo.",
   no_existe:"El link no es válido o el conteo fue eliminado. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para enviar este conteo.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_conexion:"Sin conexión a internet.",sin_productos:"El conteo no tiene productos."};
 const sbMsg=e=>SBMSG[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar el script SQL en Supabase (paso 2 de las instrucciones).":/Invalid API key|401|JWT|apikey/i.test(e.message)?"La clave pública (anon / publishable) no es válida.":e.message);
@@ -5848,7 +6201,7 @@ setInterval(checkExpiry,20000);document.addEventListener("visibilitychange",()=>
 var movs=store.get("inv_movs",[]), movLive=new Map(), movAt=null, movBusy=false, movSel=store.get("inv_movsel",null),
     movLect={}, movSeen={}, mpFilter="todos", movHide=store.get("inv_movhide",[]);
 const ROL={E:"Entrega",R:"Recepción"};
-const movMsg=e=>({bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (2 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
+const movMsg=e=>({anulado:"Este documento fue anulado por el supervisor. Si fue un error, pídele que lo restaure.",bloqueado:"El supervisor bloqueó este acceso. Habla con él para que lo desbloquee.",rol_tomado:"Ese rol ya lo tomó otro celular. Pide al supervisor que lo libere (2 · Permisos) y vuelve a abrir el mismo link.",otro_rol:"Este celular ya tomó el otro rol en esta entrega. Cada persona usa su propio celular.",finalizado:"El supervisor ya cerró esta entrega.",vencido:"Esta entrega ya venció. Pide un link nuevo al supervisor.",no_existe:"El link no es válido o la entrega fue eliminada. Pide uno nuevo al supervisor.",no_autorizado:"Este celular no está autorizado para esta entrega.",acceso_produccion:"El acceso de producción no es válido o fue cambiado. Pide un link nuevo al supervisor.",usuario_inactivo:"Tu acceso fue desactivado. Habla con el administrador.",sin_permiso:"Tu acceso no tiene permiso para esta acción.",sin_productos:"Todavía no hay catálogo de productos: el supervisor debe cargar el ERP."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase el script de actualización (actualizacion_03_produccion.sql).":sbMsg(e)));
 
 /* ---------- ¿Quién usa esta pestaña? supervisor (clave de Supabase) o jefe de producción (link propio) ---------- */
 // PRD = {url,key,tok,ses} en el PC del jefe de producción: tok viene en su link, ses es la llave que recibe ESE equipo al vincularse.
@@ -6177,8 +6530,8 @@ const SUP_PERM=[["inv_ver","Inventario","Ver el panel, conteos y resultados"],["
   ["prov_ver","Recepción proveedores","Ver recepciones, cuadre y bajar Excel"],["prov_operar","Recepción proveedores","Crear recepciones, packing list, agregar, corregir y cerrar"],["prov_eliminar","Recepción proveedores","Eliminar recepciones"],
   ["ubi_ver","Almacenamiento","Ver el mapa, dónde está cada producto, movimientos y Excel"],["ubi_operar","Almacenamiento","Cargar ubicaciones, registrar y anular movimientos"],
   ["usr_admin","Usuarios de celulares","Crear, editar, liberar, bloquear y eliminar usuarios"]];
-const SUP_TXT={inv_ver:"Inventario · ver",inv_operar:"Inventario · operar",mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",mp_operar:"MP · operar",mp_eliminar:"MP · eliminar",pt_ver:"PT · ver",pt_corregir:"PT · corregir",
-  dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · eliminar",prov_ver:"Proveedores · ver",prov_operar:"Proveedores · operar",prov_eliminar:"Proveedores · eliminar",ubi_ver:"Almacenamiento · ver",ubi_operar:"Almacenamiento · operar",usr_admin:"Usuarios"};
+const SUP_TXT={inv_ver:"Inventario · ver",inv_operar:"Inventario · operar",mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",mp_operar:"MP · operar",mp_eliminar:"MP · anular",pt_ver:"PT · ver",pt_corregir:"PT · corregir",
+  dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · anular",prov_ver:"Proveedores · ver",prov_operar:"Proveedores · operar",prov_eliminar:"Proveedores · anular",ubi_ver:"Almacenamiento · ver",ubi_operar:"Almacenamiento · operar",usr_admin:"Usuarios"};
 /* Para operar o eliminar hay que poder ver el módulo (el servidor lo exige igual). */
 const SUP_PADRES={inv_operar:["inv_ver"],mp_solicitar:["mp_ver"],mp_operar:["mp_ver","mp_solicitar"],mp_eliminar:["mp_ver"],pt_corregir:["pt_ver"],dev_crear:["dev_ver"],dev_todas:["dev_ver"],dev_cerrar:["dev_ver"],dev_eliminar:["dev_ver"],prov_operar:["prov_ver"],prov_eliminar:["prov_ver"],ubi_operar:["ubi_ver"]};
 const supLink=id=>{const t=(SB.sup||{})[id];return t?appUrl()+"?sup="+encodeURIComponent(id)+"&t="+encodeURIComponent(t)+sbLinkParams():""};
@@ -6314,14 +6667,14 @@ function renderMp(){
       const side=r=>{const [d,t]=ladoEstado(L[r],x);return `<div class="ms"><span class="dot ${d}"></span><span>${r==="E"?"Entrega":"Recibe"}: <b style="color:var(--ink)">${t}</b>${L[r]&&L[r].persona?" · "+esc(L[r].persona):""}${L[r]?" · "+fmt(L[r].n_lecturas):""}</span></div>`};
       return `<div class="mpItem${m.id===movSel?" sel":""}" data-mv="${i}"><div class="mh"><b>${esc(m.nombre)}${m.ref?`<span class="small muted" style="font-weight:500"> · ${esc(m.ref)}</span>`:""}</b>${movEstado(x)}</div>
       <div class="ms">${m.por?"Solicita "+esc(m.por)+" · ":""}${m.sol?fmt(m.sol.length)+" productos · ":""}creada ${fmtDT(m.creado)}</div>${esSolicitada(x)?`<div class="ms" style="color:var(--warn)">${prodMode()?"Esperando que bodega genere el link":"Falta generar el link para bodega"}</div>`:x?side("E")+side("R"):""}
-      <div class="acts">${open&&pvCan("mp_cerrar")?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${pvCan("mp_eliminar")?`<button class="btn sm danger" data-mx="${i}" title="La borra de Supabase con sus lecturas">Eliminar…</button>`:""}</div></div>`}).join("")
+      <div class="acts">${open&&pvCan("mp_cerrar")?`<button class="btn sm danger" data-mf="${i}">Cerrar</button>`:""}<button class="btn sm" data-mr="${i}" title="La saca de esta lista en este PC (queda en Supabase)">Quitar</button>${pvCan("mp_eliminar")?`<button class="btn sm danger" data-mx="${i}" title="La anula: deja de verse, queda en «Anuladas» y se puede restaurar">Anular…</button>`:""}</div></div>`}).join("")
     :`<div class="muted small">Todavía no hay entregas.</div>`;
   $$("#mpTbl .acts").forEach(a=>a.onclick=e=>e.stopPropagation());
   $$("#mpTbl [data-mv]").forEach(b=>b.onclick=()=>{movSel=L0[+b.dataset.mv].id;store.set("inv_movsel",movSel);refreshMov(true);renderMp();if(innerWidth<=980)setTimeout(()=>$("#mpCard").scrollIntoView({behavior:"smooth",block:"start"}),60)});
   $$("#mpTbl [data-mc]").forEach(b=>b.onclick=()=>copyText(L0[+b.dataset.mc].link));
   $$("#mpTbl [data-mf]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mf];confirmBox(`Cerrar "${esc(m.nombre)}": los celulares ya no podrán enviar más lecturas.`,async()=>{try{await mrpc("cb_mov_finalizar",{p_id:m.id});await refreshMov(true);toast("Entrega cerrada")}catch(e){toast(movMsg(e))}},"#mpConfirm")});
   $$("#mpTbl [data-mx]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mx],x=movLive.get(m.id)||{},n=Object.values(x.lados||{}).reduce((a,l)=>a+(+l.n_lecturas||0),0);
-    confirmBox(`Eliminar "${esc(m.nombre)}" de Supabase${n?` con sus ${fmt(n)} lecturas`:""}. Desaparece para todos (celulares y panel) y no se puede deshacer.`,async()=>{try{await mrpc("cb_mov_eliminar",{p_id:m.id});movHide.push(m.id);store.set("inv_movhide",movHide.slice(-300));if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}await refreshMov(true);toast("Entrega eliminada")}catch(e){toast(movMsg(e))}},"#mpConfirm");$("#mpConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
+    confirmBox(`Anular "${esc(m.nombre)}"${n?` (${fmt(n)} lecturas)`:""}. Deja de verse en el panel y en los celulares; no se borra nada: queda en «Anuladas» y se puede restaurar.`,async()=>{try{await mrpc("cb_mov_eliminar",{p_id:m.id});movHide.push(m.id);store.set("inv_movhide",movHide.slice(-300));if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}await refreshMov(true);anulRender("mp");toast("Entrega anulada · está en «Anuladas»")}catch(e){toast(movMsg(e))}},"#mpConfirm");$("#mpConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
   $$("#mpTbl [data-mr]").forEach(b=>b.onclick=()=>{const m=L0[+b.dataset.mr];confirmBox(`Quitar "${esc(m.nombre)}" de esta lista en este equipo (en Supabase queda guardada).`,()=>{movHide.push(m.id);store.set("inv_movhide",movHide.slice(-300));if(movSel===m.id){movSel=null;store.set("inv_movsel",null)}renderMp()},"#mpConfirm")});
   renderMpCmp();
 }
@@ -6543,7 +6896,7 @@ function omRender(){
   $$("#omHead [data-sc]").forEach(b=>b.onclick=()=>omRead(b.dataset.sc));
   $("#omInfo").textContent=`${fmt(om.lect.length)} lecturas`;
   const ls=[...om.lect].reverse();
-  $("#omList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td>
+  $("#omList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px"><span class="code">${esc(l.k||l.code)}</span> · ${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${hhmm(l.t)}</div></td>
      <td class="num" style="white-space:nowrap"><b>${fmt2(l.qty)}</b> <span class="small muted">${esc(l.ce&&+l.f!==1?plural(l.ce):umTxt(l.um))}</span>${l.ce&&+l.f!==1?`<span class="sub">= ${fmt2(l.qty*l.f)} ${esc(umTxt(l.um))}</span>`:""}</td>
      <td><button class="btn sm" data-ol="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#omList [data-ol]").forEach(b=>b.onclick=()=>{const lid=b.dataset.ol,l=om.lect.find(z=>z.lid===lid);if(!l)return;
@@ -7149,7 +7502,7 @@ const hoyISO=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOf
 const fechaCL=s=>{if(!s)return "—";const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}-${m[2]}-${m[1]}`:String(s)};
 const uuid4=()=>{try{if(crypto.randomUUID)return crypto.randomUUID()}catch(e){}const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=a[6]&15|64;a[8]=a[8]&63|128;const x=[...a].map(b=>b.toString(16).padStart(2,"0")).join("");return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}`};
 const DV_BLOQ={noKeep:true,msg:"En las devoluciones solo se pueden registrar productos de la lista. Revisa el código o búscalo por nombre."};
-const dvMsg=e=>({codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Ingresa el N° de guía o el N° de factura (basta con uno).",falta_factura:"Ingresa el N° de guía o el N° de factura (basta con uno).",falta_documento:"Ingresa el N° de guía o el N° de factura (basta con uno).",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
+const dvMsg=e=>({anulado:"Este documento fue anulado por el supervisor. Si fue un error, pídele que lo restaure.",codigo_no_existe:"Hay un código que no existe en la lista de productos: quítalo o corrígelo.",falta_guia:"Ingresa el N° de guía o el N° de factura (basta con uno).",falta_factura:"Ingresa el N° de guía o el N° de factura (basta con uno).",falta_documento:"Ingresa el N° de guía o el N° de factura (basta con uno).",fecha_invalida:"Revisa la fecha de la devolución.",sin_productos:"Agrega al menos un producto.",en_recepcion:"Bodega ya empezó a recibir esta devolución: ya no se puede corregir.",ya_recibida:"Esta devolución ya fue recibida.",finalizado:"El supervisor cerró esta devolución.",sin_permiso:"Este celular no tiene permiso para esta acción.",no_existe:"La devolución ya no existe."}[e.message]||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 07 (devoluciones).":puMsg(e)));
 const dvEstado=d=>d.finalizado?["Cerrada","p-mut"]:d.recibido?["Recibida","p-ok"]:d.rec_inicio?["En recepción","p-info"]:d.enviado?["Enviada a bodega","p-warn"]:["Borrador","p-mut"];
 async function puDevRefresh(m){if(!(puDevCarga()||puDevRec()))return;m=m||(puVista==="dev"?dvModo:(puDevRec()?"rec":"carga"));
   try{let r;try{r=await prpc("cb_dev_mis",{p_modo:m})}catch(e){if(/PGRST202|function/.test(e.message))r=await prpc("cb_dev_mis");else throw e}puDev=Array.isArray(r)?r:[];puDevModo=m}catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e}}
@@ -7189,11 +7542,20 @@ function dvHomeRender(){
 }
 async function dvNueva(){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
-  if(dv&&dv.dirty)await dvSync(false);
+  if(await dvPendiente(null))return;
   dv={id:uuid4(),puesto:PST.puesto,modo:"carga",doc:{guia:"",factura:"",fecha:hoyISO(),nota:""},lect:[],dirty:false,ver:0};dvSave();dvWork();
 }
-function dvElegir(id){
+async function dvPendiente(id){   // true = hay lecturas sin guardar de otra recepción (o de esta): se retoma esa
+  if(!dv||dv.fin||!dv.dirty||dv.puesto!==PST.puesto)return false;
+  if(dv.id!==id&&await dvSync(false))return false;
+  if(dv.id!==id&&/^(ya_recibida|anulado|finalizado|no_existe|en_recepcion|ya_enviada|recibida)$/.test(dv.errCode||"")){const n=dv.lect.length;dvWork();
+    confirmBox(`Esta devolución ya no se puede guardar (${esc(dv.err)}). ¿Descartar lo que quedó sin guardar en este celular y continuar?`,()=>{dv=null;dvSave();id?dvElegir(id):dvNueva()},"#dvConfirm");return true}
+  if(dv.modo!==dvModo){toast(`Tienes lecturas sin guardar en ${dv.modo==="rec"?"Recepción de devoluciones":"Devolución a bodega"}. Ábrela y guárdala con señal.`);return true}
+  if(dv.id!==id)toast("Tienes lecturas sin guardar en esta devolución. Guárdala con señal antes de abrir otra.");
+  dvWork();return true}
+async function dvElegir(id){
   const d=(puDev||[]).find(x=>x.id===id);if(!d)return;
+  if(await dvPendiente(id))return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(dvModoRec()){
     if(d.recibido)return toast("Esta devolución ya fue recibida");
@@ -7291,10 +7653,16 @@ function dvDeclRender(){
     const quit=dv.lect.filter(l=>key(l.k||l.code)===r.k);if(quit.length){dv.lect=dv.lect.filter(l=>key(l.k||l.code)!==r.k);dvDirty();dvRender()}
     $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
 }
+/* fila de lo registrado en el celular (devoluciones y proveedores): código primero, bulto y su conversión;
+   las líneas de otra persona (varias reciben el mismo documento) muestran su nombre y no se quitan desde aquí */
+function recFila(l,attr){const ajena=l.pu&&l.pu!==PST.puesto,f=+l.f||1,cv=l.ce&&f!==1;
+  return `<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px"><span class="code">${esc(l.k||l.code)}</span> · ${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${hhmm(l.t)}${ajena&&l.user?" · registró "+esc(l.user):""}</div></td>`+
+    `<td class="num" style="font-weight:700;white-space:nowrap">${fmt2(l.qty)} <span class="small muted">${esc(cv?plural(l.ce):l.ce?plural(l.ce):umTxt(l.um||""))}</span>${cv?`<div class="small muted">= ${fmt2((+l.qty||0)*f)} ${esc(umTxt(l.um||""))}</div>`:""}</td>`+
+    `<td>${ajena?"":`<button class="btn sm" ${attr}="${esc(l.lid)}" aria-label="Quitar">✕</button>`}</td></tr>`}
 function dvRender(){
   if(!dv)return;if(dvRec())dvDeclRender();const ls=[...dv.lect].reverse();
   $("#dvInfo").textContent=`${fmt(dv.lect.length)} líneas · ${fmt(new Set(dv.lect.map(l=>key(l.k||l.code))).size)} productos`;
-  $("#dvList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-dl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $("#dvList").innerHTML=ls.length?ls.map(l=>recFila(l,"data-dl")).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#dvList [data-dl]").forEach(b=>b.onclick=()=>{const l=dv.lect.find(z=>z.lid===b.dataset.dl);if(!l)return;
     confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{dv.lect=dv.lect.filter(z=>z.lid!==l.lid);dvDirty();dvRender();toast("Línea quitada")},"#dvConfirm")});
 }
@@ -7312,10 +7680,11 @@ async function dvSync(final){
   if(navigator.onLine===false&&!final){dvRenderSync();return false}
   dvSyncing=true;dvRenderSync();const v=dv.ver||0;
   try{
-    if(dvRec())await prpc("cb_dev_recibir",{p_id:dv.id,p_persona:PST.persona||"",p_rec:dv.lect,p_terminar:!!final});
+    if(dvRec()){const r=await prpc("cb_dev_recibir",{p_id:dv.id,p_persona:PST.persona||"",p_rec:dv.lect,p_terminar:!!final});
+      if(r&&Array.isArray(r.rec)&&(dv.ver||0)===v&&!final){dv.lect=r.rec;dvRender()}}   // lista unida: también lo que registró otra persona
     else{const r=await prpc("cb_dev_guardar",{p_id:dv.id,p_doc:Object.assign({persona:PST.persona||""},dv.doc),p_lect:dv.lect,p_enviar:!!final});if(r&&r.enviado)dv.enviado=r.enviado}
-    if((dv.ver||0)===v)dv.dirty=false;dv.err="";dv.syncAt=new Date().toISOString();dvSave();return true;
-  }catch(e){if(final)toast(dvMsg(e));else if(!e.net)dv.err=dvMsg(e);dvSave();return false}
+    if((dv.ver||0)===v)dv.dirty=false;dv.err="";dv.errCode="";dv.syncAt=new Date().toISOString();dvSave();return true;
+  }catch(e){if(final)toast(dvMsg(e));else if(!e.net){dv.err=dvMsg(e);dv.errCode=e.message}dvSave();return false}
   finally{dvSyncing=false;dvRenderSync()}
 }
 function dvFinalizar(){
@@ -7486,7 +7855,7 @@ $("#dpAdd").onclick=dpAdd;$("#dpSend").onclick=dpEnviar;
 $("#dvRef").onclick=()=>devRefresh(false);$("#dvOrig").onchange=devRender;$("#dvQ").oninput=devRender;
 $("#dvX").onclick=()=>{devSel=null;store.set("inv_devsel",null);devRender()};
 $("#dvCerrar").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Cerrar la devolución guía ${esc(d.guia||"—")}: queda como histórico y bodega ya no la ve.`,async()=>{try{await rpc(SB,"cb_dev_cerrar",{p_clave:SB.admin,p_id:d.id});await devRefresh(false);toast("Devolución cerrada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
-$("#dvDel").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Eliminar la devolución guía ${esc(d.guia||"—")} con todo su detalle. No se puede deshacer.`,async()=>{try{await rpc(SB,"cb_dev_eliminar",{p_clave:SB.admin,p_id:d.id});devSel=null;store.set("inv_devsel",null);await devRefresh(false);toast("Devolución eliminada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
+$("#dvDel").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Anular la devolución guía ${esc(d.guia||"—")}. Deja de verse en el panel y en los celulares; no se borra nada: queda en «Anuladas» y se puede restaurar.`,async()=>{try{await rpc(SB,"cb_dev_eliminar",{p_clave:SB.admin,p_id:d.id});devSel=null;store.set("inv_devsel",null);await devRefresh(false);anulRender("dev");toast("Devolución anulada · está en «Anuladas»")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
 $("#dvXlsx").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;const rows=devCuadre(d);
   const aoa=[["Devolución",dvOrigen(d)],["N° de guía",d.guia||""],["N° de factura",d.factura||""],["Fecha",fechaCL(d.fecha)],["Devuelve",d.persona||""],["Recibe",d.rec_persona||""],["Estado",dvEstado(d)[0]],[],
     ["Código","Descripción","Bulto","Devuelto (bultos)","Recibido (bultos)","Unidad ERP","Devuelto","Recibido","Diferencia","Estado"],...rows.map(r=>[r.cod,r.desc||"",r.ce&&r.f!==1?r.ce+" = "+r.f+" "+umTxt(r.um):"",r.D==null||!(r.ce&&r.f!==1)?"":r.D/r.f,r.R==null||!(r.ce&&r.f!==1)?"":r.R/r.f,umTxt(r.um),r.D==null?"":r.D,r.R==null?"":r.R,r.D==null||r.R==null?"":r.dif,DEVST[r.st][0]])];
@@ -7664,7 +8033,7 @@ $("#ptExp").onclick=()=>{
 var pcList=[], pc=store.get("inv_pc",null), pcT=null, pcSyncing=false, pcCamI=null, pcHold=false, pcLast={c:"",miss:99}, pcChk="";
 const pcSave=()=>store.set("inv_pc",pc);
 const PCTIPO={nacional:"Nacional",importacion:"Importación"};
-const pcMsg=e=>({falta_documento:"Ingresa el N° de guía o el N° de referencia (basta con uno).",sin_productos:"Registra al menos un producto.",ya_recibida:"Esta recepción ya se terminó.",
+const pcMsg=e=>({anulado:"Este documento fue anulado por el supervisor. Si fue un error, pídele que lo restaure.",falta_documento:"Ingresa el N° de guía o el N° de referencia (basta con uno).",sin_productos:"Registra al menos un producto.",ya_recibida:"Esta recepción ya se terminó.",
   finalizado:"El supervisor cerró esta recepción.",sin_permiso:"Tu usuario no tiene permiso para recibir proveedores. Pídeselo al supervisor.",datos_invalidos:"Hay una línea con datos inválidos: revisa las cantidades."}[e.message]
   ||(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 19 (proveedores).":puMsg(e)));
 async function pcRefresh(){try{const r=await prpc("cb_prov_mis");pcList=Array.isArray(r)?r:[]}catch(e){if(/puesto_invalido|usuario_inactivo/.test(e.message))throw e;if(/function|PGRST202|404/.test(e.message))toast(pcMsg(e))}}
@@ -7700,12 +8069,21 @@ function pcHomeRender(){
   $("#pcNew").onclick=pcNueva;
   $$("#pcHome [data-pc]").forEach(b=>b.onclick=()=>pcElegir(b.dataset.pc));
 }
-function pcNueva(){
+async function pcNueva(){
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  if(await pcPendiente(null))return;
   pc={id:uuid4(),puesto:PST.puesto,propia:true,doc:{tipo:"nacional",proveedor:"",guia:"",referencia:"",contenedor:"",fecha:hoyISO(),nota:""},decl:[],lect:[],dirty:false,ver:0};pcSave();pcWork();
 }
-function pcElegir(id){
+async function pcPendiente(id){   // true = hay lecturas sin guardar de otra recepción (o de esta): se retoma esa
+  if(!pc||pc.fin||!pc.dirty||pc.puesto!==PST.puesto)return false;
+  if(pc.id!==id&&await pcSync(false))return false;
+  if(pc.id!==id&&/^(ya_recibida|anulado|finalizado|no_existe|en_recepcion|ya_enviada|recibida)$/.test(pc.errCode||"")){pcWork();
+    confirmBox(`Esta recepción ya no se puede guardar (${esc(pc.err)}). ¿Descartar lo que quedó sin guardar en este celular y continuar?`,()=>{pc=null;pcSave();id?pcElegir(id):pcNueva()},"#pcConfirm");return true}
+  if(pc.id!==id)toast("Tienes lecturas sin guardar en esta recepción. Guárdala con señal antes de abrir otra.");
+  pcWork();return true}
+async function pcElegir(id){
   const d=pcList.find(x=>x.id===id);if(!d)return;
+  if(await pcPendiente(id))return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(d.recibido)return toast("Esta recepción ya se terminó");
   pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",contenedor:d.contenedor||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
@@ -7808,7 +8186,7 @@ function pcDeclRender(){
 function pcRender(){
   if(!pc)return;pcDeclRender();const ls=[...pc.lect].reverse();
   $("#pcInfo").textContent=`${fmt(pc.lect.length)} líneas · ${fmt(new Set(pc.lect.map(l=>key(l.k||l.code))).size)} productos`;
-  $("#pcList").innerHTML=ls.length?ls.map(l=>`<tr><td style="white-space:normal;width:100%"><div style="font-weight:600;font-size:13px">${esc(l.desc||"(no está en el maestro)")}</div><div class="small muted">${esc(l.code)} · ${hhmm(l.t)}</div></td><td class="num" style="font-weight:700">${fmt2(l.qty)}${l.ce?`<div class="small muted">${esc(plural(l.ce))}</div>`:l.um&&l.um!=="un"?`<div class="small muted">${esc(l.um)}</div>`:""}</td><td><button class="btn sm" data-pcdl="${esc(l.lid)}" aria-label="Quitar">✕</button></td></tr>`).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
+  $("#pcList").innerHTML=ls.length?ls.map(l=>recFila(l,"data-pcdl")).join(""):`<tr><td class="muted">Aún no registras productos.</td></tr>`;
   $$("#pcList [data-pcdl]").forEach(b=>b.onclick=()=>{const l=pc.lect.find(z=>z.lid===b.dataset.pcdl);if(!l)return;
     confirmBox(`Quitar ${fmt2(l.qty)} de ${esc(l.desc||l.code)}.`,()=>{pc.lect=pc.lect.filter(z=>z.lid!==l.lid);pcDirty();pcRender();toast("Línea quitada")},"#pcConfirm")});
 }
@@ -7825,9 +8203,10 @@ async function pcSync(final){
   if(!pc||pcSyncing)return false;if(!final&&!pc.dirty)return true;
   if(navigator.onLine===false&&!final){pcRenderSync();return false}
   pcSyncing=true;pcRenderSync();const v=pc.ver||0;
-  try{await prpc("cb_prov_recibir",{p_id:pc.id,p_doc:Object.assign({},pc.doc,{persona:PST.persona||""}),p_rec:pc.lect,p_terminar:!!final});
-    if((pc.ver||0)===v)pc.dirty=false;pc.err="";pc.syncAt=new Date().toISOString();pcSave();return true}
-  catch(e){if(final)toast(pcMsg(e));else if(!e.net)pc.err=pcMsg(e);pcSave();return false}
+  try{const r=await prpc("cb_prov_recibir",{p_id:pc.id,p_doc:Object.assign({},pc.doc,{persona:PST.persona||""}),p_rec:pc.lect,p_terminar:!!final});
+    if(r&&Array.isArray(r.rec)&&(pc.ver||0)===v&&!final){pc.lect=r.rec;pcRender()}   // lista unida: también lo que registró otra persona
+    if((pc.ver||0)===v)pc.dirty=false;pc.err="";pc.errCode="";pc.syncAt=new Date().toISOString();pcSave();return true}
+  catch(e){if(final)toast(pcMsg(e));else if(!e.net){pc.err=pcMsg(e);pc.errCode=e.message}pcSave();return false}
   finally{pcSyncing=false;pcRenderSync()}
 }
 function pcFinalizar(){
@@ -8076,7 +8455,19 @@ $("#pvAdOk").onclick=async()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return
 $("#pvEdTog").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(d)pvFormAbrir(d)};
 $("#pvX").onclick=()=>{pvSel=null;store.set("inv_pvsel",null);pvRender()};
 $("#pvCerrar").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Cerrar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}): queda como histórico y bodega ya no la ve.`,async()=>{try{await mrpc("cb_prov_cerrar",{p_id:d.id});toast("Recepción cerrada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
-$("#pvDel").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Eliminar la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}) con todo su detalle. No se puede deshacer.`,async()=>{try{await mrpc("cb_prov_eliminar",{p_id:d.id});pvSel=null;store.set("inv_pvsel",null);toast("Recepción eliminada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
+/* ---------- «Anuladas»: lo anulado en Entrega MP, Proveedores y Devoluciones (se carga al abrir) ---------- */
+const ANUL={mp:{fn:"cb_mov",call:(f,a)=>mrpc(f,a),perm:"mp_eliminar",tit:x=>x.nombre||"—",after:()=>refreshMov(true)},
+  prov:{fn:"cb_prov",call:(f,a)=>mrpc(f,a),perm:"prov_eliminar",tit:x=>`${x.proveedor||"Proveedor sin nombre"} · guía ${x.guia||"—"} · ref. ${x.referencia||"—"}`,after:()=>pvRefresh(true)},
+  dev:{fn:"cb_dev",call:(f,a)=>rpc(SB,f,Object.assign({p_clave:SB.admin},a||{})),perm:"dev_eliminar",tit:x=>`${x.area||""} · guía ${x.guia||"—"} · factura ${x.factura||"—"}`,after:()=>devRefresh(false)}};
+async function anulRender(k){const A=ANUL[k],box=$("#"+k+"Anul");if(!box||!box.open)return;const inn=box.querySelector(".anulIn");inn.innerHTML='<span class="small muted">Cargando…</span>';
+  try{const L=await A.call(A.fn+"_anulados",{})||[];box.querySelector("summary").textContent=`Anuladas · ${fmt(L.length)}`;
+    inn.innerHTML=L.length?`<div class="tbl" style="margin-top:6px"><table><thead><tr><th>Documento</th><th>Anulada</th><th>Por</th><th></th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(A.tit(x))}</td><td style="white-space:nowrap">${fechaCL(ymd(new Date(x.anulado)))} ${hm24(x.anulado)}</td><td>${esc(x.anulado_por||"")}</td><td>${pvCan(A.perm)?`<button class="btn sm" data-rest="${esc(x.id)}">Restaurar</button>`:""}</td></tr>`).join("")}</tbody></table></div>`
+      :'<p class="small muted" style="margin:6px 0">No hay documentos anulados en los últimos 120 días.</p>';
+    inn.querySelectorAll("[data-rest]").forEach(b=>b.onclick=async()=>{try{await A.call(A.fn+"_restaurar",{p_id:b.dataset.rest});
+      if(k==="mp"){movHide=movHide.filter(i=>i!==b.dataset.rest);store.set("inv_movhide",movHide)}toast("Restaurado: vuelve a la lista");await A.after();anulRender(k)}catch(e){toast(SBMSG[e.message]||e.message)}});
+  }catch(e){inn.innerHTML=`<p class="small" style="color:var(--bad);margin:6px 0">No se pudo cargar lo anulado: ${esc(SBMSG[e.message]||e.message)}</p>`}}
+["mp","prov","dev"].forEach(k=>{const b=$("#"+k+"Anul");if(b)b.addEventListener("toggle",()=>anulRender(k))});
+$("#pvDel").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;confirmBox(`Anular la recepción de ${esc(d.proveedor||"—")} (guía ${esc(d.guia||"—")}). Deja de verse en el panel y en los celulares; no se borra nada: queda en «Anuladas» y se puede restaurar.`,async()=>{try{await mrpc("cb_prov_eliminar",{p_id:d.id});pvSel=null;store.set("inv_pvsel",null);toast("Recepción anulada · está en «Anuladas»");await pvRefresh(true);anulRender("prov")}catch(e){toast(pvMsg(e))}},"#pvConfirm")};
 /* Detalle del cuadre por SKU, con los datos del documento en cada fila (sirve para filtrar y tablas dinámicas). */
 function pvFilasXls(d){const cv=r=>r.ce&&r.f!==1,ord={falta:0,norec:1,noesp:2,sobra:3,porrec:4,ok:5};
   return pvCuadre(d).sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod))).map(r=>({"Fecha":fechaCL(d.fecha),"Tipo":PCTIPO[d.tipo]||"","Proveedor":d.proveedor||"","N° de guía":d.guia||"","N° de referencia":d.referencia||"","N° de contenedor":d.contenedor||"",
@@ -8096,7 +8487,7 @@ $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
    ingreso, traslado o salida con ubicación, código y cantidad en bultos (con su conversión).
    El stock de cada ubicación lo calcula el servidor sumando los movimientos.
    ===================================================================== */
-var ub={ubic:[],stock:[],movs:[]}, ubAt=null, ubBusy=false, ubSel=store.get("inv_ubsel",null), ubF=store.get("inv_ubf","todas"), ubCargaL=null;
+var ub={ubic:[],stock:[],movs:[]}, ubAt=null, ubBusy=false, ubSel=store.get("inv_ubsel",null), ubF=store.get("inv_ubf","todas"), ubCargaL=null, ubVista=store.get("inv_ubvista","2d"), ub3=null;
 const UBT={ingreso:["Ingreso","p-ok"],traslado:["Traslado","p-info"],salida:["Salida","p-warn"]};
 const ubMsg=e=>({sin_stock:"No hay esa cantidad en la ubicación de origen.",ubicacion_no_existe:"Esa ubicación no está cargada.",misma_ubicacion:"El origen y el destino son la misma ubicación.",
   falta_ubicacion:"Falta la ubicación.",cantidad_invalida:"Escribe una cantidad mayor que 0.",ubicacion_con_stock:"Hay ubicaciones con producto que no vienen en la lista: vacíalas antes de quitarlas.",
@@ -8151,7 +8542,8 @@ function ubRender(){
   else $("#ubDonde").innerHTML=q?'<div class="small muted" style="margin:6px 0">Ningún producto con ese código o nombre está en una ubicación.</div>':"";
   // mapa: pasillo → rack → niveles (el más alto arriba)
   const fn=F.find(f=>f[0]===ubF)[2],L=U.filter(fn);
-  if(!U.length){$("#ubMapa").innerHTML='<p class="muted">Todavía no hay ubicaciones. Cárgalas con <b>Cargar ubicaciones</b> (Excel o pegando la lista).</p>'}
+  if(ubVista==="3d"&&U.length){}   // en 3D el mapa 2D no se ve: no se arma (se arma al volver a «Mapa»)
+  else if(!U.length){$("#ubMapa").innerHTML='<p class="muted">Todavía no hay ubicaciones. Cárgalas con <b>Cargar ubicaciones</b> (Excel o pegando la lista).</p>'}
   else{// la grilla se arma con TODAS las ubicaciones (así los niveles quedan alineados); el filtro solo atenúa las que no aplican
     const enL=new Set(L.map(u=>u.cod)),pas=new Map(),nivOf=u=>String(u.nivel||ubPartes(u.cod).nivel||"");
     for(const u of U){const p=ubPartes(u.cod),P=u.pasillo||p.pasillo||"—",R=u.rack||p.rack||"—";const m=pas.get(P)||new Map();(m.get(R)||m.set(R,[]).get(R)).push(u);pas.set(P,m)}
@@ -8165,9 +8557,16 @@ function ubRender(){
           const col=niv.length?niv.map(n=>{const u=us.find(x=>nivOf(x)===n);return u?celda(u):'<div class="ubCell pil" title="Pilar: sin ubicación en este nivel"><span class="c">—</span></div>'}).join("")+us.filter(x=>!nivOf(x)).map(celda).join(""):us.map(celda).join("");
           return `<div class="ubRack"><div class="ubRackT">${P==="PISO"?"":esc(R)}</div>${col}</div>`}).join("")+`</div></div>`}).join("")||'<p class="muted">Ninguna ubicación con este filtro.</p>';
     $$("#ubMapa [data-ub]").forEach(b=>b.onclick=()=>ubAbrir(b.dataset.ub))}
+  // modelo 3D: las mismas ubicaciones, búsqueda y filtro; si el equipo no tiene WebGL se vuelve al mapa
+  let en3=ubVista==="3d"&&U.length>0;
+  if(en3){let ok=false,err=null;try{ok=ub3Render(sm,U,new Set(L.map(u=>u.cod)),hitU,q)}catch(e){err=e;console.error(e)}
+    if(!ok){ubVista="2d";store.set("inv_ubvista","2d");toast(err?"El modelo 3D tuvo un problema. Se muestra el mapa.":"Este equipo o navegador no permite el modelo 3D. Se muestra el mapa.");return ubRender()}}
+  $("#ub3").hidden=!en3;$("#ubMapa").hidden=en3;$$("#ubVista .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.vista===ubVista));
   ubDetRender();ubMovsRender();
 }
-function ubAbrir(u){ubSel=u;store.set("inv_ubsel",u);ubRender();$("#ubDet").scrollIntoView({behavior:"smooth",block:"start"})}
+function ubAbrir(u){ubSel=u;store.set("inv_ubsel",u);ubRender();
+  if(ubVista==="3d"&&!$("#ub3").hidden){ub3Ir(u);$("#ub3").scrollIntoView({behavior:"smooth",block:"nearest"})}   // en 3D: la cámara va a la ubicación
+  else $("#ubDet").scrollIntoView({behavior:"smooth",block:"start"})}
 function ubMovRow(m,acc){const [t,c]=UBT[m.tipo]||[m.tipo,"p-mut"],an=!!m.anulado;
   return `<tr${an?' style="opacity:.55"':""}><td style="white-space:nowrap">${fechaCL(ymd(new Date(m.t)))} ${hm24(m.t)}</td><td><span class="pill ${c}">${t}</span></td><td class="code">${esc(m.desde||"—")}</td><td class="code">${esc(m.hacia||"—")}</td><td class="code">${esc(m.k)}</td><td>${esc(m.descr||(pvFind(m.k)||{}).desc||"")}</td>
     <td class="num">${an?"<s>":""}${qBC((+m.qty||0)*(+m.f||1),m.ce,m.f,m.um)}${an?"</s>":""}</td><td>${esc(m.persona||"")}${m.origen==="panel"?' <span class="small muted">(panel)</span>':""}</td>
@@ -8192,7 +8591,183 @@ function ubMovsRender(){
     $("#ubConfirm").scrollIntoView({behavior:"smooth",block:"center"})});
 }
 $("#ubDetX").onclick=()=>{ubSel=null;store.set("inv_ubsel",null);ubRender()};
-$("#ubRef").onclick=()=>ubRefresh(true);$("#ubQ").oninput=ubRender;$("#ubDia").onchange=()=>{store.set("inv_ubdia",$("#ubDia").value);ubMovsRender()};
+$("#ubRef").onclick=()=>ubRefresh(true);let ubQT=0;$("#ubQ").oninput=()=>{clearTimeout(ubQT);if(ubVista==="3d")ubQT=setTimeout(ubRender,150);else ubRender()};   // en 3D se redibuja al dejar de escribir
+$$("#ubVista .chip").forEach(b=>b.onclick=()=>{ubVista=b.dataset.vista;store.set("inv_ubvista",ubVista);ubRender()});$("#ubDia").onchange=()=>{store.set("inv_ubdia",$("#ubDia").value);ubMovsRender()};
+/* ---------- Modelo 3D de la bodega ----------
+   Dibuja las mismas ubicaciones del mapa como racks y pallets en 3D. No usa librerías (WebGL directo), así la app
+   sigue siendo un solo archivo y funciona sin señal. No guarda nada: solo muestra lo que ya trae cb_ubic_datos.
+   UB_PLANO es el plano de la bodega (layout Grupo Vector 2024: 34 × 47 m). Medidas en metros, tomadas de la
+   elevación de las estanterías: vano de 2 pallets cada 2,33 m (1,165 m por posición), fondo 1,0 m, niveles cada 1,4 m,
+   racks dobles separados 0,3 m; todos los pasillos miden 3,2 m. x = ancho de la bodega (izquierda → derecha del plano), z = largo (arriba → abajo).
+   Cada hilera: eje por el que avanzan sus posiciones, d = dónde parte su fondo, a = dónde parte la posición 1,
+   s = hacia dónde crecen (1 o -1), f = lado del pasillo (1 o -1). Una hilera que no esté aquí se dibuja al costado. */
+const UB_PLANO={ancho:34,largo:47,paso:1.165,fondo:1,nivel:1.4,
+  hil:{I:{eje:"z",d:.3,a:44.47,s:-1,f:1},H:{eje:"z",d:4.5,a:42.14,s:-1,f:-1},G:{eje:"z",d:5.8,a:42.14,s:-1,f:1},F:{eje:"z",d:10,a:42.14,s:-1,f:-1},E:{eje:"z",d:11.3,a:42.14,s:-1,f:1},
+    D:{eje:"z",d:15.5,a:42.14,s:-1,f:-1},C:{eje:"z",d:16.8,a:42.14,s:-1,f:1},B:{eje:"z",d:21,a:32.82,s:-1,f:-1},A:{eje:"z",d:32.3,a:21.5,s:1,f:-1},
+    J:{eje:"x",d:.66,a:25.93,s:-1,f:1},K:{eje:"x",d:45.34,a:15.98,s:-1,f:-1}},
+  /* zonas de piso (k = código de la ubicación de piso que se guarda ahí), vías de evacuación y recintos */
+  zonas:[{k:"PICKING-RETAIL",t:"Picking retail",x:26.6,z:.6,w:4.6,l:18.2},{k:"PICKING",t:"Picking",x:25.2,z:21.6,w:5.6,l:11.4},{t:"Picking",x:23.5,z:36.6,w:3.3,l:8},
+    {k:"MASIVO",t:"Masivo",x:27.2,z:36.6,w:6.5,l:8},{t:"Vía de evacuación",x:22.3,z:19.2,w:11.4,l:1.9,via:1},{t:"Vía de evacuación",x:17.95,z:21.1,w:2.9,l:25.5,via:1},
+    {t:"Casino",x:31.6,z:.6,w:2.1,l:5.6,sala:1},{t:"Baños",x:31.6,z:6.2,w:2.1,l:5.6,sala:1},{t:"Oficina logística",x:31.6,z:11.8,w:2.1,l:7,sala:1},{t:"Administración picking",x:23.5,z:45.2,w:10.2,l:1.4,sala:1}]};
+const UB3_FOV=40*Math.PI/180,UB3_GRIS=[203,212,218],UB3_HIT=[240,140,30];
+const UB3_SKU=[[214,186,140],[150,180,205],[176,200,150],[226,170,140],[190,170,210],[232,208,130],[140,195,190],[215,160,180],[205,190,165],[160,170,200]];   // un color por producto
+const ub3Hash=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return h};
+/* malla: cajas de caras planas con la luz ya aplicada (posición xyz + color rgba por vértice) */
+function ub3Malla(){let cap=4096,buf=new ArrayBuffer(cap*16),F=new Float32Array(buf),B=new Uint8Array(buf),n=0;
+  const v=(p,r,g,b,a)=>{if(n===cap){cap*=2;const nb=new ArrayBuffer(cap*16);new Uint8Array(nb).set(B);buf=nb;F=new Float32Array(buf);B=new Uint8Array(buf)}
+    F[n*4]=p[0];F[n*4+1]=p[1];F[n*4+2]=p[2];const o=n*16+12;B[o]=r;B[o+1]=g;B[o+2]=b;B[o+3]=a;n++};
+  const q=(p,c,k,a)=>{for(const i of [0,1,2,0,2,3])v(p[i],c[0]*k,c[1]*k,c[2]*k,a)};
+  return {box(x0,y0,z0,x1,y1,z1,c,a=255){if(x0>x1)[x0,x1]=[x1,x0];if(z0>z1)[z0,z1]=[z1,z0];
+      q([[x0,y1,z0],[x0,y1,z1],[x1,y1,z1],[x1,y1,z0]],c,1,a);q([[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]],c,.88,a);q([[x1,y0,z0],[x0,y0,z0],[x0,y1,z0],[x1,y1,z0]],c,.68,a);
+      q([[x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1]],c,.8,a);q([[x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0]],c,.74,a)},
+    get n(){return n},datos:()=>new Uint8Array(buf,0,n*16)}}
+function ub3Marco(M,b,c){const [x0,y0,z0,x1,y1,z1]=b,t=.05;
+  for(const y of [y0,y1-t]){for(const z of [z0,z1-t])M.box(x0,y,z,x1,y+t,z+t,c);for(const x of [x0,x1-t])M.box(x,y,z0,x+t,y+t,z1,c)}
+  for(const x of [x0,x1-t])for(const z of [z0,z1-t])M.box(x,y0,z,x+t,y1,z+t,c)}
+function ub3Pallet(M,x0,z0,x1,z1,y,cols,rx){const W=[196,160,108],hT=1.05,n=cols.length;M.box(x0,y+.1,z0,x1,y+.14,z1,W);
+  for(const t of [0,.45,.9])rx?M.box(x0,y,z0+(z1-z0)*t,x1,y+.1,z0+(z1-z0)*(t+.1),W):M.box(x0+(x1-x0)*t,y,z0,x0+(x1-x0)*(t+.1),y+.1,z1,W);
+  cols.forEach((c,i)=>M.box(x0+.03,y+.14+hT*i/n,z0+.03,x1-.03,y+.14+hT*(i+1)/n-(i<n-1?.015:0),z1-.03,c))}
+/* estructura fija: piso, zonas, racks y la lista de espacios (uno por ubicación) con su caja para tocar */
+function ub3Armar(U){const P=UB_PLANO,p=P.paso,M=ub3Malla(),slots=new Map(),rot=[],pas=new Map(),lim=[1e9,1e9,-1e9,-1e9];
+  const ext=(x0,z0,x1,z1)=>{lim[0]=Math.min(lim[0],x0,x1);lim[1]=Math.min(lim[1],z0,z1);lim[2]=Math.max(lim[2],x0,x1);lim[3]=Math.max(lim[3],z0,z1)};
+  const zona=z=>{ext(z.x,z.z,z.x+z.w,z.z+z.l);rot.push({c:"z",t:z.t,s:z.sala,x:z.x+z.w/2,y:z.sala?1.3:.1,z:z.z+z.l/2});
+    if(z.sala)return M.box(z.x,0,z.z,z.x+z.w,1.2,z.z+z.l,[206,219,229]);
+    M.box(z.x,0,z.z,z.x+z.w,.03,z.z+z.l,z.via?[203,232,211]:[247,238,220]);const e=z.via?[150,200,165]:[214,190,140],t=.1;
+    M.box(z.x,.03,z.z,z.x+z.w,.045,z.z+t,e);M.box(z.x,.03,z.z+z.l-t,z.x+z.w,.045,z.z+z.l,e);M.box(z.x,.03,z.z,z.x+t,.045,z.z+z.l,e);M.box(z.x+z.w-t,.03,z.z,z.x+z.w,.045,z.z+z.l,e)};
+  for(const u of U){const k=u.pasillo||ubPartes(u.cod).pasillo||"—";(pas.get(k)||pas.set(k,[]).get(k)).push(u)}
+  const plano=[...pas.keys()].some(k=>P.hil[k]);let autoN=0;const ax=plano?P.ancho+4:0;
+  if(plano){ext(0,0,P.ancho,P.largo);M.box(0,-.25,0,P.ancho,0,P.largo,[226,233,238]);const m=[176,196,208],g=.18,a=.5;
+    M.box(-g,0,-g,P.ancho+g,a,0,m);M.box(-g,0,P.largo,P.ancho+g,a,P.largo+g,m);M.box(-g,0,0,0,a,P.largo,m);M.box(P.ancho,0,0,P.ancho+g,a,P.largo,m);
+    P.zonas.forEach(zona);rot.push({c:"z",t:P.ancho+" m",x:P.ancho/2,y:.1,z:P.largo+1.2},{c:"z",t:P.largo+" m",x:P.ancho+1.4,y:.1,z:P.largo/2})}
+  const AZ=[74,110,138],NA=[222,138,62];
+  for(const k of [...pas.keys()].sort(ubCmp)){if(k==="PISO")continue;const us=pas.get(k),R=u=>String(u.rack||ubPartes(u.cod).rack||""),NV=u=>String(u.nivel||ubPartes(u.cod).nivel||"");
+    const rs=[...new Set(us.map(R))].sort(ubCmp),ns=[...new Set(us.map(NV).filter(Boolean))].sort(ubCmp),rNum=rs.every(r=>/^\d+$/.test(r)&&+r>0&&+r<400),nNum=ns.every(n=>/^\d+$/.test(n)&&+n>0&&+n<30);
+    const h=plano&&rNum&&P.hil[k]?P.hil[k]:{eje:"x",d:(autoN++)*(P.fondo+3.6),a:ax,s:1,f:1},X=h.eje==="x",tops=new Map();
+    const rb=(a0,a1,d0,d1,y0,y1,c)=>X?M.box(a0,y0,d0,a1,y1,d1,c):M.box(d0,y0,a0,d1,y1,a1,c),pt=(a,d,y)=>X?{x:a,y,z:d}:{x:d,y,z:a};
+    for(const u of us){const n=rNum?+R(u):rs.indexOf(R(u))+1,nv=NV(u),li=!nv?0:nNum?+nv-1:ns.indexOf(nv),a0=h.a+h.s*(n-1)*p,a1=h.a+h.s*n*p,lo=Math.min(a0,a1),hi=Math.max(a0,a1),y0=li*P.nivel,d0=h.d-.1,d1=h.d+P.fondo+.1;
+      tops.set(n,Math.max(tops.get(n)??0,li));
+      slots.set(u.cod,{cod:u.cod,u,k,n,li,h,lo,hi,y0,box:X?[lo,y0,d0,hi,y0+1.36,d1]:[d0,y0,lo,d1,y0+1.36,hi]});
+      if(li>0){rb(lo,hi,h.d,h.d+.05,y0-.12,y0,NA);rb(lo,hi,h.d+P.fondo-.05,h.d+P.fondo,y0-.12,y0,NA)}}
+    const N=Math.max(...tops.keys()),tope=Math.max(...tops.values())*P.nivel+.35;
+    for(let j=0;j<=N;j++){if(j%2&&j!==N)continue;const t=Math.max(tops.get(j)??-1,tops.get(j+1)??-1);if(t<0)continue;const c=h.a+h.s*j*p,alto=Math.max(t*P.nivel+.35,1.5);   // un marco cada 2 pallets
+      rb(c-.04,c+.04,h.d,h.d+.08,0,alto,AZ);rb(c-.04,c+.04,h.d+P.fondo-.08,h.d+P.fondo,0,alto,AZ);
+      for(const y of [alto-.07,alto/2,.15])rb(c-.03,c+.03,h.d+.08,h.d+P.fondo-.08,y,y+.06,AZ)}
+    for(const s of slots.values())if(s.h===h)s.tope=tope;
+    const e0=h.a-h.s*.9,e1=h.a+h.s*(N*p+.9),dc=h.d+P.fondo/2+h.f*.45,dn=h.f>0?h.d+P.fondo+.6:h.d-.6;
+    rot.push(Object.assign({c:"h",t:k},pt(e0,dc,tope+.5)),Object.assign({c:"h",t:k},pt(e1,dc,tope+.5)));
+    for(const n of tops.keys())rot.push(Object.assign({c:"n",t:String(n),n},pt(h.a+h.s*(n-.5)*p,dn,.05)));
+    X?ext(e0,h.d-.6,e1,h.d+P.fondo+.6):ext(h.d-.6,e0,h.d+P.fondo+.6,e1)}
+  let zi=0;for(const u of pas.get("PISO")||[]){let z=plano&&P.zonas.find(z=>z.k===u.cod);
+    if(!z){z={t:u.cod,x:ax+(zi++)*6.5,z:autoN*(P.fondo+3.6)+1,w:5.5,l:5.5};zona(z)}
+    slots.set(u.cod,{cod:u.cod,u,k:"PISO",piso:z,box:[z.x,0,z.z,z.x+z.w,1.5,z.z+z.l]})}
+  if(lim[0]>lim[2])ext(0,0,10,10);
+  M.box(lim[0]-3,-.3,lim[1]-3,lim[2]+3,-.26,lim[3]+3,[220,229,235]);   // suelo bajo todo (también lo que queda fuera del plano)
+  ub3.slots=slots;ub3.rot=rot;ub3.lim=lim;ub3Subir(ub3.est,M)}
+/* lo que cambia: pallets (un color por producto), búsqueda, filtro y ubicación elegida */
+function ub3Dinamica(sm,enL,hitU,q){const M=ub3Malla(),T=ub3Malla(),P=UB_PLANO,marc=new Set();
+  const es=s=>deacc(s.k+" "+(s.descr||"")).includes(q),col=(s,ok)=>!ok?UB3_GRIS:q?(es(s)?UB3_HIT:UB3_GRIS):UB3_SKU[ub3Hash(s.k)%UB3_SKU.length];
+  const pin=(x,z,y0,k)=>{if(marc.has(k))return;marc.add(k);M.box(x-.03,y0,z-.03,x+.03,y0+1.3,z+.03,UB3_HIT);M.box(x-.28,y0+1.3,z-.28,x+.28,y0+1.86,z+.28,UB3_HIT)};
+  for(const s of ub3.slots.values()){const l=sm.get(s.cod)||[],ok=enL.has(s.cod),b=s.box,hit=ok&&hitU(s.u);
+    s.sol=s.piso?true:l.length>0||(ubF==="vac"&&ok);s.pk=l.length&&!s.piso?[b[0],b[1],b[2],b[3],b[1]+1.19,b[5]]:b;
+    if(s.piso){const z=s.piso,nc=Math.max(1,Math.floor((z.w-.6)/1.4)),nf=Math.max(1,Math.floor((z.l-.6)/1.5));   // en el piso: un pallet por producto
+      l.slice(0,nc*nf).forEach((x,i)=>{const px=z.x+.5+(i%nc)*1.4,pz=z.z+.5+Math.floor(i/nc)*1.5;ub3Pallet(M,px,pz,px+1,pz+1.2,.03,[col(x,ok)],false)});
+      if(hit)pin(z.x+z.w/2,z.z+z.l/2,1.4,s.cod)}
+    else{const c=(s.lo+s.hi)/2,d0=s.h.d-.1,d1=s.h.d+P.fondo+.1,X=s.h.eje==="x";
+      if(l.length){const cols=l.slice(0,3).map(x=>col(x,ok));X?ub3Pallet(M,c-.5,d0,c+.5,d1,s.y0,cols,false):ub3Pallet(M,d0,c-.5,d1,c+.5,s.y0,cols,true)}
+      else if(ubF==="vac"&&ok)T.box(b[0]+.12,b[1]+.06,b[2]+.12,b[3]-.12,b[4]-.2,b[5]-.12,[61,134,97],95);
+      if(hit){T.box(b[0],b[1],b[2],b[3],b[4],b[5],UB3_HIT,60);const dc=s.h.d+P.fondo/2;pin(X?c:dc,X?dc:c,s.tope+1.1,s.k+":"+s.n)}}
+    if(s.cod===ubSel)ub3Marco(M,[b[0]-.04,b[1]-.02,b[2]-.04,b[3]+.04,b[4]+.04,b[5]+.04],[20,70,170])}
+  ub3Subir(ub3.din,M);ub3Subir(ub3.tra,T)}
+function ub3Subir(m,M){const gl=ub3.gl;gl.bindBuffer(gl.ARRAY_BUFFER,m.b);gl.bufferData(gl.ARRAY_BUFFER,M.datos(),gl.DYNAMIC_DRAW);m.n=M.n}
+/* cámara: gira alrededor de un punto (x,z en el piso; y = altura a la que mira) a distancia d */
+function ub3Cam(){const c=ub3.cam,cp=Math.cos(c.pitch),e=[c.x+c.d*cp*Math.sin(c.yaw),c.y+c.d*Math.sin(c.pitch),c.z+c.d*cp*Math.cos(c.yaw)];
+  let f=[c.x-e[0],c.y-e[1],c.z-e[2]];const fl=Math.hypot(...f);f=f.map(v=>v/fl);const rl=Math.hypot(f[2],f[0]),r=[-f[2]/rl,0,f[0]/rl],u=[r[1]*f[2]-r[2]*f[1],r[2]*f[0]-r[0]*f[2],r[0]*f[1]-r[1]*f[0]];return {e,f,r,u}}
+function ub3Matriz(asp){const {e,f,r,u}=ub3Cam(),t=1/Math.tan(UB3_FOV/2),near=1,far=900,A=(far+near)/(near-far),B=2*far*near/(near-far),dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const r0=[r[0],r[1],r[2],-dot(r,e)].map(v=>v*t/asp),r1=[u[0],u[1],u[2],-dot(u,e)].map(v=>v*t),v2=[-f[0],-f[1],-f[2],dot(f,e)],r2=[v2[0]*A,v2[1]*A,v2[2]*A,v2[3]*A+B],r3=v2.map(v=>-v);
+  return new Float32Array([r0[0],r1[0],r2[0],r3[0],r0[1],r1[1],r2[1],r3[1],r0[2],r1[2],r2[2],r3[2],r0[3],r1[3],r2[3],r3[3]])}
+function ub3Rayo(px,py){const b=ub3.caja,w=b.clientWidth,h=b.clientHeight,{e,f,r,u}=ub3Cam(),th=Math.tan(UB3_FOV/2),nx=(px/w*2-1)*th*w/h,ny=(1-py/h*2)*th;return {o:e,d:[f[0]+r[0]*nx+u[0]*ny,f[1]+r[1]*nx+u[1]*ny,f[2]+r[2]*nx+u[2]*ny]}}
+function ub3Tocar(px,py){const {o,d}=ub3Rayo(px,py);let mejor=null,tm=1e9;
+  for(const sol of [true,false]){if(mejor)break;for(const s of ub3.slots.values()){if(!!s.sol!==sol)continue;const b=s.pk||s.box;let t0=0,t1=1e9;
+    for(let i=0;i<3&&t0<=t1;i++){if(Math.abs(d[i])<1e-9){if(o[i]<b[i]||o[i]>b[i+3])t0=2e9;continue}let a=(b[i]-o[i])/d[i],c=(b[i+3]-o[i])/d[i];if(a>c)[a,c]=[c,a];t0=Math.max(t0,a);t1=Math.min(t1,c)}
+    if(t0<=t1&&t0<tm){tm=t0;mejor=s}}}
+  return mejor}
+function ub3Suelo(px,py){const {o,d}=ub3Rayo(px,py);if(d[1]>-1e-3)return null;const t=-o[1]/d[1];return t>600?null:[o[0]+d[0]*t,o[2]+d[2]*t]}
+function ub3Limites(){const c=ub3.cam,l=ub3.lim,R=Math.hypot(l[2]-l[0],l[3]-l[1])/2;c.x=Math.max(l[0]-2,Math.min(l[2]+2,c.x));c.z=Math.max(l[1]-2,Math.min(l[3]+2,c.z));c.y=Math.max(0,Math.min(12,c.y||0));c.d=Math.max(2.5,Math.min(R*4+10,c.d));c.pitch=Math.max(.1,Math.min(1.555,c.pitch))}
+function ub3Pedir(){if(ub3&&!ub3.raf)ub3.raf=requestAnimationFrame(ub3Pintar)}
+function ub3Pintar(now){ub3.raf=0;const gl=ub3.gl,cv=ub3.cv,b=ub3.caja,w=b.clientWidth,h=b.clientHeight;if(!w||!h||gl.isContextLost())return;
+  const k=Math.min(2,window.devicePixelRatio||1);if(cv.width!==Math.round(w*k)||cv.height!==Math.round(h*k)){cv.width=ub3.lc.width=Math.round(w*k);cv.height=ub3.lc.height=Math.round(h*k)}
+  if(ub3.anim){const a=ub3.anim,t=Math.min(1,(now-a.t0)/a.ms),s=t*t*(3-2*t);for(const i in a.a)ub3.cam[i]=a.de[i]+(a.a[i]-a.de[i])*s;if(t>=1)ub3.anim=null;else ub3Pedir()}
+  ub3Limites();const m=ub3Matriz(w/h);
+  gl.viewport(0,0,cv.width,cv.height);gl.clearColor(.914,.949,.969,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.useProgram(ub3.pr);gl.uniformMatrix4fv(ub3.um,false,m);
+  const dib=x=>{if(!x.n)return;gl.bindBuffer(gl.ARRAY_BUFFER,x.b);gl.enableVertexAttribArray(0);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(0,3,gl.FLOAT,false,16,0);gl.vertexAttribPointer(1,4,gl.UNSIGNED_BYTE,true,16,12);gl.drawArrays(gl.TRIANGLES,0,x.n)};
+  dib(ub3.est);dib(ub3.din);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);dib(ub3.tra);dib(ub3.hov);gl.depthMask(true);gl.disable(gl.BLEND);
+  ub3Rotulos(m,w,h,k)}
+function ub3Proy(m,x,y,z,w,h){const cw=m[3]*x+m[7]*y+m[11]*z+m[15];if(cw<1)return null;return [((m[0]*x+m[4]*y+m[8]*z+m[12])/cw*.5+.5)*w,(.5-(m[1]*x+m[5]*y+m[9]*z+m[13])/cw*.5)*h,cw]}
+/* rótulos sobre el modelo: letra de cada hilera, zonas y números de posición (aparecen al acercarse) */
+function ub3Rotulos(m,w,h,k){const x=ub3.lc.getContext("2d"),th=Math.tan(UB3_FOV/2),F='"IBM Plex Sans",system-ui,sans-serif';x.setTransform(k,0,0,k,0,0);x.clearRect(0,0,w,h);x.textAlign="center";x.textBaseline="middle";
+  for(const r of ub3.rot){const p=ub3Proy(m,r.x,r.y,r.z,w,h);if(!p||p[0]<-30||p[0]>w+30||p[1]<-12||p[1]>h+12)continue;const ppm=h/(2*th*p[2]);
+    if(r.c==="n"){const e=ppm*UB_PLANO.paso;if(p[2]>32||!(e>=20||(e*5>=38&&r.n%5===0)))continue;x.font="600 10px "+F;x.fillStyle="#6b8799";x.fillText(r.t,p[0],p[1])}
+    else if(r.c==="z"){if(ppm<(r.s?11:4.5))continue;x.font="600 11px "+F;x.fillStyle="#557386";x.fillText(r.t.toUpperCase(),p[0],p[1])}
+    else{x.font="700 13px "+F;const tw=Math.max(22,x.measureText(r.t).width+12);x.fillStyle="rgba(248,251,253,.94)";x.strokeStyle="#4a7fa0";x.lineWidth=1.5;x.beginPath();x.rect(p[0]-tw/2,p[1]-11,tw,22);x.fill();x.stroke();x.fillStyle="#26465c";x.fillText(r.t,p[0],p[1]+.5)}}}
+function ub3Volar(a,ms){const c=ub3.cam;if(a.yaw!=null){const T=2*Math.PI;c.yaw=((c.yaw%T)+T)%T;if(a.yaw-c.yaw>Math.PI)c.yaw+=T;else if(c.yaw-a.yaw>Math.PI)c.yaw-=T}
+  if(!ms){Object.assign(c,a);ub3.anim=null}else ub3.anim={de:Object.assign({},c),a,t0:performance.now(),ms};ub3Pedir()}
+function ub3Vista(v,ms){const l=ub3.lim,R=Math.hypot(l[2]-l[0],l[3]-l[1])/2,cx=(l[0]+l[2])/2,cz=(l[1]+l[3])/2,c=ub3.cam;
+  if(v==="gen")ub3Volar({x:cx,y:0,z:cz,d:R*1.75+4,yaw:.5,pitch:.72},ms);else if(v==="planta")ub3Volar({x:cx,y:0,z:cz,d:R*2.4+4,yaw:0,pitch:1.555},ms);
+  else ub3Volar({d:Math.max(2.5,c.d*(v==="mas"?.7:1.4))},200)}
+/* acerca la cámara a una ubicación, mirándola desde su pasillo */
+function ub3Ir(cod){const s=ub3&&ub3.slots&&ub3.slots.get(cod);if(!s)return;const b=s.box,x=(b[0]+b[3])/2,z=(b[2]+b[5])/2;
+  if(s.piso)return ub3Volar({x,y:0,z,d:16,pitch:.7},500);ub3Volar({x,y:(b[1]+b[4])/2,z,d:8,pitch:.95,yaw:s.h.eje==="x"?(s.h.f>0?0:Math.PI):(s.h.f>0?Math.PI/2:-Math.PI/2)},500)}
+function ub3Pantalla(cod){const s=ub3&&ub3.slots&&ub3.slots.get(cod),bx=ub3&&ub3.caja;if(!s||!bx)return null;const b=s.pk||s.box,r=bx.getBoundingClientRect(),p=ub3Proy(ub3Matriz(r.width/r.height),(b[0]+b[3])/2,(b[1]+b[4])/2,(b[2]+b[5])/2,r.width,r.height);return p&&{x:r.left+p[0],y:r.top+p[1]}}
+function ub3Info(cod,sm){const s=ub3.slots.get(cod),l=sm.get(cod)||[],u=s.u,p=ubPartes(cod);
+  return `<b>${esc(cod)}</b> <span class="muted">${s.piso?"Zona de piso":`Hilera ${esc(u.pasillo||p.pasillo||"—")} · posición ${esc(u.rack||p.rack||"—")} · nivel ${esc(u.nivel||p.nivel||"—")}`}</span>`+
+    (l.length?l.slice(0,5).map(x=>`<div class="l"><span class="code">${esc(x.k)}</span> ${esc(x.descr)} · ${qBC(+x.base,x.ce,x.f,x.um)}</div>`).join("")+(l.length>5?`<div class="l muted">+${fmt(l.length-5)} productos más</div>`:""):'<div class="l muted">Vacía</div>')}
+function ub3Flotar(s,px,py){const t=$("#ub3Tip");if(ub3.hover===(s&&s.cod)){if(s){t.style.left=Math.min(px+14,ub3.caja.clientWidth-250)+"px";t.style.top=(py+16)+"px"}return}
+  ub3.hover=s?s.cod:null;const M=ub3Malla();if(s){const b=s.box;M.box(b[0]-.02,b[1],b[2]-.02,b[3]+.02,b[4],b[5]+.02,[31,66,88],70)}ub3Subir(ub3.hov,M);
+  t.hidden=!s;if(s){t.innerHTML=ub3Info(s.cod,ub3.sm);t.style.left=Math.min(px+14,ub3.caja.clientWidth-250)+"px";t.style.top=(py+16)+"px"}ub3.cv.style.cursor=s?"pointer":"grab";ub3Pedir()}
+function ub3Elegir(cod){ubSel=cod;store.set("inv_ubsel",cod);ubRender()}
+function ub3Ini(){if(ub3)return ub3.gl?true:false;const caja=$("#ub3"),cv=$("#ub3C");ub3={gl:null};
+  const gl=cv.getContext("webgl",{antialias:true,alpha:false})||cv.getContext("experimental-webgl");if(!gl)return false;
+  const prep=()=>{const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o},pr=gl.createProgram(),mk=()=>({b:gl.createBuffer(),n:0});
+    gl.attachShader(pr,sh(gl.VERTEX_SHADER,"attribute vec3 p;attribute vec4 c;uniform mat4 m;varying vec4 v;void main(){v=c;gl_Position=m*vec4(p,1.);}"));
+    gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,"precision mediump float;varying vec4 v;void main(){gl_FragColor=v;}"));
+    gl.bindAttribLocation(pr,0,"p");gl.bindAttribLocation(pr,1,"c");gl.linkProgram(pr);if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return false;
+    Object.assign(ub3,{pr,um:gl.getUniformLocation(pr,"m"),est:mk(),din:mk(),tra:mk(),hov:mk(),firma:null,hover:null});return true};
+  ub3={gl,caja,cv,lc:$("#ub3L"),cam:{x:0,y:0,z:0,d:60,yaw:.5,pitch:.72},slots:new Map(),rot:[],lim:[0,0,10,10],raf:0,anim:null,sm:new Map(),vista:false};
+  if(!prep()){ub3={gl:null};return false}
+  /* mouse y dedos: arrastrar gira · Shift, clic derecho o dos dedos desplazan · rueda o pellizco acercan · clic elige */
+  const pts=new Map(),pos=e=>{const r=caja.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};let arr=null,pz=null;
+  const mover=(dx,dy)=>{const c=ub3.cam,k=2*c.d*Math.tan(UB3_FOV/2)/caja.clientHeight,sy=Math.sin(c.yaw),cy=Math.cos(c.yaw),q=dy*k/Math.max(.35,Math.sin(c.pitch));c.x-=cy*dx*k+sy*q;c.z+=sy*dx*k-cy*q};
+  const zoom=(f,px,py)=>{const c=ub3.cam,g=ub3Suelo(px,py),nd=Math.max(2.5,Math.min(400,c.d*f));if(g){const t=1-nd/c.d;c.x+=(g[0]-c.x)*t;c.z+=(g[1]-c.z)*t}c.d=nd};
+  cv.addEventListener("contextmenu",e=>e.preventDefault());
+  cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);const [x,y]=pos(e);pts.set(e.pointerId,[x,y]);ub3.anim=null;
+    if(pts.size===1)arr={x,y,mov:0,pan:e.button!==0||e.shiftKey};else{arr=null;pz=null}ub3Flotar(null)});
+  cv.addEventListener("pointermove",e=>{const [x,y]=pos(e);
+    if(!pts.has(e.pointerId)){if(e.pointerType==="mouse"&&!e.buttons)ub3Flotar(ub3Tocar(x,y),x,y);return}
+    pts.set(e.pointerId,[x,y]);
+    if(pts.size===2){const [a,b]=[...pts.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;if(pz){mover(mx-pz.mx,my-pz.my);if(d>8&&pz.d>8)zoom(pz.d/d,mx,my)}pz={d,mx,my};ub3Pedir();return}
+    if(!arr)return;const dx=x-arr.x,dy=y-arr.y;arr.x=x;arr.y=y;arr.mov+=Math.abs(dx)+Math.abs(dy);if(arr.mov<5)return;
+    if(arr.pan)mover(dx,dy);else{ub3.cam.yaw-=dx*.006;ub3.cam.pitch+=dy*.005}cv.style.cursor="grabbing";ub3Pedir()});
+  const fin=e=>{if(!pts.has(e.pointerId))return;pts.delete(e.pointerId);pz=null;cv.style.cursor="grab";
+    if(arr&&arr.mov<5&&e.type==="pointerup"&&e.button===0){const s=ub3Tocar(arr.x,arr.y);if(s)ub3Elegir(s.cod)}arr=null};
+  cv.addEventListener("pointerup",fin);cv.addEventListener("pointercancel",fin);
+  cv.addEventListener("pointerleave",()=>{if(!pts.size)ub3Flotar(null)});
+  cv.addEventListener("dblclick",e=>{const [x,y]=pos(e),s=ub3Tocar(x,y);if(s)ub3Ir(s.cod)});
+  cv.addEventListener("wheel",e=>{e.preventDefault();const [x,y]=pos(e);ub3.anim=null;zoom(Math.exp(Math.max(-1.2,Math.min(1.2,e.deltaY*(e.deltaMode===1?33:1)*.0015))),x,y);ub3Flotar(null);ub3Pedir()},{passive:false});
+  cv.addEventListener("webglcontextlost",e=>{e.preventDefault();cancelAnimationFrame(ub3.raf);ub3.raf=0;clearTimeout(ub3.perdido);
+    ub3.perdido=setTimeout(()=>{if(ub3.gl.isContextLost()&&ubVista==="3d"&&!$("#ub3").hidden)ubRender()},3000)});   // si no se recupera en 3 s, ubRender vuelve al mapa con aviso
+  cv.addEventListener("webglcontextrestored",()=>{clearTimeout(ub3.perdido);ub3.firma=null;if(prep())ubRender()});   // el navegador soltó la memoria gráfica: se arma de nuevo
+  $$("#ub3 [data-v3]").forEach(b=>b.onclick=()=>ub3Vista(b.dataset.v3,450));
+  addEventListener("resize",ub3Pedir);if(window.ResizeObserver)new ResizeObserver(ub3Pedir).observe(caja);
+  return true}
+/* lo llama ubRender cuando está elegida la vista 3D; devuelve false si el equipo no tiene WebGL */
+function ub3Render(sm,U,enL,hitU,q){if(!ub3Ini()||ub3.gl.isContextLost())return false;ub3.sm=sm;
+  const firma=U.map(u=>[u.cod,u.pasillo,u.rack,u.nivel].join("|")).join("\n");
+  if(firma!==ub3.firma){ub3.firma=firma;ub3Armar(U);ub3.hover=null;$("#ub3Tip").hidden=true;ub3Subir(ub3.hov,ub3Malla());if(!ub3.vista){ub3.vista=true;ub3Vista("gen",0)}}
+  ub3Dinamica(sm,enL,hitU,q);
+  const e=$("#ub3Sel"),s=ubSel&&ub3.slots.get(ubSel);e.hidden=!s;
+  if(s){e.innerHTML=ub3Info(ubSel,sm)+'<div class="l"><button class="linkBtn" id="ub3Ver">Ver detalle e historial ↓</button> · <button class="linkBtn" id="ub3Acer">Acercar</button> · <button class="linkBtn" id="ub3Cer">Cerrar</button></div>';
+    $("#ub3Ver").onclick=()=>$("#ubDet").scrollIntoView({behavior:"smooth",block:"start"});$("#ub3Acer").onclick=()=>ub3Ir(ubSel);$("#ub3Cer").onclick=()=>$("#ubDetX").click()}
+  ub3Pedir();return true}
 /* ---------- cargar ubicaciones ---------- */
 function ubFilasCarga(rows){
   const R=rows.map(r=>r.map(c=>String(c==null?"":c).trim())).filter(r=>r.some(Boolean));let h=-1,C={cod:0,pasillo:-1,rack:-1,nivel:-1,pos:-1,tipo:-1,nota:-1};
@@ -8325,7 +8900,7 @@ addEventListener("online",()=>{if(puestoMode())ucEnviar()});
 function ucRender(){
   const P=ucPend.map(m=>Object.assign({},m,{pend:true})),E=ucErr.slice(0,10),M=(ucData.mis||[]).filter(m=>!ucPend.some(p=>p.lid===m.lid));
   const fila=(m,est)=>{const f=+m.f||1,[tt,c]=UBT[m.tipo]||[m.tipo,"p-mut"],it=ptFind(m.k)||{};return `<tr${m.anulado?' style="opacity:.55"':""}><td style="white-space:normal;width:100%"><div><span class="pill ${c}">${tt}</span> <b>${esc(m.desde||"")}${m.desde&&m.hacia?" → ":""}${esc(m.hacia||"")}</b></div>
-    <div style="font-weight:600;font-size:13px">${esc(m.descr||m.desc||it.desc||m.k)}</div><div class="small muted">${esc(m.k)} · ${hm24(m.t)}${est}</div></td>
+    <div style="font-weight:600;font-size:13px"><span class="code">${esc(m.k)}</span> · ${esc(m.descr||m.desc||it.desc||"")}</div><div class="small muted">${hm24(m.t)}${est}</div></td>
     <td class="num" style="white-space:nowrap"><b>${fmt2(+m.qty)}</b> <span class="small muted">${esc(m.ce&&f!==1?plural(m.ce):umTxt(m.um))}</span>${m.ce&&f!==1?`<span class="sub">= ${fmt2(m.qty*f)} ${esc(umTxt(m.um))}</span>`:""}</td></tr>`};
   $("#ucInfo").textContent=`${fmt(M.filter(m=>!m.anulado&&new Date(m.t).toDateString()===new Date().toDateString()).length+P.length)} hoy`;
   $("#ucList").innerHTML=(P.map(m=>fila(m," · ⏳ por enviar")).join("")+E.map(m=>fila(m,` · <span style="color:var(--bad)">no se registró: ${esc(m.err)}</span>`)).join("")+M.map(m=>fila(m,m.anulado?" · anulado por el supervisor":" · ✓ registrado")).join(""))||'<tr><td class="muted">Todavía no registras movimientos hoy.</td></tr>';
