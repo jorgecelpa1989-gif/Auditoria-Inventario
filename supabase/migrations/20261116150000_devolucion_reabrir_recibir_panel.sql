@@ -24,7 +24,9 @@ begin
   if not found or d.enviado is null then raise exception 'no_existe'; end if;
   if d.finalizado is not null then raise exception 'finalizado'; end if;
   if d.recibido is not null then raise exception 'ya_recibida'; end if;
-  v_rec := cb_rec_mezclar(d.rec, (select coalesce(jsonb_agg(e || jsonb_build_object('user', v_por, 'panel', true)), '[]'::jsonb) from jsonb_array_elements(p_rec) e), 'panel');
+  v_rec := cb_rec_mezclar(   -- las líneas antiguas de bodega sin marca de persona se conservan (no las reemplaza el panel)
+    (select coalesce(jsonb_agg(case when coalesce(e->>'pu', '') = '' then e || jsonb_build_object('pu', 'bodega') else e end), '[]'::jsonb) from jsonb_array_elements(coalesce(d.rec, '[]'::jsonb)) e),
+    (select coalesce(jsonb_agg(e || jsonb_build_object('user', v_por, 'panel', true)), '[]'::jsonb) from jsonb_array_elements(p_rec) e), 'panel');
   if jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
   update cb_dev set rec = v_rec, rec_persona = left(v_por || ' (panel)', 80), rec_inicio = coalesce(rec_inicio, now()), recibido = now(), actualizado = now()
    where id = p_id;

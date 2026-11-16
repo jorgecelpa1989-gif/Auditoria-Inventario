@@ -28,14 +28,19 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  const cm=await b.newContext({...devices['iPhone 13'],timezoneId:'America/Santiago'});await route(cm);const m=await cm.newPage();m.on('pageerror',e=>errs.push('cel: '+e.message));
  await m.goto(`${B}?puesto=${fId}&t=${fT}&u=${encodeURIComponent(SBU)}&k=anon`);await m.waitForTimeout(2000);await m.fill('#puPersona','FELIPE');await m.dispatchEvent('#puPersona','change');await m.waitForTimeout(500);
  console.log('MENU',(await m.textContent('#puMenu')).replace(/\s+/g,' '));check(/2 devoluciones por recibir/.test(await m.textContent('#puMenu')),'Celular de bodega: "Recepcionar devoluciones" muestra las 2 por recibir (incluida la reabierta)');
- // 2) Recibir desde el panel, corrigiendo una cantidad
- await s.click('#dvRecPanel summary');await s.waitForTimeout(300);
- const v=await s.$$eval('#dvRecTbl [data-rc]',x=>x.map(i=>i.dataset.rc+'='+i.value).join(' '));
- check(/140101=4/.test(v)&&/110107=10/.test(v)&&/SACOS/.test(await s.textContent('#dvRecTbl')),'Viene con lo declarado, en bultos (4 SACOS) y en kg → '+v);
- await s.fill('#dvRecTbl [data-rc="140101"]','3');await s.click('#dvRecOk');await s.waitForTimeout(300);await s.click('#dvRecConfirm #cYes');await s.waitForTimeout(2000);
- const r=JSON.parse(sql(`select json_build_object('rec',rec,'rp',rec_persona,'ok',recibido is not null)::text from cb_dev where id='${d1}'`));
- check(r.ok&&r.rp==='Administrador (panel)'&&r.rec.length===2&&r.rec.every(l=>l.pu==='panel'&&l.panel===true)&&r.rec.find(l=>l.code==='140101').qty===3,'Servidor: recepción terminada desde el panel, marcada "(panel)" con 3 sacos y 10 kg');
- await s.click('#dvChips [data-f="todas"]');await s.waitForTimeout(300);console.log('TBL',(await s.textContent('#dvTbl')).replace(/\s+/g,' '));check(/Recibida/.test(await s.textContent('#dvTbl'))&&/con diferencia/.test(await s.textContent('#dvTbl'))&&/ADMINISTRADOR \(PANEL\)|Administrador \(panel\)/i.test(await s.textContent('#dvTbl')),'Panel: queda "Recibida" con diferencia (faltó 1 saco) y quién la recibió');
+ // 2) Bodega empieza a recibir en el celular mientras el panel tiene la tabla abierta
+ await s.click('#dvRecPanel summary');await s.waitForTimeout(300);await s.fill('#dvRecTbl [data-rc="110107"]','7');
+ await m.tap('#puMenu [data-pk="devrec"]');await m.waitForTimeout(1500);await m.tap(`#dvHome [data-dv="${d1}"]`);await m.waitForTimeout(500);
+ await m.fill('#dvScan','140101');await m.press('#dvScan','Enter');await m.waitForTimeout(300);await m.fill('#dvQty','1');await m.tap('#dvOk');await m.waitForTimeout(2500);
+ await s.evaluate(()=>devRefresh(false));await s.waitForTimeout(1500);
+ const v0=await s.$$eval('#dvRecTbl [data-rc]',x=>x.map(i=>i.dataset.rc+'='+i.value).join(' '));
+ check(/Bodega ya está recibiendo/.test(await s.textContent('#dvRecAviso'))&&/110107=7/.test(v0)&&/140101=3/.test(v0),'Panel: avisa que bodega ya está recibiendo, conserva lo escrito (7) y propone solo lo que falta (3 sacos) → '+v0);
+ await s.click('#dvRecOk');await s.waitForTimeout(300);await s.click('#dvRecConfirm #cYes');await s.waitForTimeout(2000);
+ const r0=JSON.parse(sql(`select rec::text from cb_dev where id='${d1}'`)),tot=c=>r0.filter(l=>l.code===c).reduce((a,l)=>a+(+l.qty),0);
+ check(tot('140101')===4&&tot('110107')===7&&r0.some(l=>l.pu===fId)&&r0.filter(l=>l.pu==='panel').length===2,'Servidor: se conserva lo de bodega (1 saco) y se suma lo del panel (3 sacos + 7 kg)');
+ // anulada: no se puede reabrir ni recibir
+ rpc('cb_dev_cerrar',{p_clave:ADMIN,p_id:d2});rpc('cb_dev_eliminar',{p_clave:ADMIN,p_id:d2});
+ check(/anulado/.test(rpc('cb_dev_reabrir',{p_clave:ADMIN,p_id:d2}).body),'Una devolución anulada no se puede reabrir');
  check(/anulado|ya_recibida|ya fue/i.test(rpc('cb_dev_recibir_panel',{p_clave:ADMIN,p_id:d1,p_rec:[]}).body),'No se puede recibir dos veces (ya_recibida)');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));
  await b.close();console.log(fail?'FALLAS: '+fail:'TODO OK')})();

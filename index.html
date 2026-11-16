@@ -927,8 +927,8 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="kpis" id="dvKpis"></div>
     <div class="tbl" style="max-height:520px"><table id="dvCmp"></table></div>
     <details id="dvRecPanel" class="card" style="margin:8px 0;padding:10px 12px" hidden><summary style="cursor:pointer;font-weight:600">📥 Recibir desde el panel <span class="small muted">(si bodega no puede hacerlo en el celular)</span></summary>
-      <p class="small muted" style="margin:6px 0">Viene con lo declarado (menos lo que bodega ya registró). Corrige la cantidad de lo que no calza y toca <b>Terminar recepción</b>. Queda a tu nombre, marcado "(panel)".</p>
-      <div class="tbl"><table id="dvRecTbl"></table></div>
+      <p class="small muted" style="margin:6px 0">Viene con lo declarado (menos lo que bodega ya registró). Corrige la cantidad de lo que no calza (0 si no llegó) y toca <b>Terminar recepción</b>. Queda a tu nombre, marcado "(panel)". Úsalo solo cuando bodega no la está recibiendo en el celular.</p>
+      <div id="dvRecAviso"></div><div class="tbl"><table id="dvRecTbl"></table></div>
       <div class="row" style="margin-top:6px"><button class="btn primary" id="dvRecOk">Terminar recepción…</button></div>
       <div id="dvRecConfirm"></div></details>
     <div class="row"><button class="btn primary" id="dvXlsx">Descargar cuadre (.xlsx)</button><button class="btn" id="dvCerrar">Cerrar devolución</button><button class="btn" id="dvReabrir" hidden>Reabrir</button><span class="sep"></span><button class="btn danger" id="dvDel">Anular…</button></div>
@@ -4673,7 +4673,9 @@ begin
   if not found or d.enviado is null then raise exception 'no_existe'; end if;
   if d.finalizado is not null then raise exception 'finalizado'; end if;
   if d.recibido is not null then raise exception 'ya_recibida'; end if;
-  v_rec := cb_rec_mezclar(d.rec, (select coalesce(jsonb_agg(e || jsonb_build_object('user', v_por, 'panel', true)), '[]'::jsonb) from jsonb_array_elements(p_rec) e), 'panel');
+  v_rec := cb_rec_mezclar(   -- las líneas antiguas de bodega sin marca de persona se conservan (no las reemplaza el panel)
+    (select coalesce(jsonb_agg(case when coalesce(e->>'pu', '') = '' then e || jsonb_build_object('pu', 'bodega') else e end), '[]'::jsonb) from jsonb_array_elements(coalesce(d.rec, '[]'::jsonb)) e),
+    (select coalesce(jsonb_agg(e || jsonb_build_object('user', v_por, 'panel', true)), '[]'::jsonb) from jsonb_array_elements(p_rec) e), 'panel');
   if jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
   update cb_dev set rec = v_rec, rec_persona = left(v_por || ' (panel)', 80), rec_inicio = coalesce(rec_inicio, now()), recibido = now(), actualizado = now()
    where id = p_id;
@@ -7897,14 +7899,18 @@ $("#dvX").onclick=()=>{devSel=null;store.set("inv_devsel",null);devRender()};
 /* Recibir desde el panel: una fila por producto declarado; la cantidad va en bultos (si tiene conversión) */
 function dvRecPanelRender(d,rows){
   const box=$("#dvRecPanel"),ok=!!d.enviado&&!d.recibido&&!d.finalizado&&pvCan("dev_cerrar");box.hidden=!ok;if(!ok){box.open=false;return}
-  if(box.dataset.id===d.id&&box.dataset.n===String((d.rec||[]).length))return;box.dataset.id=d.id;box.dataset.n=String((d.rec||[]).length);
+  // se rehace solo si cambió lo que registró bodega (líneas y cantidades); lo que el supervisor ya escribió se conserva
+  const firma=d.id+"|"+(d.rec||[]).map(l=>l.lid+":"+l.qty).join(",");if(box.dataset.f===firma)return;
+  const escrito={};if(box.dataset.id===d.id)$$("#dvRecTbl [data-rc][data-ed]").forEach(i=>escrito[i.dataset.rc]=i.value);box.dataset.f=firma;box.dataset.id=d.id;
+  const nb=(d.rec||[]).length;$("#dvRecAviso").innerHTML=d.rec_inicio?`<div class="small" style="color:var(--warn);font-weight:600;margin:6px 0">⚠ Bodega ya está recibiendo esta devolución en el celular${nb?` (${fmt(nb)} línea${nb>1?"s":""} registrada${nb>1?"s":""})`:""}. Úsalo solo si bodega no puede terminar: lo que su celular tenga sin enviar ya no se podrá guardar.</div>`:"";
   const R=rows.filter(r=>r.D!=null).sort((a,b)=>String(a.cod).localeCompare(String(b.cod)));
   $("#dvRecTbl").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Devuelto</th><th class="num">Ya registró bodega</th><th class="num">Recibido ahora</th></tr></thead><tbody>`+R.map(r=>{const f=r.ce&&r.f!==1?r.f:1,v=Math.max(0,(r.D-(r.R||0))/f);
     return `<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"")}</td><td class="num">${qBC(r.D,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td>
-      <td class="num" style="white-space:nowrap"><input class="eq" data-rc="${esc(r.cod)}" inputmode="decimal" value="${String(+v.toFixed(6)).replace(".",",")}" style="width:80px"> <span class="small muted">${esc(f!==1?plural(r.ce):umTxt(r.um))}</span></td></tr>`}).join("")+"</tbody>";
+      <td class="num" style="white-space:nowrap"><input class="eq" data-rc="${esc(r.cod)}" inputmode="decimal" value="${escrito[r.cod]!=null?esc(escrito[r.cod]):String(+v.toFixed(6)).replace(".",",")}"${escrito[r.cod]!=null?" data-ed":""} style="width:80px"> <span class="small muted">${esc(f!==1?plural(r.ce):umTxt(r.um))}</span></td></tr>`}).join("")+"</tbody>";
+  $$("#dvRecTbl [data-rc]").forEach(i=>i.oninput=()=>i.dataset.ed="1");
 }
 $("#dvRecOk").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;const rows=devCuadre(d),t=new Date().toISOString(),L=[];let mal=false;
-  $$("#dvRecTbl [data-rc]").forEach(i=>{const q=num(i.value);if(q==null||q<0){mal=true;return}if(q<=0)return;const r=rows.find(x=>x.cod===i.dataset.rc);if(!r)return;
+  $$("#dvRecTbl [data-rc]").forEach(i=>{const q=String(i.value).trim()===""?0:num(i.value);if(q==null||q<0){mal=true;return}if(q<=0)return;const r=rows.find(x=>x.cod===i.dataset.rc);if(!r)return;
     const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc||"",um:r.um||"",qty:q,t,acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}L.push(l)});
   if(mal){toast("Revisa las cantidades: deben ser números de 0 o más");return}
   if(!L.length&&!(d.rec||[]).length){toast("Ingresa al menos una cantidad recibida");return}
