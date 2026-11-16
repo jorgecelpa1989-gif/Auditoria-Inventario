@@ -926,7 +926,12 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <div class="small muted" id="dvDetS"></div>
     <div class="kpis" id="dvKpis"></div>
     <div class="tbl" style="max-height:520px"><table id="dvCmp"></table></div>
-    <div class="row"><button class="btn primary" id="dvXlsx">Descargar cuadre (.xlsx)</button><button class="btn" id="dvCerrar">Cerrar devolución</button><span class="sep"></span><button class="btn danger" id="dvDel">Anular…</button></div>
+    <details id="dvRecPanel" class="card" style="margin:8px 0;padding:10px 12px" hidden><summary style="cursor:pointer;font-weight:600">📥 Recibir desde el panel <span class="small muted">(si bodega no puede hacerlo en el celular)</span></summary>
+      <p class="small muted" style="margin:6px 0">Viene con lo declarado (menos lo que bodega ya registró). Corrige la cantidad de lo que no calza y toca <b>Terminar recepción</b>. Queda a tu nombre, marcado "(panel)".</p>
+      <div class="tbl"><table id="dvRecTbl"></table></div>
+      <div class="row" style="margin-top:6px"><button class="btn primary" id="dvRecOk">Terminar recepción…</button></div>
+      <div id="dvRecConfirm"></div></details>
+    <div class="row"><button class="btn primary" id="dvXlsx">Descargar cuadre (.xlsx)</button><button class="btn" id="dvCerrar">Cerrar devolución</button><button class="btn" id="dvReabrir" hidden>Reabrir</button><span class="sep"></span><button class="btn danger" id="dvDel">Anular…</button></div>
     <div id="dvConfirmS"></div>
   </div>
 </section>
@@ -4642,6 +4647,41 @@ end $function$;
 grant execute on function public.cb_mov_restaurar(text, uuid), public.cb_prov_restaurar(text, uuid), public.cb_dev_restaurar(text, uuid),
   public.cb_mov_anulados(text), public.cb_prov_anulados(text), public.cb_dev_anulados(text) to anon, authenticated;
 
+-- =====================================================================
+--  DEVOLUCIONES: REABRIR Y RECIBIR DESDE EL PANEL (permiso de supervisor "dev_cerrar")
+--  · Reabrir: una devolución cerrada vuelve a estar activa (si no se había recibido, bodega la ve de nuevo).
+--  · Recibir desde el panel: cuando bodega no puede hacerlo en el celular, el supervisor registra lo que
+--    llegó y termina la recepción. Sus líneas quedan marcadas "panel" (no pisan las que ya registró bodega).
+--  Solo agrega funciones nuevas: la app anterior no cambia.
+-- =====================================================================
+create or replace function public.cb_dev_reabrir(p_clave text, p_id uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'dev_cerrar');
+  update cb_dev set finalizado = null, actualizado = now() where id = p_id and finalizado is not null;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+create or replace function public.cb_dev_recibir_panel(p_clave text, p_id uuid, p_rec jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare d cb_dev; v_rec jsonb; v_por text := left(coalesce(cb_sup_nombre(p_clave), 'Administrador'), 70);
+begin
+  perform cb_puede(p_clave, 'dev_cerrar');
+  if p_rec is null or jsonb_typeof(p_rec) <> 'array' or jsonb_array_length(p_rec) > 5000 then raise exception 'datos_invalidos'; end if;
+  perform cb_dev_codigos_ok(p_rec);
+  select * into d from cb_dev where id = p_id for update;
+  if not found or d.enviado is null then raise exception 'no_existe'; end if;
+  if d.finalizado is not null then raise exception 'finalizado'; end if;
+  if d.recibido is not null then raise exception 'ya_recibida'; end if;
+  v_rec := cb_rec_mezclar(d.rec, (select coalesce(jsonb_agg(e || jsonb_build_object('user', v_por, 'panel', true)), '[]'::jsonb) from jsonb_array_elements(p_rec) e), 'panel');
+  if jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
+  update cb_dev set rec = v_rec, rec_persona = left(v_por || ' (panel)', 80), rec_inicio = coalesce(rec_inicio, now()), recibido = now(), actualizado = now()
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', now(), 'rec', v_rec);
+end $$;
+
+grant execute on function public.cb_dev_reabrir(text, uuid), public.cb_dev_recibir_panel(text, uuid, jsonb) to anon, authenticated;
+
 </script>
   </div>
 
@@ -5822,7 +5862,7 @@ const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a
 /* Permiso que exige cada función de panel (igual que en el servidor). "__admin" = solo el administrador. */
 const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
-  cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
+  cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
   cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
@@ -6227,7 +6267,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 const SUP_SIEMPRE="#sbCard,#ghCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
-  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
+  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
   let st=$("#supStyle");if(!st){st=document.createElement("style");st.id="supStyle";document.head.appendChild(st)}
@@ -7119,7 +7159,7 @@ function renderPuesto(){
   if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Retiro de PT para despacho",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
   if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
   if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía o de factura, fecha y productos"});
-  if(can("dev_recibir"))items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} devolución${devN>1?"es":""} por recibir`:"Sin devoluciones por recibir",dot:devN});
+  if(can("dev_recibir"))items.push({k:"devrec",ic:"↩️",t:"Recepcionar devoluciones",s:devN?`${devN} ${devN>1?"devoluciones":"devolución"} por recibir`:"Sin devoluciones por recibir",dot:devN});
   if(!items.length){$("#puMenu").innerHTML='<div class="card contarCard"><p class="muted" style="margin:0">Tu usuario todavía no tiene permisos. Pídele al supervisor que te los asigne: aparecerán aquí solos.</p></div>';$("#puList").innerHTML="";return}
   $("#puMenu").innerHTML=items.map(x=>`<button class="puBtn" data-pk="${x.k}"><span class="ic">${x.ic}</span><span><b>${x.t}</b><span class="s">${x.s}</span></span>${x.dot?`<span class="dotR">${x.dot}</span>`:""}</button>`).join("");
   $$("#puMenu [data-pk]").forEach(b=>b.onclick=()=>puAbrir(b.dataset.pk));
@@ -7788,7 +7828,7 @@ function devDetRender(){
   const ord={falta:0,norec:1,nodecl:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
   $("#dvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Devuelto</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
     (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td><td class="num">${r.D==null?"—":qBC(r.D,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.D==null||r.R==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${DEVST[r.st][1]}">${DEVST[r.st][0]}</span></td></tr>`).join(""):`<tr><td colspan="7" class="muted">Sin productos todavía.</td></tr>`)+"</tbody>";
-  $("#dvCerrar").hidden=!!d.finalizado||!pvCan("dev_cerrar");$("#dvDel").hidden=!pvCan("dev_eliminar");$("#dvConfirmS").innerHTML="";
+  $("#dvCerrar").hidden=!!d.finalizado||!pvCan("dev_cerrar");$("#dvReabrir").hidden=!d.finalizado||!pvCan("dev_cerrar");dvRecPanelRender(d,rows);$("#dvDel").hidden=!pvCan("dev_eliminar");$("#dvConfirmS").innerHTML="";
 }
 /* ---------- 5 · Logística inversa: crear una devolución desde el panel del PC ---------- */
 var dpLect=[], dpCat=null, dpIdx=new Map(), dpChk="";
@@ -7854,6 +7894,23 @@ $("#dpQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault(
 $("#dpAdd").onclick=dpAdd;$("#dpSend").onclick=dpEnviar;
 $("#dvRef").onclick=()=>devRefresh(false);$("#dvOrig").onchange=devRender;$("#dvQ").oninput=devRender;
 $("#dvX").onclick=()=>{devSel=null;store.set("inv_devsel",null);devRender()};
+/* Recibir desde el panel: una fila por producto declarado; la cantidad va en bultos (si tiene conversión) */
+function dvRecPanelRender(d,rows){
+  const box=$("#dvRecPanel"),ok=!!d.enviado&&!d.recibido&&!d.finalizado&&pvCan("dev_cerrar");box.hidden=!ok;if(!ok){box.open=false;return}
+  if(box.dataset.id===d.id&&box.dataset.n===String((d.rec||[]).length))return;box.dataset.id=d.id;box.dataset.n=String((d.rec||[]).length);
+  const R=rows.filter(r=>r.D!=null).sort((a,b)=>String(a.cod).localeCompare(String(b.cod)));
+  $("#dvRecTbl").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th class="num">Devuelto</th><th class="num">Ya registró bodega</th><th class="num">Recibido ahora</th></tr></thead><tbody>`+R.map(r=>{const f=r.ce&&r.f!==1?r.f:1,v=Math.max(0,(r.D-(r.R||0))/f);
+    return `<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"")}</td><td class="num">${qBC(r.D,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td>
+      <td class="num" style="white-space:nowrap"><input class="eq" data-rc="${esc(r.cod)}" inputmode="decimal" value="${String(+v.toFixed(6)).replace(".",",")}" style="width:80px"> <span class="small muted">${esc(f!==1?plural(r.ce):umTxt(r.um))}</span></td></tr>`}).join("")+"</tbody>";
+}
+$("#dvRecOk").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;const rows=devCuadre(d),t=new Date().toISOString(),L=[];let mal=false;
+  $$("#dvRecTbl [data-rc]").forEach(i=>{const q=num(i.value);if(q==null||q<0){mal=true;return}if(q<=0)return;const r=rows.find(x=>x.cod===i.dataset.rc);if(!r)return;
+    const l={lid:newLid(),code:r.cod,k:r.cod,desc:r.desc||"",um:r.um||"",qty:q,t,acept:true};if(r.ce&&r.f!==1){l.f=r.f;l.ce=r.ce}L.push(l)});
+  if(mal){toast("Revisa las cantidades: deben ser números de 0 o más");return}
+  if(!L.length&&!(d.rec||[]).length){toast("Ingresa al menos una cantidad recibida");return}
+  confirmBox(`Terminar la recepción de la devolución guía ${esc(d.guia||"—")} con ${fmt(L.length)} producto${L.length===1?"":"s"} registrado${L.length===1?"":"s"} desde el panel${(d.rec||[]).length?` (más ${fmt(d.rec.length)} líneas que ya registró bodega)`:""}. Después ya no se puede modificar.`,async()=>{
+    try{await rpc(SB,"cb_dev_recibir_panel",{p_clave:SB.admin,p_id:d.id,p_rec:L});$("#dvRecPanel").open=false;await devRefresh(false);toast("✓ Recepción registrada desde el panel")}catch(e){toast(dvMsg(e))}},"#dvRecConfirm")};
+$("#dvReabrir").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Reabrir la devolución guía ${esc(d.guia||"—")}${d.recibido?"":": vuelve a quedar «por recibir» y bodega la ve en su celular"}.`,async()=>{try{await rpc(SB,"cb_dev_reabrir",{p_clave:SB.admin,p_id:d.id});await devRefresh(false);toast("Devolución reabierta")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
 $("#dvCerrar").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Cerrar la devolución guía ${esc(d.guia||"—")}: queda como histórico y bodega ya no la ve.`,async()=>{try{await rpc(SB,"cb_dev_cerrar",{p_clave:SB.admin,p_id:d.id});await devRefresh(false);toast("Devolución cerrada")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
 $("#dvDel").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;confirmBox(`Anular la devolución guía ${esc(d.guia||"—")}. Deja de verse en el panel y en los celulares; no se borra nada: queda en «Anuladas» y se puede restaurar.`,async()=>{try{await rpc(SB,"cb_dev_eliminar",{p_clave:SB.admin,p_id:d.id});devSel=null;store.set("inv_devsel",null);await devRefresh(false);anulRender("dev");toast("Devolución anulada · está en «Anuladas»")}catch(e){toast(dvMsg(e))}},"#dvConfirmS")};
 $("#dvXlsx").onclick=()=>{const d=devList.find(x=>x.id===devSel);if(!d)return;const rows=devCuadre(d);
