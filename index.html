@@ -6301,6 +6301,7 @@ async function factRecuperar(){
    para ver resultados con stock. Si en este equipo se carga un archivo del ERP, ese manda. */
 async function erpDesdeNube(){
   if(erp&&!erp.maestro&&!erp.fromServer)return;
+  if((erp&&erp.conteo)||(typeof puestoMode==="function"&&puestoMode()))return;   // hay un conteo abierto en este equipo: no se toca
   try{const r=await rpc(SB,"cb_catalogo_stock",{p_clave:SB.admin});if(!r||!Array.isArray(r.items)||!r.items.length)return;
     if(erp&&erp.fromServer&&erp.at===r.actualizado)return;
     const st=r.stock||{};
@@ -6313,6 +6314,7 @@ async function erpDesdeNube(){
 }
 async function catSync(force){        // supervisor: sube catálogo + stock si cambió
   if(prodMode()||!nubeOn()||catBusy||!pvCan("inv_operar"))return;
+  if((erp&&erp.conteo)||(typeof puestoMode==="function"&&puestoMode()))return;   // equipo contando: no sube ni baja catálogo
   if(erp&&erp.fromServer)return factNube(force);   // ese ERP vino de Supabase: solo se suben las equivalencias que falten
   await factRecuperar();
   if(erp&&erp.fromServer)return factNube(force);
@@ -7214,8 +7216,10 @@ async function puAbrirConteo(t){
     if(nubeConf()&&cfg.dirty){await syncNow();if(cfg.dirty)throw new Error("Hay lecturas de otro conteo sin enviar. Busca señal y vuelve a intentar.")}
     let m;try{m=await prpc("cb_puesto_conteo_tomar",{p_id:t.id,p_device:cfg.dev})}
     catch(e){if(!/function|PGRST202|404/.test(e.message))throw e;m=await rpc(pconf(),"cb_abrir",{p_id:t.id,p_token:t.token,p_device:cfg.dev})}
-    scans=[];store.set("inv_scans",scans);
+    const desde=Date.parse(t.creado||0)||0,mias=scans.filter(s=>!s.nube&&(s.conteo===t.nombre||!s.conteo)&&Date.parse(s.t||0)>=desde);   // hechas en este equipo para este conteo (o sin conteo, después de crearlo)
+    scans=mias.map(s=>Object.assign(s,{conteo:t.nombre}));store.set("inv_scans",scans);
     applyConteo(m,t.id,{url:PST.url,key:PST.key,secret:m.secret});
+    if(mias.length){cfg.dirty=true;cfg.ver=(cfg.ver||0)+1;store.set("inv_cfg",cfg);toast(`Se recuperaron ${mias.length} lecturas de este celular: se envían ahora`);syncNow()}
     puestoApply();
   }catch(e){toast(e.message&&!SBMSG[e.message]&&!/[_]/.test(e.message)?e.message:sbMsg(e));puestoMenu()}
 }
