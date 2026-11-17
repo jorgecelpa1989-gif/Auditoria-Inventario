@@ -7206,7 +7206,7 @@ function puestoApply(){
   const b=document.body;b.classList.add("puesto");b.classList.remove("prodv","locked");$("#lockBox").innerHTML="";
   b.classList.toggle("op",puVista==="conteo");b.classList.toggle("mov",puVista==="mp");
   const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel",prov:"provcel",ubic:"ubiccel"}[puVista]||"puesto";
-  if($("#v-"+v).hidden)show(v);
+  if($("#v-"+v).hidden){show(v);window.scrollTo(0,0)}   // cada pantalla del celular parte arriba (no queda corrida por el menú)
 }
 function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();if(typeof dvStopCam==="function")dvStopCam();if(typeof pcStopCam==="function")pcStopCam();puestoApply();renderPuesto();puRefresh()}
 $$("[data-menu]").forEach(b=>b.onclick=()=>puestoMenu());
@@ -7233,7 +7233,7 @@ setInterval(()=>{if(puestoMode()&&!document.hidden)puRefresh()},20000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&puestoMode())puRefresh()});
 
 function renderPuesto(){
-  if(!PST)return;
+  if(!PST)return;$("#puMenu").hidden=false;
   const pend=a=>a.filter(t=>!t.terminado).length;
   $("#puHead").innerHTML=`<div class="row"><span class="pill p-info" style="font-size:13px">📱 ${esc(puNombre())}</span>${PST.area?`<span class="small muted">${esc(PST.area)}</span>`:""}<span class="sep"></span><span class="small muted">conectado</span></div>
     <label class="f">Operario<input id="puPersona" value="${esc(PST.persona||"")}" placeholder="Tu nombre" autocapitalize="characters"></label>`;
@@ -7267,14 +7267,16 @@ function puAbrir(k){
   if(!lista.length&&!directa)return toast(k==="mp"?"No tienes entregas asignadas por ahora":"No tienes conteos asignados por ahora");
   if(lista.length===1&&!directa)return k==="mp"?puAbrirMov(lista[0]):puAbrirConteo(lista[0]);
   if(directa)return puMpLista(lista);
-  $("#puList").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Elige la tarea</h2>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":fmt(t.productos)+" productos"}</span></button>`).join("")+`</div>`;
+  $("#puMenu").hidden=true;window.scrollTo(0,0);
+  $("#puList").innerHTML=`<div class="puestoBar"><button class="btn sm" data-pumenu>← Menú</button><b>${k==="mp"?"Materia prima":"Conteos"}</b></div><div class="card contarCard"><h2 style="margin:0">Elige la tarea</h2>`+lista.map((t,i)=>`<button class="clrow${t.terminado?" done":""}" data-pi="${i}"><span class="code">${t.terminado?"✓":"●"}</span><span class="cd">${esc(t.nombre)}${t.ref?" · "+esc(t.ref):""}</span><span class="cs">${t.terminado?"terminada":fmt(t.productos)+" productos"}</span></button>`).join("")+`</div>`;
   $$("#puList [data-pi]").forEach(b=>b.onclick=()=>{const t=lista[+b.dataset.pi];k==="mp"?puAbrirMov(t):puAbrirConteo(t)});
 }
 /* Bodega: lista de entregas + "Nueva entrega directa" (cuando producción pide algo en el momento). */
 var puMpOn=false;
+document.addEventListener("click",e=>{if(e.target.closest("[data-pumenu]")){puMpOn=false;renderPuesto();window.scrollTo(0,0)}});   // «← Menú» de las listas de MP y conteos
 function puMpLista(lista,keep){const ref=keep!=null?keep:($("#puMpRef")?$("#puMpRef").value:"");puMpOn=true;
-  lista=[...lista].sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));
-  $("#puList").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Entrega de materia prima</h2>
+  lista=[...lista].sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));if(!$("#puMenu").hidden){$("#puMenu").hidden=true;if(keep==null)window.scrollTo(0,0)}   // la actualización cada 20 s no mueve la pantalla
+  $("#puList").innerHTML=`<div class="puestoBar"><button class="btn sm" data-pumenu>← Menú</button><b>Entrega de MP</b></div><div class="card contarCard"><h2 style="margin:0">Entrega de materia prima</h2>
     <div class="cbox" style="max-width:none;gap:8px"><b>＋ Nueva entrega directa</b><span class="small muted">Para cuando producción te pide algo en el momento. Le llega a quien recibe en producción y al panel, como cualquier entrega.</span>
       <label class="f">¿Quién la pide? / OT (opcional)<input id="puMpRef" maxlength="60" autocomplete="off" autocapitalize="characters" placeholder="Ej: OT 4512 o nombre"></label>
       <button class="btn primary" id="puMpNew" style="justify-content:center">Crear y empezar a entregar</button></div>`+
@@ -7696,7 +7698,7 @@ async function dvElegir(id){
   dv={id:d.id,puesto:PST.puesto,modo:"carga",doc:{guia:d.guia||"",factura:d.factura||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},lect:Array.isArray(d.lect)?d.lect:[],dirty:false,ver:0,enviado:d.enviado||null};dvSave();dvWork();
 }
 function dvWork(){
-  $("#dvHome").hidden=true;$("#dvWork").hidden=false;
+  $("#dvHome").hidden=true;$("#dvWork").hidden=false;window.scrollTo(0,0);
   if(dvRec()){const i=dv.info||{};
     $("#dvDocEb").textContent="Devolución que recibes";
     $("#dvDoc").innerHTML=`<div class="dvDocRO"><span><b>${esc(dvOrigen(i))}</b></span><span>Guía <b>${esc(i.guia||"—")}</b></span><span>Factura <b>${esc(i.factura||"—")}</b></span><span>Fecha <b>${fechaCL(i.fecha)}</b></span>${i.persona?`<span>Devuelve <b>${esc(i.persona)}</b></span>`:""}</div>${i.nota?`<div class="small" style="margin-top:4px">Observación: ${esc(i.nota)}</div>`:""}<div id="dvDecl"></div>`;
@@ -7845,7 +7847,7 @@ async function dvOpenCam(){
 }
 async function dvStopCam(){if(dvCamI){await detenerLector(dvCamI);dvCamI=null}dvHold=false;const w=$("#dvCamWrap");if(w)w.hidden=true}
 $("#dvCam").onclick=dvOpenCam;$("#dvCamStop").onclick=dvStopCam;$("#dvOk").onclick=dvAdd;$("#dvFin").onclick=dvFinalizar;
-$("#dvBack").onclick=async()=>{if(dv&&dv.dirty)await dvSync(false);dvStopCam();await puDevRefresh().catch(()=>{});dvHomeRender()};
+$("#dvBack").onclick=async()=>{window.scrollTo(0,0);if(dv&&dv.dirty)await dvSync(false);dvStopCam();await puDevRefresh().catch(()=>{});dvHomeRender()};
 $("#dvQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();dvAdd()}});
 $("#dvScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();dvRead(e.target.value)}});
 $("#dvScan").addEventListener("input",()=>{$("#dvPending").hidden=true});
@@ -8278,7 +8280,7 @@ $("#pcFoto").addEventListener("change",async e=>{const f=e.target.files&&e.targe
   catch(er){toast("No se pudo guardar la foto. Intenta de nuevo.")}});
 addEventListener("online",()=>fotoSubir());setInterval(()=>{if(puestoMode()&&fotoQ.length)fotoSubir()},30000);
 function pcWork(){
-  $("#pcHome").hidden=true;$("#pcWork").hidden=false;const D=pc.doc;fotoCargarQ().then(()=>{pcFotosRender();fotoSubir()});
+  $("#pcHome").hidden=true;$("#pcWork").hidden=false;window.scrollTo(0,0);const D=pc.doc;fotoCargarQ().then(()=>{pcFotosRender();fotoSubir()});
   if(pc.propia){
     $("#pcDocEb").textContent="1 · Datos de la recepción";
     $("#pcDoc").innerHTML=`<div class="dvGrid"><label class="f">Tipo<select id="pcTipo"><option value="nacional">Nacional</option><option value="importacion">Importación</option></select></label>
@@ -8421,7 +8423,7 @@ async function pcOpenCam(){
 }
 async function pcStopCam(){if(pcCamI){await detenerLector(pcCamI);pcCamI=null}pcHold=false;const w=$("#pcCamWrap");if(w)w.hidden=true}
 $("#pcCam").onclick=pcOpenCam;$("#pcCamStop").onclick=pcStopCam;$("#pcOk").onclick=pcAdd;$("#pcFin").onclick=pcFinalizar;
-$("#pcBack").onclick=async()=>{if(pc&&pc.dirty)await pcSync(false);pcStopCam();await pcRefresh().catch(()=>{});pcHomeRender()};
+$("#pcBack").onclick=async()=>{window.scrollTo(0,0);if(pc&&pc.dirty)await pcSync(false);pcStopCam();await pcRefresh().catch(()=>{});pcHomeRender()};
 $("#pcQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();pcAdd()}});
 $("#pcScan").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key==="Tab"){if(!e.target.value.trim())return;e.preventDefault();pcRead(e.target.value)}});
 $("#pcScan").addEventListener("input",()=>{$("#pcPending").hidden=true;pcOkUnknown=""});
