@@ -7783,8 +7783,11 @@ function dvDeclRender(){
     ok1(r)});
   const all=$("#dvAccAll");if(all)all.onclick=()=>confirmBox(`Aceptar ${fmt(pendOk.length)} producto${pendOk.length===1?"":"s"} con la cantidad declarada${pendNo.length?` (no incluye ${fmt(pendNo.length)} código${pendNo.length===1?"":"s"} fuera del maestro)`:""}.`,()=>{let n=0;for(const r of pendOk)if(acc(r))n++;if(n){dvDirty();audio.beep(true);dvRender();toast(`✓ ${fmt(n)} producto${n===1?"":"s"} aceptado${n===1?"":"s"}`)}},"#dvConfirm");
   $$("#dvDecl [data-edt]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.k===b.dataset.edt);if(!r)return;
-    const quit=dv.lect.filter(l=>key(l.k||l.code)===r.k);if(quit.length){dv.lect=dv.lect.filter(l=>key(l.k||l.code)!==r.k);dvDirty();dvRender()}
-    $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});toast("Digita la cantidad real que llegó y toca OK")});
+    const mia=l=>!l.pu||l.pu===PST.puesto,es=l=>key(l.k||l.code)===r.k;   // solo se quitan las líneas propias; las de otra persona quedan
+    const quit=dv.lect.filter(l=>es(l)&&mia(l)),otro=dv.lect.filter(l=>es(l)&&!mia(l)).reduce((a,l)=>a+(+l.qty||0)*(+l.f||1),0);
+    if(quit.length){dv.lect=dv.lect.filter(l=>!(es(l)&&mia(l)));dvDirty();dvRender()}
+    $("#dvScan").value=r.cod;dvChk=r.cod;dvPend(r.cod);$("#dvQty").value="";focusSel($("#dvQty"));$("#dvQty").scrollIntoView({block:"center",behavior:"smooth"});
+    toast(otro>1e-9?`Otra persona ya registró ${dvEnU(r,otro)}: digita solo lo que tú recibiste y toca OK`:"Digita la cantidad real que llegó y toca OK")});
 }
 /* fila de lo registrado en el celular (devoluciones y proveedores): código primero, bulto y su conversión;
    las líneas de otra persona (varias reciben el mismo documento) muestran su nombre y no se quitan desde aquí */
@@ -7921,7 +7924,8 @@ function devDetRender(){
   const ord={falta:0,norec:1,nodecl:2,sobra:3,porrec:4,ok:5};rows.sort((a,b)=>ord[a.st]-ord[b.st]||String(a.cod).localeCompare(String(b.cod)));
   $("#dvCmp").innerHTML=`<thead><tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="num">Devuelto</th><th class="num">Recibido</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>`+
     (rows.length?rows.map(r=>`<tr><td class="code">${esc(r.cod)}</td><td>${esc(r.desc||"(no está en el maestro)")}</td><td>${esc(r.ce&&r.f!==1?plural(r.ce)+" de "+fmt2(r.f)+" "+umTxt(r.um):umTxt(r.um))}</td><td class="num">${r.D==null?"—":qBC(r.D,r.ce,r.f,r.um)}</td><td class="num">${r.R==null?"—":qBC(r.R,r.ce,r.f,r.um)}</td><td class="num" style="color:${r.dif<0?"var(--bad)":r.dif>0?"var(--warn)":"inherit"}">${r.D==null||r.R==null?"—":qBC(r.dif,r.ce,r.f,r.um,true)}</td><td><span class="pill ${DEVST[r.st][1]}">${DEVST[r.st][0]}</span></td></tr>`).join(""):`<tr><td colspan="7" class="muted">Sin productos todavía.</td></tr>`)+"</tbody>";
-  $("#dvCerrar").hidden=!!d.finalizado||!pvCan("dev_cerrar");$("#dvReabrir").hidden=!d.finalizado||!pvCan("dev_cerrar");dvRecPanelRender(d,rows);$("#dvDel").hidden=!pvCan("dev_eliminar");$("#dvConfirmS").innerHTML="";
+  $("#dvCerrar").hidden=!!d.finalizado||!pvCan("dev_cerrar");$("#dvReabrir").hidden=!d.finalizado||!pvCan("dev_cerrar");dvRecPanelRender(d,rows);$("#dvDel").hidden=!pvCan("dev_eliminar");
+  {const c=$("#dvConfirmS");if(c.dataset.sel!==d.id){c.innerHTML="";c.dataset.sel=d.id}}   // la actualización de 20 s no borra una confirmación abierta
 }
 /* ---------- 5 · Logística inversa: crear una devolución desde el panel del PC ---------- */
 var dpLect=[], dpCat=null, dpIdx=new Map(), dpChk="";
