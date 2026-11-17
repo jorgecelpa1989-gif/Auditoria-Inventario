@@ -4818,6 +4818,24 @@ begin
   return jsonb_build_object('n', n, 'at', now());
 end $$;
 
+-- Entrega MP: el supervisor también puede corregir registros de una entrega CERRADA (ajuste posterior, con historial).
+-- Los celulares siguen sin poder enviar a una entrega cerrada (cb_mov_enviar). Lo anulado sigue bloqueado (trigger).
+create or replace function public.cb_mov_corregir(p_clave text, p_id uuid, p_rol text, p_lid text, p_qty numeric) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'mp_operar'); m cb_mov; d jsonb; v_por text := left(coalesce(cb_sup_nombre(p_clave), 'Supervisor'), 80);
+begin
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  select * into m from cb_mov where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  select data into d from cb_mov_lect where mov = p_id and rol = p_rol and lid = p_lid for update;
+  if not found then raise exception 'no_existe'; end if;
+  update cb_mov_lect set data = d || jsonb_build_object('qty', p_qty, 'ed', coalesce(d->'ed', '[]'::jsonb)
+           || jsonb_build_array(jsonb_build_object('de', d->'qty', 'a', p_qty, 'por', v_por, 't', now())))
+   where mov = p_id and rol = p_rol and lid = p_lid;
+  return jsonb_build_object('lid', p_lid, 'qty', p_qty);
+end $$;
+
 </script>
   </div>
 
@@ -6847,7 +6865,7 @@ function renderMpCmp(){
     :`<tr><td colspan="8" class="muted">${rows.length?"Nada con este filtro.":"Todavía no llegan lecturas de los celulares."}</td></tr>`)+"</tbody>";
   const ls=[...(movLect[m.id]||[])].sort((a,b)=>String(b.t).localeCompare(String(a.t)));
   $("#mpDetBox").querySelector("summary").textContent=`Detalle de lecturas (${fmt(ls.length)})`;
-  const puedeEd=pvCan("mp_operar")&&!m.finalizado;
+  const puedeEd=pvCan("mp_operar");   // también en entregas cerradas (ajuste del supervisor, con historial)
   $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th>${puedeEd?"<th></th>":""}</tr></thead><tbody>`+
     ls.map(d=>`<tr${+d.qty===0&&d.ed?' style="opacity:.55"':""}><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}${d.manual?' <span class="pill p-warn" title="Agregado a mano desde el panel">a mano</span>':""}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}${Array.isArray(d.ed)&&d.ed.length?`<span class="sub">✎ ${d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)}${+x.a===0?" (anulado)":""} · ${esc(x.por||"")} ${x.t?hm24(x.t):""}`).join(" · ")}</span>`:""}</td>${(()=>{const [u,c]=uCv(d.qty,d.ce,d.f,d.um);return `<td class="num">${u}</td><td class="num">${c}</td>`})()}${puedeEd&&d.lid?`<td><button class="btn sm" data-mped="${esc(d.rol)}|${esc(d.lid)}" title="Corregir la cantidad (0 = anular)">✎ Modificar</button></td>`:puedeEd?"<td></td>":""}</tr>`).join("")+"</tbody>";
   $$("#mpDet [data-mped]").forEach(b=>b.onclick=async()=>{const [rol,lid]=b.dataset.mped.split("|"),d=(movLect[m.id]||[]).find(x=>x.lid===lid&&x.rol===rol);if(!d)return;
