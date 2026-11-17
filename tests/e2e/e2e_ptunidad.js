@@ -13,7 +13,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  ins('e1','produccion','E',60,{k:'120125',qty:10,um:'m',ce:'ROLLO',f:25});ins('e2','produccion','E',59,{k:'120125',qty:10,um:'m',ce:'ROLLO',f:25});
  ins('r1','bodega','R',40,{k:'120125',qty:10,um:'m',ce:'ROLLO',f:25});
  ins('e3','produccion','E',30,{k:'120262',qty:4,um:'un'});ins('r3','bodega','R',20,{k:'120262',qty:4,um:'un'});   // SKU sin ningún registro con conversión: la toma de Supabase
- const b=await chromium.launch();const errs=[];const c=await b.newContext({viewport:{width:1366,height:900}});await route(c);const a=await c.newPage();a.on('pageerror',x=>errs.push(x.message));
+ const b=await chromium.launch();const errs=[];const c=await b.newContext({viewport:{width:1366,height:900},timezoneId:'America/Santiago'});await route(c);const a=await c.newPage();a.on('pageerror',x=>errs.push(x.message));
  await a.goto(B+'#panel');await a.evaluate(([u,k])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:k,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);   // PC SIN equivalencias guardadas
  await a.goto(B+'#pt');await a.reload();await a.waitForTimeout(4500);
  const t=(await a.textContent('#ptRes')).replace(/\s+/g,' ');console.log('PT',t.slice(0,400));
