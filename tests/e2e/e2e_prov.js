@@ -47,7 +47,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(/ACEROS DEL SUR/.test(await m.textContent('#pcHome'))&&/3 líneas/.test(await m.textContent('#pcHome')),'Ve la recepción por recibir, con su packing list');
  await m.tap('#pcHome [data-pc]');await m.waitForTimeout(800);
  const lc=await m.textContent('#pcDecl');
- check(/0 de 3 productos recibidos/.test(lc)&&/221317/.test(lc)&&/MALLA|Mos/.test(lc)&&/Pendiente/.test(lc)&&!/esperado|10\s*rollos/i.test(lc)&&/Cont\. ONEU9329903/.test(await m.textContent('#pcDoc')),'Celular: ve los códigos del packing list como en el inventario (código, descripción, "Pendiente"), sin las cantidades esperadas; y el contenedor');
+ check(/0 de 3 productos recibidos/.test(lc)&&/221317/.test(lc)&&/MALLA|Mos/.test(lc)&&/Pendiente/.test(lc)&&/A recibir:\s*10\s*rollos\s*=\s*900 m/i.test(lc)&&/Cont\. ONEU9329903/.test(await m.textContent('#pcDoc')),'Celular: ve los códigos del packing list como en el inventario (código, descripción, "Pendiente"), con la cantidad a recibir del packing list (10 rollos = 900 m); y el contenedor');
  await m.tap('#pcDecl [data-pcc="221317"]');await m.waitForTimeout(300);
  check((await m.inputValue('#pcScan'))==='221317','Tocar un producto de la lista lo carga para registrarlo');
  await m.fill('#pcQty','10');await m.tap('#pcOk');await m.waitForTimeout(300);

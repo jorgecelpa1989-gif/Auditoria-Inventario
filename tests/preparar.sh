@@ -27,6 +27,7 @@ m=re.search(r'<script type="text/plain" id="sqlScript">(.*?)</script>',s,re.S)
 sys.stdout.write(m.group(1))   # tal cual lo copia el botón «Copiar script SQL»
 PY
   "${PSQL[@]}" -d postgres -tAc "select 1 from pg_roles where rolname='anon'" | grep -q 1 || "${PSQL[@]}" -d postgres -c "create role anon nologin; create role authenticated nologin"
+  "${PSQL[@]}" -d postgres -tAc "select 1 from pg_roles where rolname='service_role'" | grep -q 1 || "${PSQL[@]}" -d postgres -c "create role service_role nologin"   # como en Supabase: lo usa la Edge Function de fotos
   "${PSQL[@]}" -d "$DB" -c "create schema if not exists extensions; create extension if not exists pgcrypto schema extensions; grant usage on schema extensions to anon, authenticated"
   "${PSQL[@]}" -d "$DB" -f "$TMP" >/dev/null
   "${PSQL[@]}" -d "$DB" -f "$RAIZ/tests/sql/post.sql" >/dev/null
