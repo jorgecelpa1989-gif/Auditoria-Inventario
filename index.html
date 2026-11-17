@@ -6766,7 +6766,7 @@ function solFix(arr){return Array.isArray(arr)?arr.map(x=>{if(!Array.isArray(x))
   const d=convFix({k:cod,code:cod,um:""});return d.ce&&+d.f>0&&+d.f!==1&&d.um&&UMN(d.um)!=="un"?[cod,(+q||0)*d.f,desc,d.um,d.ce,d.f]:x}):arr}
 function mpSolOf(id){const m=movById(id);return m&&m.sol?solFix(m.sol):null}
 function mpRows(id){
-  const ls=(movLect[id]||[]).map(convFix), map=new Map(), sol=mpSolOf(id);
+  const ls=(movLect[id]||[]).filter(d=>!(+d.qty===0&&Array.isArray(d.ed)&&d.ed.length)).map(convFix), map=new Map(), sol=mpSolOf(id);   // anulado en el panel (0): no cuenta
   for(const [cod,q,desc,um,ce,f] of sol||[]){const k=key(cod),r=map.get(k)||{cod,desc:desc||"",um:um||"",ce:ce||"",f:+f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0,S:null};r.S=(r.S||0)+(+q||0);map.set(k,r)}
   for(const d of ls){const k=key(d.k||d.code);const r=map.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,E:null,R:null,qE:0,qR:0,nE:0,nR:0};
     if(!r.desc&&d.desc)r.desc=d.desc;if(!r.um&&d.um)r.um=d.um;if(!(r.ce&&r.f!==1)&&d.ce&&+d.f>0&&+d.f!==1){r.ce=d.ce;r.f=+d.f}const t=(+d.qty||0)*(+d.f||1);
