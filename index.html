@@ -902,7 +902,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card">
     <div class="row"><div class="eyebrow">4 · Logística inversa</div><span class="sep"></span><span class="small muted" id="dvAt"></span><button class="btn sm" id="dvRef">Actualizar</button></div>
     <h2>Devoluciones a bodega</h2>
-    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>2 · Permisos</b>.</p>
+    <p class="small" style="margin:0">Las cargan desde el celular los usuarios de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>2 · Permisos</b>.</p>
     <div class="notice" id="dvNote" hidden></div>
     <div class="row" style="margin-top:4px"><div class="chips" id="dvChips"></div><span class="sep"></span>
       <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option></select></label>
@@ -957,7 +957,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
   <details class="card mpFold" id="puAdm" open>
     <summary><b>Usuarios</b> <span class="small muted" id="puAdmSum"></span></summary>
-    <p class="small" style="margin:8px 0 0">Crea un usuario para cada persona o equipo (PC o celular) y marca lo que puede hacer. Le mandas su link: queda amarrado al primer equipo que lo abre (uno a la vez). Si cambia de equipo, toca <b>Nuevo acceso</b>. Los celulares fijos de bodega, producción, retail y distribución ya son usuarios: sus links siguen funcionando.</p>
+    <p class="small" style="margin:8px 0 0">Crea un usuario para cada persona o equipo (PC o celular) y marca lo que puede hacer. Le mandas su link: queda amarrado al primer equipo que lo abre (uno a la vez). Si cambia de equipo, toca <b>Nuevo acceso</b>.</p>
     <div id="puAdmBox"></div>
   </details>
 
@@ -5912,35 +5912,9 @@ function cPuSync(){const w=$("#cPuWrap");if(!w)return;w.hidden=!nubeOn();if(w.hi
   const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— Elige a quién —");
   const rs=$("#rePuesto");if(rs){const rv=rs.value;rs.innerHTML=uOpts("conteo",rv,"— Elige a quién —")}
   $("#cPuHint").innerHTML=n?"Le llega a su app en unos segundos, con aviso.":'<span style="color:var(--bad)">Ningún usuario tiene permiso de conteo: créalo o dale el permiso en 2 · Permisos.</span>'}
-function renderConteosOnly(){
-  if(!$("#conteosTbl")){
-    cPuSync();edRender();
-    if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();return}
-  const hasN=conteos.some(c=>c.nube);
-  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
-   (conteos.length?conteos.map((c,i)=>{
-     if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&(x.finalizado||x.terminado))c.fin=true;
-       return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
-       <td style="min-width:220px"><div class="row" style="gap:6px;flex-wrap:wrap">${x&&(!x.abierto||x.libre)&&!x.finalizado&&c.link?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&usersCon("conteo").length?`<select class="selSm" data-pa="${i}" title="Usuario que lo ve en su menú">${uOpts("conteo",x.puesto,"📱 Asignar a…")}</select>`:""}${x&&x.abierto&&x.libre===false&&!x.finalizado?`<button class="btn sm" data-lb="${i}" title="Si el celular del contador quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
-     return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
-    <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
-    <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
-   :`<tr><td colspan="7" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>"+
-   (hasN&&nubeAt?`<caption class="small muted" style="caption-side:bottom;text-align:left;padding:6px">Actualizado ${nubeAt.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · se refresca cada 20 s</caption>`:"");
-  $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
-  $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
-  $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
-  $$("#conteosTbl select[data-pa]").forEach(s=>s.onchange=async()=>{const c=conteos[+s.dataset.pa],pu=s.value;
-    try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:pu});toast(pu?"Conteo asignado a "+uNombre(pu):"Conteo quitado del usuario");refreshNube(true)}catch(e){toast(sbMsg(e));refreshNube(true)}});
+function renderConteosOnly(){   // la antigua tabla de conteos (#conteosTbl) ya no existe: los conteos se ven en Permisos
   cPuSync();edRender();
-  $$("#conteosTbl [data-lb]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.lb],x=nubeLive.get(c.id)||{};
-    confirmBox(`Liberar el celular de "${esc(c.nombre)}"${x.contador?" ("+esc(x.contador)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas ya recibidas.`,async()=>{try{await rpc(SB,"cb_liberar",{p_clave:SB.admin,p_id:c.id});await refreshNube(true);toast("Celular liberado: reenvía el mismo link al contador")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
-  $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
-    confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
-  $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
-    confirmBox(c.nube?`Quitar "${esc(c.nombre)}" de esta lista (en Supabase queda guardado).`:`Quitar "${esc(c.nombre)}" de la lista${c.cerrado?"":" y cerrar su link"}.`,async()=>{
-      if(!c.nube&&!c.cerrado){try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo cerrar en GitHub; se quitó solo de la lista")}}
-      conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
+  if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();
 }
 
 /* ================= NUBE (Supabase): los conteos llegan solos ================= */
@@ -7911,7 +7885,7 @@ function devRender(){
   $("#dvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Origen</th><th>Guía</th><th>Factura</th><th>Devuelve</th><th>Recibe</th><th class="num">Líneas</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
     (L.length?L.map(d=>{const s=devSt(d),[t,c]=dvEstado(d),cu=s==="rec"||s==="cerr"?devCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
       return `<tr data-di="${esc(d.id)}" class="${d.id===devSel?"sel":""}"><td>${fechaCL(d.fecha)}</td><td>${esc(dvOrigen(d))}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.factura||"—")}</td><td>${esc(d.persona||"—")}</td><td>${esc(d.rec_persona||"—")}</td><td class="num">${fmt((d.lect||[]).length)}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
-     :`<tr><td colspan="9" class="muted">${devList.length?"No hay devoluciones con este filtro.":"Todavía no hay devoluciones. Las cargan los celulares fijos de producción, retail y distribución."}</td></tr>`)+"</tbody>";
+     :`<tr><td colspan="9" class="muted">${devList.length?"No hay devoluciones con este filtro.":"Todavía no hay devoluciones. Las cargan desde el celular los usuarios de producción, retail y distribución."}</td></tr>`)+"</tbody>";
   $$("#dvTbl [data-di]").forEach(tr=>tr.onclick=()=>{devSel=tr.dataset.di;store.set("inv_devsel",devSel);devRender();$("#dvDet").scrollIntoView({behavior:"smooth",block:"start"})});
   devDetRender();
 }
