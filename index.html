@@ -241,6 +241,7 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .fotosGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;margin-top:8px}
 .fotosGrid .ft{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--chip)}
 .fotosGrid .ft img{width:100%;height:100%;object-fit:cover;display:block}.fotosGrid .ft span{position:absolute;left:0;right:0;bottom:0;font-size:11px;padding:2px 4px;background:rgba(0,0,0,.55);color:#fff}
+.bodBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0}
 .anulBox{margin-top:10px;font-size:13px}.anulBox>summary{cursor:pointer;color:var(--muted);font-weight:600}
 .ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
 .ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
@@ -323,6 +324,8 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card">
     <div class="eyebrow">Paso 1</div>
     <h2>Carga el informe de stock tal como sale del ERP</h2>
+    <div class="bodBar"><span class="small muted">Stock de:</span><div class="chips" id="bodBar" role="group" aria-label="Bodega"></div></div>
+    <p class="small muted" id="bodInfo" style="margin:0"></p>
     <p>Excel (.xlsx / .xls), CSV o TXT. La app busca la fila de encabezados, quita títulos, encabezados repetidos por página, filas de totales y filas vacías, arregla números con punto de miles y coma decimal, y junta códigos repetidos.</p>
     <div class="drop" id="dropErp" tabindex="0"><b>Arrastra el archivo aquí o toca para elegirlo</b><span class="small">Nada sale de tu equipo: todo se procesa aquí mismo.</span></div>
     <input type="file" id="fileErp" accept=".xlsx,.xls,.xlsm,.csv,.txt,.ods" hidden>
@@ -575,6 +578,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card" id="maestroCard" hidden>
     <div class="eyebrow">Crear conteo</div>
     <div class="row">
+      <label class="f" style="flex:0 1 220px">Bodega a contar<select id="cBod"></select></label>
       <label class="f" style="flex:1 1 260px">Nombre del conteo<input id="cNombre" placeholder="Ej: Bodega Central · Pasillos 1 a 5"></label>
       <label class="f" style="flex:0 1 200px">Vigencia del link<select id="cVence">
         <option value="2">2 horas</option><option value="4">4 horas</option><option value="8" selected>8 horas (un turno)</option><option value="12">12 horas</option><option value="hoy">Hasta hoy 23:59</option>
@@ -5213,9 +5217,24 @@ $("#hdrRow").onchange=e=>{erpDraft.hdrRow=Math.max(0,(+e.target.value||1)-1);erp
 $("#optZeros").checked=cfg.zeros;
 $("#optZeros").onchange=e=>{cfg.zeros=e.target.checked;store.set("inv_cfg",cfg);buildIndex()};
 // El stock cargado queda activo al tiro para Resultados (pestaña 3) y para la lista de productos de las entregas.
+/* ---------- Stock por bodega: hasta 3 informes del ERP (Bodega 1, 2 y 3). El stock activo es `erp`;
+   cada conteo guarda su bodega y Resultados compara contra esa. Entrega MP usa siempre el stock de la Bodega 3. ---------- */
+const BODS=["1","2","3"],BOD_MP="3";let erpB=store.get("inv_erpb",{});
+const bodActiva=()=>BODS.includes(cfg.bod)?cfg.bod:"1";
+const bodTxt=n=>{const x=erpB[n];return x&&x.items?`${x.file} · ${fmt(x.items.length)} productos · ${fechaCL(ymd(new Date(x.at)))}`:"sin cargar"};
+function bodUsar(n,silent){if(!BODS.includes(n))return;cfg.bod=n;store.set("inv_cfg",cfg);const x=erpB[n];
+  if(x&&x.items&&x.items.length){erp=x;store.set("inv_erp",erp);erpDraft=null;$("#erpMapCard").hidden=true;buildIndex();updStatus();if(typeof maestroSync==="function")maestroSync()}
+  bodRender();if(!silent){toast(x&&x.items?`Stock activo: Bodega ${n}`:`Bodega ${n}: carga su informe del ERP`);if(typeof renderResult==="function"&&!$("#v-resultado").hidden)renderResult()}}
+function bodRender(){const a=bodActiva();
+  $("#bodBar").innerHTML=BODS.map(n=>`<button class="chip" data-bod="${n}" aria-pressed="${n===a}">Bodega ${n}${erpB[n]?" ✓":""}</button>`).join("");
+  $$("#bodBar [data-bod]").forEach(b=>b.onclick=()=>bodUsar(b.dataset.bod));
+  $("#bodInfo").innerHTML=`El archivo que cargues queda como stock de la <b>Bodega ${a}</b> (${esc(bodTxt(a))}). Entrega MP usa siempre el stock de la Bodega ${BOD_MP}.`;
+  const sel=$("#cBod");if(sel){sel.innerHTML=BODS.map(n=>`<option value="${n}"${n===a?" selected":""}${erpB[n]?"":" disabled"}>Bodega ${n}${erpB[n]?"":" (sin stock)"}</option>`).join("");}}
+$("#cBod").onchange=e=>bodUsar(e.target.value);
 function usarErp(silent){
   const d=erpDraft;if(!d||!d.items||!d.items.length)return false;enrich(d.items);
   erp={file:d.file,at:new Date().toISOString(),items:d.items,merged:d.merged};
+  const b=bodActiva();erpB[b]=Object.assign({bod:b},erp);erp.bod=b;store.set("inv_erpb",erpB);bodRender();
   if(!store.set("inv_erp",erp))return false;
   buildIndex();updStatus();if(!silent)toast(`Stock cargado: ${fmt(erp.items.length)} productos`);
   if(typeof renderResult==="function"&&!$("#v-resultado").hidden)renderResult();
@@ -5521,6 +5540,8 @@ function renderSel(){
   if($("#rVerArch"))$("#rVerArch").onchange=e=>{cfg.verArch=e.target.checked;store.set("inv_cfg",cfg);renderResult()};
 }
 function renderResult(){
+  {const c=conteos.find(x=>x.id===rSel),b=c&&(c.bodega||(c.reconteoDe&&(conteos.find(y=>y.id===c.reconteoDe)||{}).bodega));
+   if(b&&erpB[b]&&cfg.bod!==b)bodUsar(b,true)}   // el stock del conteo es el de su bodega
   renderLive();
   renderSel();
   const rows=compute(), k=kpis(rows), sc=scope();
@@ -5591,7 +5612,7 @@ $("#btnReconteo").onclick=async()=>{
   const vence=venceDesde(vv,ahora);
   const puR=$("#rePuesto").value;if(nubeOn()&&!puR){$("#rePuesto").focus();return toast("Elige a quién se asigna el reconteo")}
   const nombre="Reconteo · "+(raiz?raiz.nombre:ahora.toLocaleDateString("es-CL"));
-  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,reconteoDe:raiz?raiz.id:null,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
+  const m={app:"conteo-bodega",v:3,bodega:(raiz&&raiz.bodega)||null,nombre,vence,creado:ahora.toISOString(),origen:erp.file,subgrupos:null,rotativo:true,reconteoDe:raiz?raiz.id:null,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   $("#btnReconteo").disabled=true;
   try{const c=await crearNube(m,its,null,true);c.codes=its.map(i=>i.cod);if(raiz)c.reconteoDe=raiz.id;
     if(puR){try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:puR});c.puesto=puR}catch(e){toast("El reconteo se creó, pero no se pudo asignar a "+uNombre(puR))}}
@@ -5781,14 +5802,15 @@ $("#btnCrear").onclick=async()=>{
   if(!d||!d.items.length)return toast("Primero carga el inventario del ERP");
   if(d.map.cod==null)return toast("Falta elegir la columna de código");
   if(!nubeOn()){show("permisos");$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático con Supabase (una sola vez, en Permisos)")}
-  const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
+  const bodC=Object.keys(erpB).length?bodActiva():null;
+  const nombre=norm($("#cNombre").value)||((bodC?"Bodega "+bodC+" · ":"")+"Conteo "+new Date().toLocaleDateString("es-CL"));
   const vv=$("#cVence").value, ahora=new Date();
   const vence=venceDesde(vv,ahora);
   enrich(d.items);
   const rot=rotParse();
   const sel=rot?null:sgSelected(), its=rot?rot.found:(sel?d.items.filter(i=>sel.has(i.sg||"(sin subgrupo)")):d.items);
   if(!its.length)return toast(rot?"Ninguno de los códigos pegados está en el informe":"Elige al menos un subgrupo");
-  const m={app:"conteo-bodega",v:3,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,rotativo:!!rot,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
+  const m={app:"conteo-bodega",v:3,bodega:bodC,nombre,vence,creado:ahora.toISOString(),origen:d.file,subgrupos:sel?[...sel]:null,rotativo:!!rot,productos:its.length,items:its.map(i=>conv(i)?[i.cod,i.ean,i.desc,i.um,i.ce,i.f]:[i.cod,i.ean,i.desc,i.um])};
   if(nubeOn()&&!$("#cPuesto").value){$("#cPuesto").focus();return toast("Elige a quién se asigna el conteo")}
   $("#btnCrear").disabled=true;$("#crearMsg").textContent="Creando…";
   try{
@@ -5911,9 +5933,9 @@ $("#btnEd").onclick=async()=>{const c=conteos.find(z=>z.id===$("#edSel").value);
   catch(e){toast(/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización 09.":/finalizado/.test(e.message)?"Ese conteo ya está finalizado.":sbMsg(e))}
   finally{b.disabled=false}};
 async function crearNube(m,its,sel,rot){
-  const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo,reconteo_de:m.reconteoDe||null}});
+  const r=await rpc(SB,"cb_crear",{p_clave:SB.admin,p_nombre:m.nombre,p_vence:m.vence,p_items:m.items,p_meta:{origen:m.origen,subgrupos:m.subgrupos,rotativo:m.rotativo,reconteo_de:m.reconteoDe||null,bodega:m.bodega||null}});
   const link=appUrl()+"?nube="+r.id+"."+r.token+sbLinkParams();
-  return {id:r.id,nube:true,codes:its.map(i=>i.cod),nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
+  return {id:r.id,nube:true,bodega:m.bodega||null,codes:its.map(i=>i.cod),nombre:m.nombre,vence:m.vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",rot:!!rot,link};
 }
 
 /* ---- estado en vivo de los conteos ---- */
@@ -5928,7 +5950,7 @@ async function conteosRecuperar(arr){
   try{let det={};try{det=await rpc(SB,"cb_conteo_codigos",{p_clave:SB.admin,p_ids:[...nuevos.map(x=>x.id),...sinCod]})||{}}catch(e){}
     for(const x of nuevos){const d=det[x.id]||{};
       conteos.push({id:x.id,nube:true,recuperado:true,nombre:x.nombre,creado:x.creado,vence:x.vence,productos:x.productos,codes:Array.isArray(d.codes)?d.codes:null,
-        reconteoDe:d.meta&&d.meta.reconteo_de||undefined,rot:!!(d.meta&&d.meta.rotativo),fin:!!(x.finalizado||x.terminado),link:x.token?appUrl()+"?nube="+x.id+"."+x.token+sbLinkParams():""})}
+        reconteoDe:d.meta&&d.meta.reconteo_de||undefined,bodega:d.meta&&d.meta.bodega||null,rot:!!(d.meta&&d.meta.rotativo),fin:!!(x.finalizado||x.terminado),link:x.token?appUrl()+"?nube="+x.id+"."+x.token+sbLinkParams():""})}
     for(const id of sinCod){const c=conteos.find(z=>z.id===id),d=det[id];if(c&&d&&Array.isArray(d.codes))c.codes=d.codes}
     conteos.sort((a,b)=>String(b.creado).localeCompare(String(a.creado)));store.set("inv_conteos",conteos);
     if(nuevos.length&&typeof renderResult==="function"&&!$("#v-resultado").hidden){renderResult();if(typeof traerSel==="function")traerSel(true).then(renderResult).catch(()=>{})}}
@@ -6293,13 +6315,15 @@ async function catSync(force){        // supervisor: sube catálogo + stock si c
   await factRecuperar();
   if(erp&&erp.fromServer)return factNube(force);
   if(!force&&!Object.keys(FACT).length)return;      // sin equivalencias no se pisa el catálogo de la nube
-  const its=movCatalog();if(!its)return;
+  let its=movCatalog();if(!its)return;let stIts=its;
+  if(Object.keys(erpB).length){const u=new Map();for(const n of BODS)for(const i of ((erpB[n]||{}).items||[]))if(!u.has(key(i.cod)))u.set(key(i.cod),i);
+    its=enrich([...u.values()]);stIts=(erpB[BOD_MP]||{}).items||[]}   // varias bodegas: catálogo = todas; stock = Bodega 3
   const items=its.map(catRow), stock={};
-  for(const i of its)stock[i.cod]=[i.disp!=null?+i.disp:(i.stock!=null?+i.stock:null),i.stock!=null?+i.stock:null];
-  const sig=JSON.stringify(items).length+"|"+JSON.stringify(stock).length+"|"+items.length+"|"+(erp&&erp.at||"");
+  for(const i of stIts)stock[i.cod]=[i.disp!=null?+i.disp:(i.stock!=null?+i.stock:null),i.stock!=null?+i.stock:null];
+  const sig=JSON.stringify(items).length+"|"+JSON.stringify(stock).length+"|"+items.length+"|"+(erp&&erp.at||"")+"|"+BODS.map(n=>(erpB[n]||{}).at||"").join(",");
   if(!force&&store.get("inv_catsig","")===sig)return factNube(false);
   catBusy=true;
-  try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:(erp&&erp.file)||"ERP"});
+  try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:Object.keys(erpB).length?("Bodega "+BOD_MP+" · "+((erpB[BOD_MP]||{}).file||"sin stock")):((erp&&erp.file)||"ERP")});
     store.set("inv_catsig",sig);store.set("inv_catat",new Date().toISOString());renderAcc();if(force)toast("Catálogo y stock enviados")}
   catch(e){if(force)toast(movMsg(e))}
   finally{catBusy=false}
@@ -9000,7 +9024,7 @@ async function ucOpenCam(t){
 async function ucStopCam(){if(ucCamI){await detenerLector(ucCamI);ucCamI=null}ucHold=false;const w=$("#ucCamWrap");if(w)w.hidden=true}
 $$("#v-ubiccel [data-ucam]").forEach(b=>b.onclick=()=>ucOpenCam(b.dataset.ucam));$("#ucCamStop").onclick=ucStopCam;
 
-updStatus();renderSess();applyMode();renderAppUrl();renderConteos();checkExpiry();renderFact();renderConteoBox();
+updStatus();renderSess();applyMode();renderAppUrl();bodRender();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
  if(!isOp()&&!isSupDevice()&&!prodMode()&&!puestoMode())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}
