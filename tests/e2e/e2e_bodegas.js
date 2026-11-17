@@ -37,5 +37,19 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  await p.evaluate(()=>bodUsar("3",true));const id=sql("select id from cb_conteos where nombre='Inventario B1'");
  await p.evaluate(i=>{rSel=i;renderResult()},id);await p.waitForTimeout(500);
  check(await p.evaluate(()=>erp.bod==="1"),'Resultados del conteo de la Bodega 1 comparan contra el stock de la Bodega 1 (aunque el activo fuera la 3)');
+ // Bodega vacía: no deja crear el conteo
+ await p.evaluate(()=>bodUsar("2",true));await p.fill('#cNombre','Inventario B2');await p.click('#btnCrear');await p.waitForTimeout(800);
+ check(sql("select count(*) from cb_conteos where nombre='Inventario B2'")==='0','Bodega sin archivo: no deja crear el conteo');
+ // PC con un solo informe (antes de las bodegas): pasa a ser la Bodega 1; cargar solo la Bodega 1 NO borra el stock de la nube
+ const st0=sql("select stock::text from cb_catalogo where id=1");
+ const c2=await b.newContext({viewport:{width:1366,height:900}});await c2.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
+ const q=await c2.newPage();q.on('pageerror',e=>errs.push('pc2: '+e.message));await q.goto(B+'#panel');
+ await q.evaluate(([u,a])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));
+   localStorage.setItem('inv_erp',JSON.stringify({file:'antiguo.xlsx',at:new Date().toISOString(),items:[{cod:'000123',ean:'',desc:'ACEITE',um:'UN',stock:3}],merged:0}))},[SBU,ADMIN]);
+ await q.goto(B+'#erp');await q.reload();await q.waitForTimeout(1500);
+ check(await q.evaluate(()=>!!erpB["1"]&&erpB["1"].file==='antiguo.xlsx'&&erp.bod==="1"),'PC con un informe antiguo: queda como Bodega 1');
+ await q.click('#bodBar [data-bod="1"]');await q.setInputFiles('#fileErp',__dirname+'/../datos/Ejemplo_informe_ERP.xlsx');await q.waitForTimeout(1000);
+ await q.evaluate(()=>catSync(true));await q.waitForTimeout(1500);
+ check(sql("select stock::text from cb_catalogo where id=1")===st0,'Sin archivo de la Bodega 3: el stock de Entrega MP en la nube no se toca');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));
  console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();

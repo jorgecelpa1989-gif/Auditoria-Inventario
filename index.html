@@ -5220,6 +5220,7 @@ $("#optZeros").onchange=e=>{cfg.zeros=e.target.checked;store.set("inv_cfg",cfg);
 /* ---------- Stock por bodega: hasta 3 informes del ERP (Bodega 1, 2 y 3). El stock activo es `erp`;
    cada conteo guarda su bodega y Resultados compara contra esa. Entrega MP usa siempre el stock de la Bodega 3. ---------- */
 const BODS=["1","2","3"],BOD_MP="3";let erpB=store.get("inv_erpb",{});
+if(!Object.keys(erpB).length&&erp&&!erp.maestro&&!erp.fromServer&&erp.items&&erp.items.length){erpB["1"]=Object.assign({bod:"1"},erp);erp.bod="1";store.set("inv_erpb",erpB)}   // PC con un solo informe (antes de las bodegas)
 const bodActiva=()=>BODS.includes(cfg.bod)?cfg.bod:"1";
 const bodTxt=n=>{const x=erpB[n];return x&&x.items?`${x.file} · ${fmt(x.items.length)} productos · ${fechaCL(ymd(new Date(x.at)))}`:"sin cargar"};
 function bodUsar(n,silent){if(!BODS.includes(n))return;cfg.bod=n;store.set("inv_cfg",cfg);const x=erpB[n];
@@ -5541,7 +5542,7 @@ function renderSel(){
 }
 function renderResult(){
   {const c=conteos.find(x=>x.id===rSel),b=c&&(c.bodega||(c.reconteoDe&&(conteos.find(y=>y.id===c.reconteoDe)||{}).bodega));
-   if(b&&erpB[b]&&cfg.bod!==b)bodUsar(b,true)}   // el stock del conteo es el de su bodega
+   if(b&&erpB[b]&&cfg.bod!==b){bodUsar(b,true);toast(`Stock activo: Bodega ${b} (la de este conteo)`)}}   // el stock del conteo es el de su bodega
   renderLive();
   renderSel();
   const rows=compute(), k=kpis(rows), sc=scope();
@@ -5803,6 +5804,7 @@ $("#btnCrear").onclick=async()=>{
   if(d.map.cod==null)return toast("Falta elegir la columna de código");
   if(!nubeOn()){show("permisos");$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático con Supabase (una sola vez, en Permisos)")}
   const bodC=Object.keys(erpB).length?bodActiva():null;
+  if(bodC&&!erpB[bodC]){show("erp");return toast(`La Bodega ${bodC} no tiene stock cargado: carga su informe en 1 · Panel`)}
   const nombre=norm($("#cNombre").value)||((bodC?"Bodega "+bodC+" · ":"")+"Conteo "+new Date().toLocaleDateString("es-CL"));
   const vv=$("#cVence").value, ahora=new Date();
   const vence=venceDesde(vv,ahora);
@@ -6318,12 +6320,13 @@ async function catSync(force){        // supervisor: sube catálogo + stock si c
   let its=movCatalog();if(!its)return;let stIts=its;
   if(Object.keys(erpB).length){const u=new Map();for(const n of BODS)for(const i of ((erpB[n]||{}).items||[]))if(!u.has(key(i.cod)))u.set(key(i.cod),i);
     its=enrich([...u.values()]);stIts=(erpB[BOD_MP]||{}).items||[]}   // varias bodegas: catálogo = todas; stock = Bodega 3
-  const items=its.map(catRow), stock={};
+  const items=its.map(catRow);let stock={};
+  if(Object.keys(erpB).length&&!erpB[BOD_MP]){try{const r=await rpc(SB,"cb_catalogo_stock",{p_clave:SB.admin});stock=(r&&r.stock)||{}}catch(e){return}stIts=[]}   // se mantiene el stock que ya estaba en la nube
   for(const i of stIts)stock[i.cod]=[i.disp!=null?+i.disp:(i.stock!=null?+i.stock:null),i.stock!=null?+i.stock:null];
   const sig=JSON.stringify(items).length+"|"+JSON.stringify(stock).length+"|"+items.length+"|"+(erp&&erp.at||"")+"|"+BODS.map(n=>(erpB[n]||{}).at||"").join(",");
   if(!force&&store.get("inv_catsig","")===sig)return factNube(false);
   catBusy=true;
-  try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:Object.keys(erpB).length?("Bodega "+BOD_MP+" · "+((erpB[BOD_MP]||{}).file||"sin stock")):((erp&&erp.file)||"ERP")});
+  try{await rpc(SB,"cb_catalogo_subir",{p_clave:SB.admin,p_items:items,p_stock:stock,p_origen:Object.keys(erpB).length&&erpB[BOD_MP]?("Bodega "+BOD_MP+" · "+erpB[BOD_MP].file):((erp&&erp.file)||"ERP")});
     store.set("inv_catsig",sig);store.set("inv_catat",new Date().toISOString());renderAcc();if(force)toast("Catálogo y stock enviados")}
   catch(e){if(force)toast(movMsg(e))}
   finally{catBusy=false}
