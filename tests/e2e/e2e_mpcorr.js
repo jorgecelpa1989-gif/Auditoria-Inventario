@@ -28,5 +28,9 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  check(sql(`select data->>'qty' from cb_mov_lect where mov='${id}' and lid='e2'`)==='0','Escribir 0 anula el registro (queda en 0, no se borra)');
  env(L);   // el celular vuelve a mandar su lista original
  check(sql(`select string_agg(lid||'='||(data->>'qty'),',' order by lid) from cb_mov_lect where mov='${id}'`)==='e1=8,e2=0','El celular vuelve a enviar: lo corregido en el panel se mantiene (no se pisa)');
+ // entrega cerrada: el supervisor igual puede corregir
+ sql(`update cb_mov set finalizado=now() where id='${id}'`);
+ check(rpc('cb_mov_corregir',{p_clave:ADMIN,p_id:id,p_rol:'E',p_lid:'e1',p_qty:9}).ok&&sql(`select data->>'qty' from cb_mov_lect where mov='${id}' and lid='e1'`)==='9','Entrega cerrada: el supervisor puede corregir (8 → 9)');
+ check(/finalizado/.test(env(L).body),'Entrega cerrada: el celular ya no puede enviar');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));
  console.log(fail?'FALLAS: '+fail:'TODO OK');await b.close()})();
