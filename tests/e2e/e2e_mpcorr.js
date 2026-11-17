@@ -18,7 +18,7 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  const b=await chromium.launch();const errs=[];const cs=await b.newContext({viewport:{width:1366,height:900},timezoneId:'America/Santiago'});await route(cs);const s=await cs.newPage();s.on('pageerror',e=>errs.push(e.message));
  await s.goto(B+'#panel');await s.evaluate(([u,a])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));localStorage.setItem('inv_fact',JSON.stringify({"221317":{ce:"ROLLO",f:90}}))},[SBU,ADMIN]);
  await s.goto(B+'#mp');await s.reload();await s.waitForTimeout(3500);
- await s.click('#mpDetBox summary');await s.waitForTimeout(300);
+ check(await s.isVisible('#mpModTog'),'Botón «✎ Modificar» visible junto a «Agregar registro»');await s.click('#mpModTog');await s.waitForTimeout(400);check(await s.evaluate(()=>document.querySelector('#mpDetBox').open),'«✎ Modificar» abre el detalle de lecturas');
  check((await s.$$('#mpDet [data-mped]')).length===2,'Detalle de lecturas: cada registro tiene «✎ Modificar»');
  s.once('dialog',d=>d.accept('8'));await s.click('#mpDet [data-mped="E|e1"]');await s.waitForTimeout(2500);
  const q1=sql(`select (data->>'qty')||'|'||jsonb_array_length(data->'ed') from cb_mov_lect where mov='${id}' and lid='e1'`);

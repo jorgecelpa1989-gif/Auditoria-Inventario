@@ -450,7 +450,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card mpEmpty" id="mpEmpty"><div class="row"><div class="eyebrow">Entrega vs Recepción</div><span class="sep"></span><select id="mpDia2" class="mpDiaSel" style="flex:0 1 210px"></select></div><p class="muted" style="margin:0" id="mpEmptyTxt">Genera una solicitud o elige una entrega de la lista para ver aquí, en tiempo real, lo solicitado, entregado y recibido.</p></div>
   <div class="card" id="mpCard" hidden>
     <div class="eyebrow">Entrega vs Recepción</div>
-    <div class="row"><h2 id="mpTitle" style="margin:0"></h2><span class="sep"></span><select id="mpDia" class="mpDiaSel" style="flex:0 1 210px"></select><button class="btn primary" id="btnMpTraer">Actualizar lecturas</button><button class="btn" id="btnMpExp">Excel</button><button class="btn" id="mpAddTog">＋ Agregar registro</button></div>
+    <div class="row"><h2 id="mpTitle" style="margin:0"></h2><span class="sep"></span><select id="mpDia" class="mpDiaSel" style="flex:0 1 210px"></select><button class="btn primary" id="btnMpTraer">Actualizar lecturas</button><button class="btn" id="btnMpExp">Excel</button><button class="btn" id="mpAddTog">＋ Agregar registro</button><button class="btn" id="mpModTog" type="button">✎ Modificar</button></div>
     <div class="cbox" id="mpAddPanel" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b id="mpAddTit">Agregar un registro que faltó</b>
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -6298,7 +6298,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 /* Lo que se oculta cuando falta cada permiso (el servidor lo rechaza igual). */
 const SUP_SIEMPRE="#sbCard,#appUrlCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
-  mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
+  mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpModTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
   pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
@@ -6857,6 +6857,7 @@ function renderMpCmp(){
     b.disabled=true;try{await mrpc("cb_mov_corregir",{p_id:m.id,p_rol:rol,p_lid:lid,p_qty:q});toast(q===0?"Registro anulado (en 0)":"Cantidad corregida");await refreshMov(true)}catch(e){toast(movMsg(e))}finally{b.disabled=false}});
 }
 $("#mpQ").addEventListener("input",()=>renderMpCmp());
+$("#mpModTog").onclick=()=>{const d=$("#mpDetBox");if(!d)return;d.open=true;setTimeout(()=>d.scrollIntoView({behavior:"smooth",block:"start"}),50);toast("Toca «✎ Modificar» en el registro a corregir (0 = anular)")};
 /* ---------- Entrega MP: menú de días (igual que Recepción PT) ---------- */
 const mpDiaV=()=>$("#mpDia").value||store.get("inv_mpdia","d0");
 function mpDias(){const v=store.get("inv_mpdia","d0"),h=new Date();h.setHours(0,0,0,0);
