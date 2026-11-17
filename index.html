@@ -4775,6 +4775,49 @@ revoke execute on function public.cb_prov_foto_puede(text, text, uuid), public.c
 grant execute on function public.cb_prov_foto_puede(text, text, uuid), public.cb_prov_foto_agregar(text, text, uuid, text, text),
   public.cb_prov_fotos(text, uuid) to service_role;
 
+-- =====================================================================
+--  ENTREGA MP: CORREGIR UN REGISTRO DESDE EL PANEL (permiso "mp_operar")
+--  Cambia la cantidad de una lectura (0 = anular; queda en el historial "ed").
+--  cb_mov_enviar: una lectura corregida en el panel se conserva aunque el celular vuelva a enviar su lista.
+--  Compatible con la app anterior (mismos parámetros).
+-- =====================================================================
+create or replace function public.cb_mov_corregir(p_clave text, p_id uuid, p_rol text, p_lid text, p_qty numeric) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'mp_operar'); m cb_mov; d jsonb; v_por text := left(coalesce(cb_sup_nombre(p_clave), 'Supervisor'), 80);
+begin
+  if p_rol not in ('E','R') then raise exception 'datos_invalidos'; end if;
+  if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  select * into m from cb_mov where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  select data into d from cb_mov_lect where mov = p_id and rol = p_rol and lid = p_lid for update;
+  if not found then raise exception 'no_existe'; end if;
+  update cb_mov_lect set data = d || jsonb_build_object('qty', p_qty, 'ed', coalesce(d->'ed', '[]'::jsonb)
+           || jsonb_build_array(jsonb_build_object('de', d->'qty', 'a', p_qty, 'por', v_por, 't', now())))
+   where mov = p_id and rol = p_rol and lid = p_lid;
+  return jsonb_build_object('lid', p_lid, 'qty', p_qty);
+end $$;
+grant execute on function public.cb_mov_corregir(text, uuid, text, text, numeric) to anon, authenticated;
+
+create or replace function public.cb_mov_enviar(p_id uuid, p_rol text, p_secret text, p_persona text, p_lecturas jsonb)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare m cb_mov; n int;
+begin
+  perform cb_mov_lado_ok(p_id, p_rol, p_secret);
+  select * into m from cb_mov where id = p_id;
+  if m.finalizado is not null then raise exception 'finalizado'; end if;
+  if m.vence is not null and m.vence < now() - interval '24 hours' then raise exception 'vencido'; end if;
+  if jsonb_typeof(p_lecturas) <> 'array' or jsonb_array_length(p_lecturas) > 20000 then raise exception 'datos_invalidos'; end if;
+  -- lo agregado a mano y lo corregido desde el panel no se borra ni se pisa
+  delete from cb_mov_lect where mov = p_id and rol = p_rol and not (data ? 'manual') and not (data ? 'ed');
+  insert into cb_mov_lect(mov, rol, lid, data)
+    select p_id, p_rol, coalesce(e->>'lid', md5(e::text)), e from jsonb_array_elements(p_lecturas) e
+    on conflict (mov, rol, lid) do update set data = case when cb_mov_lect.data ? 'ed' then cb_mov_lect.data else excluded.data end;
+  get diagnostics n = row_count;
+  update cb_mov_lado set n_lecturas = n, ultimo_envio = now(), visto = now(), persona = left(p_persona, 80) where mov = p_id and rol = p_rol;
+  return jsonb_build_object('n', n, 'at', now());
+end $$;
+
 </script>
   </div>
 
@@ -5873,7 +5916,7 @@ const sbRef=u=>{const m=String(u||"").match(/^https:\/\/([a-z0-9]{10,40})\.supab
 const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a-z0-9]{10,40}$/i.test(u))u="https://"+u+".supabase.co";return u};
 /* Permiso que exige cada función de panel (igual que en el servidor). "__admin" = solo el administrador. */
 const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
-  cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
+  cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_corregir:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
   cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
   cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
@@ -6804,8 +6847,14 @@ function renderMpCmp(){
     :`<tr><td colspan="8" class="muted">${rows.length?"Nada con este filtro.":"Todavía no llegan lecturas de los celulares."}</td></tr>`)+"</tbody>";
   const ls=[...(movLect[m.id]||[])].sort((a,b)=>String(b.t).localeCompare(String(a.t)));
   $("#mpDetBox").querySelector("summary").textContent=`Detalle de lecturas (${fmt(ls.length)})`;
-  $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th></tr></thead><tbody>`+
-    ls.map(d=>`<tr><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}${d.manual?' <span class="pill p-warn" title="Agregado a mano desde el panel">a mano</span>':""}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}</td>${(()=>{const [u,c]=uCv(d.qty,d.ce,d.f,d.um);return `<td class="num">${u}</td><td class="num">${c}</td>`})()}</tr>`).join("")+"</tbody>";
+  const puedeEd=pvCan("mp_operar")&&!m.finalizado;
+  $("#mpDet").innerHTML=`<thead><tr><th>Rol</th><th>Hora</th><th>Persona</th><th>Código</th><th>Descripción</th><th class="num">Unidades</th><th class="num">Conversión</th>${puedeEd?"<th></th>":""}</tr></thead><tbody>`+
+    ls.map(d=>`<tr${+d.qty===0&&d.ed?' style="opacity:.55"':""}><td><span class="pill ${d.rol==="E"?"p-info":"p-ok"}">${ROL[d.rol]||d.rol}</span></td><td>${hhmm(d.t)}</td><td>${esc(d.user||"")}${d.manual?' <span class="pill p-warn" title="Agregado a mano desde el panel">a mano</span>':""}</td><td class="code">${esc(d.code)}</td><td class="desc">${esc(d.desc||"")}${Array.isArray(d.ed)&&d.ed.length?`<span class="sub">✎ ${d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)}${+x.a===0?" (anulado)":""} · ${esc(x.por||"")} ${x.t?hm24(x.t):""}`).join(" · ")}</span>`:""}</td>${(()=>{const [u,c]=uCv(d.qty,d.ce,d.f,d.um);return `<td class="num">${u}</td><td class="num">${c}</td>`})()}${puedeEd&&d.lid?`<td><button class="btn sm" data-mped="${esc(d.rol)}|${esc(d.lid)}" title="Corregir la cantidad (0 = anular)">✎ Modificar</button></td>`:puedeEd?"<td></td>":""}</tr>`).join("")+"</tbody>";
+  $$("#mpDet [data-mped]").forEach(b=>b.onclick=async()=>{const [rol,lid]=b.dataset.mped.split("|"),d=(movLect[m.id]||[]).find(x=>x.lid===lid&&x.rol===rol);if(!d)return;
+    const u=d.ce&&+d.f!==1?plural(d.ce):umTxt(d.um||""),v=prompt(`${ROL[rol]||rol} · ${d.code} ${d.desc||""}\nNueva cantidad (en ${u}). Escribe 0 para anular un registro equivocado:`,fmt2(+d.qty));if(v==null)return;
+    const q=num(v);if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");
+    if(q===0&&!confirm("¿Dejar este registro en 0?\nQueda anulado: no suma. Queda en el historial y se puede volver a corregir."))return;
+    b.disabled=true;try{await mrpc("cb_mov_corregir",{p_id:m.id,p_rol:rol,p_lid:lid,p_qty:q});toast(q===0?"Registro anulado (en 0)":"Cantidad corregida");await refreshMov(true)}catch(e){toast(movMsg(e))}finally{b.disabled=false}});
 }
 $("#mpQ").addEventListener("input",()=>renderMpCmp());
 /* ---------- Entrega MP: menú de días (igual que Recepción PT) ---------- */
