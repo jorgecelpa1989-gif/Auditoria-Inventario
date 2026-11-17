@@ -6,14 +6,16 @@ function rpc(fn,args){const s=`set role anon; select rpc_test($$${fn}$$, $j$${JS
   try{return {ok:true,body:execFileSync('psql',[...PG,'-c',s],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()||'null'}}catch(e){const m=(e.stderr||'').match(/ERROR:\s+(.*)/);return {ok:false,body:JSON.stringify({message:m?m[1].trim():'error'})}}}
 const B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN='clave-supervisor-123';let fail=0;const check=(c,m)=>{console.log((c?'✅ ':'❌ ')+m);if(!c)fail++};
 const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
+// Hora fija (hoy 18:00 en Chile) para la base y el navegador: la prueba no depende de la hora en que se corre
+const BASE="(date_trunc('day', now() at time zone 'America/Santiago') + interval '18 hours') at time zone 'America/Santiago'";
 (async()=>{rpc('cb_configurar',{p_clave:ADMIN});sql("delete from cb_pt");
  rpc('cb_catalogo_subir',{p_clave:ADMIN,p_items:[["120125","","ROMBO PLAST. 5012","ML","ROLLO",25],["120262","","ROMBO STANDARD","ML","ROLLO",25]],p_stock:{},p_origen:'STOCK'});
- const ins=(lid,pu,lado,min,data)=>sql(`insert into cb_pt(lid,puesto,pallet,data,t,lado) values ('${lid}','${pu}','SN-${lid}','${JSON.stringify(Object.assign({lid,sn:true,code:data.k,user:'X'},data))}',now()-interval '${min} minutes','${lado}')`);
+ const ins=(lid,pu,lado,min,data)=>sql(`insert into cb_pt(lid,puesto,pallet,data,t,lado) values ('${lid}','${pu}','SN-${lid}','${JSON.stringify(Object.assign({lid,sn:true,code:data.k,user:'X'},data))}',(${BASE})-interval '${min} minutes','${lado}')`);
  ins('r0','bodega','R',300,{k:'120125',qty:10,um:'un'});                       // registro antiguo sin conversión, el primero de la fila
  ins('e1','produccion','E',60,{k:'120125',qty:10,um:'m',ce:'ROLLO',f:25});ins('e2','produccion','E',59,{k:'120125',qty:10,um:'m',ce:'ROLLO',f:25});
  ins('r1','bodega','R',40,{k:'120125',qty:10,um:'m',ce:'ROLLO',f:25});
  ins('e3','produccion','E',30,{k:'120262',qty:4,um:'un'});ins('r3','bodega','R',20,{k:'120262',qty:4,um:'un'});   // SKU sin ningún registro con conversión: la toma de Supabase
- const b=await chromium.launch();const errs=[];const c=await b.newContext({viewport:{width:1366,height:900},timezoneId:'America/Santiago'});await route(c);const a=await c.newPage();a.on('pageerror',x=>errs.push(x.message));
+ const b=await chromium.launch();const errs=[];const c=await b.newContext({viewport:{width:1366,height:900},timezoneId:'America/Santiago'});await c.clock.install({time:new Date(sql(`select to_char((${BASE}) at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')`))});await route(c);const a=await c.newPage();a.on('pageerror',x=>errs.push(x.message));
  await a.goto(B+'#panel');await a.evaluate(([u,k])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:k,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);   // PC SIN equivalencias guardadas
  await a.goto(B+'#pt');await a.reload();await a.waitForTimeout(4500);
  const t=(await a.textContent('#ptRes')).replace(/\s+/g,' ');console.log('PT',t.slice(0,400));
