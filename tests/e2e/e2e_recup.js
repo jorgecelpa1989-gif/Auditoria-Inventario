@@ -16,7 +16,7 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  const p=await c.newPage();const errs=[];p.on('pageerror',e=>errs.push(e.message));await p.goto(B+'#panel');
  // PC "nuevo": sin lista local de conteos (como en la dirección nueva)
  await p.evaluate(([u,ad])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:ad,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
- await p.goto(B+'#panel');await p.reload();await p.waitForTimeout(1500);await p.click('#btnDemo');await p.waitForTimeout(800);
+ await p.goto(B+'#panel');await p.reload();await p.waitForTimeout(1500);await p.setInputFiles('#fileErp',__dirname+'/../datos/Ejemplo_informe_ERP.xlsx');await p.waitForTimeout(800);
  await p.click('#sideNav [data-v="resultado"]');await p.waitForTimeout(4000);
  const loc=await p.evaluate(()=>conteos.map(c=>c.nombre+'|'+(c.codes||[]).join(',')+'|'+(c.reconteoDe?'re':'')));console.log('LOCAL',loc.join(' ; '));
  check(loc.some(x=>x==='Conteo 05-11-2026|000123,000124|')&&loc.some(x=>x==='Reconteo · Conteo 05-11-2026|000124|re'),'PC nuevo: recupera desde Supabase los 2 conteos, con sus códigos y la relación de reconteo');

@@ -326,7 +326,6 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <p>Excel (.xlsx / .xls), CSV o TXT. La app busca la fila de encabezados, quita títulos, encabezados repetidos por página, filas de totales y filas vacías, arregla números con punto de miles y coma decimal, y junta códigos repetidos.</p>
     <div class="drop" id="dropErp" tabindex="0"><b>Arrastra el archivo aquí o toca para elegirlo</b><span class="small">Nada sale de tu equipo: todo se procesa aquí mismo.</span></div>
     <input type="file" id="fileErp" accept=".xlsx,.xls,.xlsm,.csv,.txt,.ods" hidden>
-    <div class="row"><button class="btn sm" id="btnDemo">Probar con un informe de ejemplo</button></div>
   </div>
 
   <div class="card" id="erpMapCard" hidden>
@@ -902,7 +901,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="card">
     <div class="row"><div class="eyebrow">4 · Logística inversa</div><span class="sep"></span><span class="small muted" id="dvAt"></span><button class="btn sm" id="dvRef">Actualizar</button></div>
     <h2>Devoluciones a bodega</h2>
-    <p class="small" style="margin:0">Las cargan los celulares fijos de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>2 · Permisos</b>.</p>
+    <p class="small" style="margin:0">Las cargan desde el celular los usuarios de <b>Producción</b> (devolución de MP), <b>Picking retail</b> y <b>Distribución</b> (devoluciones de clientes) con N° de guía, N° de factura, fecha, SKU y cantidad. El celular de <b>Bodega</b> ve lo declarado y acepta o corrige lo que llega. Aquí ves el cuadre. Los links de los celulares están en <b>2 · Permisos</b>.</p>
     <div class="notice" id="dvNote" hidden></div>
     <div class="row" style="margin-top:4px"><div class="chips" id="dvChips"></div><span class="sep"></span>
       <label class="f" style="flex:0 1 190px">Origen<select id="dvOrig"><option value="">Todos</option></select></label>
@@ -957,7 +956,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   </div>
   <details class="card mpFold" id="puAdm" open>
     <summary><b>Usuarios</b> <span class="small muted" id="puAdmSum"></span></summary>
-    <p class="small" style="margin:8px 0 0">Crea un usuario para cada persona o equipo (PC o celular) y marca lo que puede hacer. Le mandas su link: queda amarrado al primer equipo que lo abre (uno a la vez). Si cambia de equipo, toca <b>Nuevo acceso</b>. Los celulares fijos de bodega, producción, retail y distribución ya son usuarios: sus links siguen funcionando.</p>
+    <p class="small" style="margin:8px 0 0">Crea un usuario para cada persona o equipo (PC o celular) y marca lo que puede hacer. Le mandas su link: queda amarrado al primer equipo que lo abre (uno a la vez). Si cambia de equipo, toca <b>Nuevo acceso</b>.</p>
     <div id="puAdmBox"></div>
   </details>
 
@@ -4775,25 +4774,10 @@ grant execute on function public.cb_prov_foto_puede(text, text, uuid), public.cb
 </script>
   </div>
 
-  <div class="card" id="ghCard">
-    <div class="row"><div class="eyebrow">Configuración (una sola vez) <span id="ghOptional" hidden>· opcional si usas envío automático</span></div><span class="sep"></span><span class="pill" id="ghState"></span></div>
-    <h2>Conexión con GitHub</h2>
-    <p>Los conteos se guardan como <b>Gist secreto</b> en tu cuenta de GitHub: no aparece en tu perfil ni en búsquedas, solo lo abre quien tiene el link. Para crearlos, la app necesita una llave (token) de tu cuenta.</p>
-    <details id="ghHelp">
-      <summary>Cómo obtener la llave</summary>
-      <ol class="small" style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
-        <li>Abre <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Conteo%20de%20Bodega" target="_blank" rel="noopener">este enlace de GitHub</a> (ya viene marcado el permiso <b>gist</b>, que es el único necesario).</li>
-        <li>En <b>Vencimiento</b> (Expiration) elige 1 año o "Sin vencimiento".</li>
-        <li>Baja hasta el final y toca <b>Generar token</b>.</li>
-        <li>Copia el código que empieza con <code>ghp_</code> y pégalo aquí abajo.</li>
-      </ol>
-    </details>
-    <div class="row">
-      <label class="f" style="flex:1 1 260px">Llave de GitHub (token)<input id="ghToken" type="password" autocomplete="off" placeholder="ghp_…"></label>
-      <button class="btn" id="btnGhSave" style="margin-top:16px">Guardar y probar</button>
-    </div>
-    <label class="f">Dirección de tu app<input id="appUrl" placeholder="https://usuario.github.io/repositorio/"></label>
-    <p class="small">La llave queda guardada solo en este computador. No la compartas ni la mandes por WhatsApp.</p>
+  <div class="card" id="appUrlCard">
+    <div class="eyebrow">Configuración (una sola vez)</div>
+    <label class="f">Dirección de tu app<input id="appUrl" placeholder="https://control-operaciones-vector.jorge-celpa-1989.workers.dev/"></label>
+    <p class="small muted" style="margin:0">Con esta dirección se arman los links de los usuarios y supervisores.</p>
   </div>
 
   <details class="card mpFold" id="supAdm" open>
@@ -5250,17 +5234,6 @@ function dropZone(zone,input,cb){
 }
 dropZone($("#dropErp"),$("#fileErp"),f=>f[0]&&loadErpFile(f[0]));
 
-/* informe de ejemplo con toda la suciedad típica */
-$("#btnDemo").onclick=()=>{
-  const prods=[["000123","7801234500011","ACEITE VEGETAL 1LT","45","1.250,50"],["000124","7801234500028","ARROZ GRADO 1 1KG","120","890"],["000125","7801234500035","AZUCAR 1KG","98","1.020"],["000126","7801234500042","FIDEOS SPAGHETTI 400G","210","560"],["000127","7801234500059","HARINA SIN POLVOS 1KG","64","720"],["000128","7801234500066","SAL FINA 1KG","33","310"],["000129","7801234500073","TE NEGRO 100 BOLSAS","27","2.150"],["000130","7801234500080","CAFE INSTANTANEO 170G","18","4.390"],["000131","7801234500097","LECHE ENTERA 1LT","144","980"],["000132","7801234500103","DETERGENTE 3KG","12","6.790"],["000133","","BOLSA CAMISETA (SIN CODIGO BARRA)","1.500","12,5"],["000134","7801234500127","PAPEL HIGIENICO 4 ROLLOS","-3","2.390"],["000135","7801234500134","CABLE ELECTRICO 2,5MM ROJO","1.250","390"],["000136","7801234500141","CEMENTO ESPECIAL","3.000","180"],["000137","","MANGUERA JARDIN 1/2","240","650"]];
-  const UMD={"000135":"MT","000136":"KG","000137":"M"};
-  const aoa=[["EMPRESA DEMO LTDA"],["RUT 76.123.456-7"],["INFORME DE EXISTENCIAS VALORIZADO"],["Fecha: 28-10-2026","","","Hora: 09:14"],[],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega","U.M."]];
-  prods.forEach((p,i)=>{aoa.push([...p,"BOD-CENTRAL",UMD[p[0]]||"UN"]);if(i===5){aoa.push([],["Página 1 de 2"],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega","U.M."])}});
-  aoa.push(["000126","7801234500042","FIDEOS SPAGHETTI 400G","15","560","BOD-SALA","UN"]);
-  aoa.push([],["","","TOTAL GENERAL","2.288",""],["Fin del informe"]);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),"Informe");
-  setDraftSheet({file:"Ejemplo_informe_ERP.xlsx",wb},"Informe");
-};
 
 /* ================= CONTAR ================= */
 const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||window.webkitAudioContext)();const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.frequency.value=ok?1600:320;o.type=ok?"sine":"square";g.gain.value=.08;o.connect(g);g.connect(this.ctx.destination);o.start();o.stop(this.ctx.currentTime+(ok?.08:.28))}catch(e){}
@@ -5791,35 +5764,13 @@ function renderRot(){const r=rotParse();
 $("#rotCodes").oninput=renderRot;
 
 /* ================= PANEL: crear conteo y compartir link ================= */
-const GH="https://api.github.com", RAW="https://gist.githubusercontent.com/";
 const DEFAULT_APP="https://control-operaciones-vector.jorge-celpa-1989.workers.dev/";   // sitio oficial (Cloudflare); GitHub es solo respaldo del código
-let gh=store.get("inv_gh",{token:"",login:""});
 let conteos=store.get("inv_conteos",[]);
 const appUrl=()=>{let u=norm(cfg.appUrl||"");
   if(!u){u=(/^https:$/.test(location.protocol)&&!/claude\.ai|claudeusercontent/.test(location.hostname))?location.origin+location.pathname.replace(/index\.html$/,""):DEFAULT_APP}
   if(!/\/$/.test(u)&&!/\.html$/.test(u))u+="/"; return u};
-function renderGh(){
-  $("#appUrl").value=appUrl();
-  $("#ghToken").value="";$("#ghToken").placeholder=gh.token?"Guardada ("+gh.token.slice(0,7)+"…). Pega otra para cambiarla":"ghp_…";
-  const st=$("#ghState");
-  st.className="pill "+(gh.login?"p-ok":"p-warn");st.textContent=gh.login?"Conectado como "+gh.login:"Sin conectar";
-  $("#ghHelp").open=!gh.login;
-}
-$("#appUrl").onchange=e=>{cfg.appUrl=norm(e.target.value);store.set("inv_cfg",cfg);renderGh()};
-$("#btnGhSave").onclick=async()=>{
-  const t=norm($("#ghToken").value)||gh.token;
-  if(!t)return toast("Pega la llave de GitHub primero");
-  $("#btnGhSave").disabled=true;
-  try{
-    const r=await fetch(GH+"/user",{headers:{Authorization:"Bearer "+t,Accept:"application/vnd.github+json"}});
-    if(r.status===401)throw new Error("La llave no es válida o venció.");
-    if(!r.ok)throw new Error("GitHub respondió "+r.status);
-    const u=await r.json(), scopes=r.headers.get("x-oauth-scopes");
-    if(scopes!=null&&scopes!==""&&!/\bgist\b/.test(scopes))throw new Error("La llave no tiene el permiso gist. Crea otra con el enlace de las instrucciones.");
-    gh={token:t,login:u.login};store.set("inv_gh",gh);renderGh();toast("Conectado como "+u.login);
-  }catch(e){toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":e.message)}
-  finally{$("#btnGhSave").disabled=false}
-};
+function renderAppUrl(){$("#appUrl").value=appUrl()}
+$("#appUrl").onchange=e=>{cfg.appUrl=norm(e.target.value);store.set("inv_cfg",cfg);renderAppUrl()};
 
 function conteoMsg(c){return `Conteo: ${c.nombre}\nAbre este link en el celular para empezar a contar:\n${c.link}`}
 const waHref=c=>waLink(conteoMsg(c));
@@ -5829,7 +5780,7 @@ $("#btnCrear").onclick=async()=>{
   const d=erpBase();
   if(!d||!d.items.length)return toast("Primero carga el inventario del ERP");
   if(d.map.cod==null)return toast("Falta elegir la columna de código");
-  if(!nubeOn()&&!gh.token){show("permisos");$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático o GitHub (una sola vez, más abajo)")}
+  if(!nubeOn()){show("permisos");$("#sbCard").scrollIntoView({behavior:"smooth"});return toast("Falta configurar el envío automático con Supabase (una sola vez, en Permisos)")}
   const nombre=norm($("#cNombre").value)||("Conteo "+new Date().toLocaleDateString("es-CL"));
   const vv=$("#cVence").value, ahora=new Date();
   const vence=venceDesde(vv,ahora);
@@ -5849,48 +5800,20 @@ $("#btnCrear").onclick=async()=>{
     cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
     showCreated(c);renderConteos();refreshNube(true);$("#crearMsg").textContent="";return;
    }
-    const r=await fetch(GH+"/gists",{method:"POST",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json","Content-Type":"application/json"},
-      body:JSON.stringify({description:"Conteo de Bodega · "+nombre,public:false,files:{"conteo.json":{content:JSON.stringify(m)}}})});
-    if(r.status===401)throw new Error("La llave de GitHub no es válida o venció. Pega una nueva abajo.");
-    if(!r.ok)throw new Error("GitHub respondió "+r.status+". Intenta de nuevo.");
-    const g=await r.json(), raw=g.files["conteo.json"].raw_url;
-    const mm=raw.match(/^https:\/\/gist\.githubusercontent\.com\/([\w-]+)\/([0-9a-f]+)\/raw\/([0-9a-f]+)\/conteo\.json$/);
-    if(!mm)throw new Error("Respuesta inesperada de GitHub");
-    const c={id:g.id,codes:its.map(i=>i.cod),nombre,vence,creado:m.creado,productos:m.productos,conv:its.filter(conv).length,sg:sel?[...sel].join(", "):"",link:appUrl()+"?c="+mm[1]+"/"+mm[2]+"/"+mm[3]};
-    conteos.unshift(c);store.set("inv_conteos",conteos);
-    // en el PC queda cargado el stock completo para cruzar después
-    erp={file:d.file,at:m.creado,items:d.items,merged:d.merged,conteoPC:nombre};store.set("inv_erp",erp);buildIndex();
-    cfg.sup=true;store.set("inv_cfg",cfg);applyMode();updStatus();
-    showCreated(c);renderConteos();$("#crearMsg").textContent="";
-  }catch(e){$("#crearMsg").textContent="";toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":(nubeOn()?sbMsg(e):e.message))}
+  }catch(e){$("#crearMsg").textContent="";toast(sbMsg(e))}
   finally{$("#btnCrear").disabled=false}
 };
-async function closeLink(c){
-  if(!gh.token)return toast("Falta conectar GitHub");
-  try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});
-    if(!r.ok&&r.status!==404)throw new Error(r.status);
-    c.cerrado=new Date().toISOString();store.set("inv_conteos",conteos);renderConteos();
-    if($("#crearRes").dataset.id===c.id)showCreated(c);
-    toast("Link cerrado: ya no abre en ningún celular nuevo");
-  }catch(e){toast(e.message==="Failed to fetch"?"Sin conexión con GitHub. Revisa internet.":"No se pudo cerrar el link ("+e.message+"). Intenta de nuevo.")}
-}
 function showCreated(c){
   const box=$("#crearRes");box.dataset.id=c.id;
   if(c.cerrado){box.innerHTML=`<div class="pending" style="gap:6px"><div class="d">Link cerrado: ${esc(c.nombre)}</div><div class="small muted">Cerrado el ${fmtDT(c.cerrado)}. El celular que ya lo abrió sigue contando; nadie más puede abrirlo.</div></div>`;return}
   if(c.nube){box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
     <div class="small muted">${fmt(c.productos)} productos${c.conv?` (${fmt(c.conv)} con equivalencia)`:""} · <b>vence ${fmtDT(c.vence)}</b></div>
     ${c.puesto?`<div>📱 <b>Enviado a ${esc(uNombre(c.puesto))}</b>: ya le aparece en su app, con aviso. No tienes que hacer nada más.</div></div>`:`<div class="small" style="color:var(--bad)">No quedó asignado a nadie: asígnalo en 2 · Permisos → Liberar o bloquear accesos → Conteos en curso.</div></div>`}`;return}
-  box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo creado: ${esc(c.nombre)}</div>
-    <div class="small muted">${fmt(c.productos)} productos · <b>vence ${fmtDT(c.vence)}</b> · Manda este link al contador:</div>
-    <input id="linkOut" readonly value="${esc(c.link)}" style="font:13px var(--mono)">
-    <div class="row"><a class="btn accent" href="${esc(waHref(c))}" target="_blank" rel="noopener">Enviar por WhatsApp</a><button class="btn" id="btnCopyLink">Copiar link</button><button class="btn danger" id="btnCloseLink">Cerrar link</button></div></div>`;
-  $("#btnCopyLink").onclick=()=>copyText(c.link,$("#linkOut"));$("#btnCloseLink").onclick=()=>closeLink(c);$("#linkOut").onclick=e=>e.target.select();
+  box.innerHTML=`<div class="pending" style="gap:8px"><div class="d">Conteo antiguo: ${esc(c.nombre)}</div><div class="small muted">Fue creado con la versión anterior (link de GitHub), que ya no se usa.</div></div>`;return;
 }
 function irPermisos(box){if(box)box.querySelectorAll("[data-irperm]").forEach(b=>b.onclick=()=>{show("permisos");setTimeout(()=>{const c=$("#lbCard");if(c)c.scrollIntoView({behavior:"smooth",block:"start"})},150)})}
 const isVenc=v=>!!v&&Date.now()>Date.parse(v);
-let autoClosing=false;
-async function autoCloseExpired(){if(autoClosing||!gh.token)return;autoClosing=true;try{for(const c of conteos.filter(c=>!c.nube&&!c.cerrado&&isVenc(c.vence))){try{const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"}});if(r.ok||r.status===404){c.cerrado=new Date().toISOString();c.auto=true}}catch(e){}}store.set("inv_conteos",conteos)}finally{autoClosing=false;renderConteosOnly()}}
-function renderConteos(){renderConteosOnly();autoCloseExpired()}
+function renderConteos(){renderConteosOnly()}
 function edConteos(){return conteos.filter(c=>c.nube&&!c.arch&&!esReconteo(c)&&!cFin(c))}
 function edParse(c){
   const raw=$("#edCodes").value.split(/[\s,;]+/).map(codeStr).filter(Boolean);if(!raw.length)return null;
@@ -5912,35 +5835,9 @@ function cPuSync(){const w=$("#cPuWrap");if(!w)return;w.hidden=!nubeOn();if(w.hi
   const s=$("#cPuesto"),v=s.value;s.innerHTML=uOpts("conteo",v,"— Elige a quién —");
   const rs=$("#rePuesto");if(rs){const rv=rs.value;rs.innerHTML=uOpts("conteo",rv,"— Elige a quién —")}
   $("#cPuHint").innerHTML=n?"Le llega a su app en unos segundos, con aviso.":'<span style="color:var(--bad)">Ningún usuario tiene permiso de conteo: créalo o dale el permiso en 2 · Permisos.</span>'}
-function renderConteosOnly(){
-  if(!$("#conteosTbl")){
-    cPuSync();edRender();
-    if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();return}
-  const hasN=conteos.some(c=>c.nube);
-  $("#conteosTbl").innerHTML=`<thead><tr><th>Conteo</th><th>Creado</th><th>Vence</th><th class="num">Productos</th><th>Estado</th>${hasN?"<th>Avance</th>":""}<th></th></tr></thead><tbody>`+
-   (conteos.length?conteos.map((c,i)=>{
-     if(c.nube){const x=nubeLive.get(c.id);const [st,av]=nubeEstado(c,x);if(x&&(x.finalizado||x.terminado))c.fin=true;
-       return `<tr><td>${esc(c.nombre)}${c.sg||c.rot?`<div class="small muted">${c.rot?"Rotativo":esc(c.sg)}</div>`:""}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td><td>${st}</td><td class="small" style="white-space:normal;min-width:180px">${av}</td>
-       <td style="min-width:220px"><div class="row" style="gap:6px;flex-wrap:wrap">${x&&(!x.abierto||x.libre)&&!x.finalizado&&c.link?`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button>`:""}${x&&x.n_lecturas?`<button class="btn sm primary" data-tr="${i}">Traer lecturas</button>`:""}${x&&x.asignable&&!x.finalizado&&!x.terminado&&usersCon("conteo").length?`<select class="selSm" data-pa="${i}" title="Usuario que lo ve en su menú">${uOpts("conteo",x.puesto,"📱 Asignar a…")}</select>`:""}${x&&x.abierto&&x.libre===false&&!x.finalizado?`<button class="btn sm" data-lb="${i}" title="Si el celular del contador quedó bloqueado o cambió de teléfono">🔓 Liberar celular</button>`:""}${x&&!x.finalizado&&!x.terminado?`<button class="btn sm danger" data-fz="${i}">Finalizar</button>`:""}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}
-     return `<tr><td>${esc(c.nombre)}</td><td>${fmtDT(c.creado)}</td><td>${c.vence?fmtDT(c.vence):"—"}</td><td class="num">${fmt(c.productos)}</td>
-    <td>${c.cerrado?'<span class="pill p-mut">Cerrado</span>':(isVenc(c.vence)?'<span class="pill p-warn">Vencido</span>':'<span class="pill p-ok">Abierto</span>')}</td>${hasN?'<td class="small muted">Sin envío automático</td>':""}
-    <td><div class="row" style="gap:6px;flex-wrap:nowrap">${c.cerrado?"":`<a class="btn sm" href="${esc(waHref(c))}" target="_blank" rel="noopener">WhatsApp</a><button class="btn sm" data-cp="${i}">Copiar link</button><button class="btn sm danger" data-cl="${i}">Cerrar link</button>`}<button class="btn sm" data-rm="${i}">Quitar</button></div></td></tr>`}).join("")
-   :`<tr><td colspan="7" class="muted">Todavía no creas conteos.</td></tr>`)+"</tbody>"+
-   (hasN&&nubeAt?`<caption class="small muted" style="caption-side:bottom;text-align:left;padding:6px">Actualizado ${nubeAt.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · se refresca cada 20 s</caption>`:"");
-  $$("#conteosTbl [data-cp]").forEach(b=>b.onclick=()=>copyText(conteos[+b.dataset.cp].link));
-  $$("#conteosTbl [data-cl]").forEach(b=>b.onclick=()=>closeLink(conteos[+b.dataset.cl]));
-  $$("#conteosTbl [data-tr]").forEach(b=>b.onclick=async()=>{try{const c=conteos[+b.dataset.tr];await traerLecturas(c);rSel=c.reconteoDe||c.id;store.set("inv_rsel",rSel);show("resultado")}catch(e){toast(sbMsg(e))}});
-  $$("#conteosTbl select[data-pa]").forEach(s=>s.onchange=async()=>{const c=conteos[+s.dataset.pa],pu=s.value;
-    try{await rpc(SB,"cb_conteo_asignar",{p_clave:SB.admin,p_id:c.id,p_puesto:pu});toast(pu?"Conteo asignado a "+uNombre(pu):"Conteo quitado del usuario");refreshNube(true)}catch(e){toast(sbMsg(e));refreshNube(true)}});
+function renderConteosOnly(){   // la antigua tabla de conteos (#conteosTbl) ya no existe: los conteos se ven en Permisos
   cPuSync();edRender();
-  $$("#conteosTbl [data-lb]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.lb],x=nubeLive.get(c.id)||{};
-    confirmBox(`Liberar el celular de "${esc(c.nombre)}"${x.contador?" ("+esc(x.contador)+")":""}: ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas ya recibidas.`,async()=>{try{await rpc(SB,"cb_liberar",{p_clave:SB.admin,p_id:c.id});await refreshNube(true);toast("Celular liberado: reenvía el mismo link al contador")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
-  $$("#conteosTbl [data-fz]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.fz];
-    confirmBox(`Finalizar "${esc(c.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,async()=>{try{await rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:c.id});await refreshNube();toast("Conteo finalizado")}catch(e){toast(sbMsg(e))}},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
-  $$("#conteosTbl [data-rm]").forEach(b=>b.onclick=()=>{const c=conteos[+b.dataset.rm];
-    confirmBox(c.nube?`Quitar "${esc(c.nombre)}" de esta lista (en Supabase queda guardado).`:`Quitar "${esc(c.nombre)}" de la lista${c.cerrado?"":" y cerrar su link"}.`,async()=>{
-      if(!c.nube&&!c.cerrado){try{if(gh.token){const r=await fetch(GH+"/gists/"+c.id,{method:"DELETE",headers:{Authorization:"Bearer "+gh.token}});if(!r.ok&&r.status!==404)throw new Error()}}catch(e){toast("No se pudo cerrar en GitHub; se quitó solo de la lista")}}
-      conteos=conteos.filter(x=>x!==c);store.set("inv_conteos",conteos);renderConteos();},"#ctConfirm");$("#ctConfirm").scrollIntoView({block:"center",behavior:"smooth"})});
+  if(typeof lbRender==="function"&&$("#v-permisos")&&!$("#v-permisos").hidden)lbRender();
 }
 
 /* ================= NUBE (Supabase): los conteos llegan solos ================= */
@@ -5982,8 +5879,6 @@ function renderSB(){
   $("#sbAdmin").value=SB.admin;
   const st=$("#sbState");st.className="pill "+(nubeOn()?"p-ok":"p-warn");st.textContent=nubeOn()?"Conectado":"Sin conectar";
   $("#sbHelp").open=!nubeOn();
-  $("#ghCard").classList.toggle("dim",nubeOn());
-  $("#ghOptional").hidden=!nubeOn();
 }
 $("#btnSbSave").onclick=async()=>{
   const url=sbUrl($("#sbUrl").value), key=norm($("#sbKey").value), admin=norm($("#sbAdmin").value);
@@ -6179,32 +6074,11 @@ addEventListener("offline",renderSync);
 setInterval(()=>{if(nubeConf()&&cfg.dirty&&!syncing)syncNow()},30000);
 
 /* ================= CELULAR: abrir conteo desde el link ================= */
-function checkConteoLink(){
+function checkConteoLink(){   // links antiguos de GitHub (?c=): ya no se usan
   let c=null;try{c=new URLSearchParams(location.search).get("c")}catch(e){}
   if(!c)return false;
   try{history.replaceState(null,"",location.pathname+"#contar")}catch(e){}
-  if(!/^[\w-]+\/[0-9a-f]{20,}\/[0-9a-f]{20,}$/.test(c)){toast("El link del conteo está incompleto. Pide que te lo reenvíen.");lockScreen("El link del conteo está incompleto. Pide que te lo reenvíen.","No se puede abrir este link","⚠️");return true}
-  const [u,id,sha]=c.split("/");
-  if(cfg.conteoId===id&&erp&&erp.conteo){toast("Conteo "+erp.conteo.nombre);return true}
-  $("#conteoBanner").innerHTML=`<div class="notice">Descargando el conteo…</div>`;
-  fetch(RAW+u+"/"+id+"/raw/"+sha+"/conteo.json").then(r=>{if(!r.ok)throw new Error(r.status===404?"gone":"net");return r.json()}).then(m=>{
-    if(!m||m.app!=="conteo-bodega"||!Array.isArray(m.items))throw new Error("bad");
-    if(isVenc(m.vence)){$("#conteoBanner").innerHTML=`<div class="confirm"><span>Este link venció (${fmtDT(m.vence)}). Pide uno nuevo al supervisor.</span></div>`;lockFromBanner();return}
-    if(cfg.conteoId===id&&erp&&erp.conteo){$("#conteoBanner").innerHTML="";toast("Conteo "+m.nombre+" ya estaba abierto");return}
-    if(scans.length){
-      $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch">
-        <b>Llegó un conteo nuevo: ${esc(m.nombre)}</b>
-        <span class="small">Este celular tiene ${fmt(scans.length)} lecturas de un conteo anterior${erp&&erp.conteo?" ("+esc(erp.conteo.nombre)+")":""}. Expórtalas antes de empezar, o se borrarán.</span>
-        <div class="row"><button class="btn primary" id="cbExp">Exportar lecturas anteriores</button><button class="btn danger" id="cbNew">Empezar conteo nuevo</button></div></div>`;
-      $("#cbExp").onclick=()=>$("#btnExpScans").click();
-      $("#cbNew").onclick=()=>{scans=[];saveScans();applyConteo(m,id)};
-      return;
-    }
-    applyConteo(m,id);
-  }).catch(e=>{
-    $("#conteoBanner").innerHTML=`<div class="confirm"><span>${e.message==="gone"?"Este link ya fue cerrado por el supervisor. Si eres el contador asignado, pídele uno nuevo.":"No se pudo descargar el conteo. Revisa la señal y vuelve a abrir el link."}</span></div>`;lockFromBanner();
-  });
-  return true;
+  lockScreen("Este link es de una versión antigua de la app. Pide al supervisor que te asigne el conteo: te llega directo a tu app.","Link antiguo","⚠️");return true;
 }
 /* lista de productos del conteo en el celular */
 let clFilter="pend";
@@ -6256,9 +6130,9 @@ function applyConteo(m,id,sb){
 }
 
 if(/^#panel$/i.test(location.hash||"")){cfg.sup=true;store.set("inv_cfg",cfg)}
-const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup&&!(typeof gh!=="undefined"&&gh.login);
+const isOp=()=>!!(erp&&erp.maestro)&&!cfg.sup;
 /* Un celular que no es del supervisor nunca ve el panel: solo su conteo o un mensaje. */
-function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(typeof gh!=="undefined"&&gh.login)||(erp&&!erp.maestro))}
+function isSupDevice(){return !!(cfg.sup||(typeof nubeOn==="function"&&nubeOn())||(erp&&!erp.maestro))}
 function lockScreen(msg,title,icon,force){
   if(!force&&(isOp()||isSupDevice()||(typeof movOn==="function"&&movOn())||(typeof prodMode==="function"&&prodMode())||(typeof puestoMode==="function"&&puestoMode())))return false;
   if(typeof stopCam==="function")stopCam();
@@ -6355,7 +6229,7 @@ const pvViews=()=>supOn()?SUP_VISTAS.filter(x=>pvCan(x[1])).map(x=>x[0]):prodMod
 const mpLim=()=>prodMode()||(supOn()&&!pvCan("mp_operar"));       // solo solicita: no activa, asigna ni cierra
 const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la lista de productos de la nube, no un ERP cargado aquí
 /* Lo que se oculta cuando falta cada permiso (el servidor lo rechaza igual). */
-const SUP_SIEMPRE="#sbCard,#ghCard,#supAdm,#mpAcc";
+const SUP_SIEMPRE="#sbCard,#appUrlCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
   pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
@@ -7911,7 +7785,7 @@ function devRender(){
   $("#dvTbl").innerHTML=`<thead><tr><th>Fecha</th><th>Origen</th><th>Guía</th><th>Factura</th><th>Devuelve</th><th>Recibe</th><th class="num">Líneas</th><th>Estado</th><th>Cuadre</th></tr></thead><tbody>`+
     (L.length?L.map(d=>{const s=devSt(d),[t,c]=dvEstado(d),cu=s==="rec"||s==="cerr"?devCuadre(d):null,nd=cu?cu.filter(r=>r.st!=="ok").length:0;
       return `<tr data-di="${esc(d.id)}" class="${d.id===devSel?"sel":""}"><td>${fechaCL(d.fecha)}</td><td>${esc(dvOrigen(d))}</td><td class="code">${esc(d.guia||"—")}</td><td class="code">${esc(d.factura||"—")}</td><td>${esc(d.persona||"—")}</td><td>${esc(d.rec_persona||"—")}</td><td class="num">${fmt((d.lect||[]).length)}</td><td><span class="pill ${c}">${t}</span></td><td>${cu?(nd?`<span class="pill p-bad">${fmt(nd)} con diferencia</span>`:'<span class="pill p-ok">Cuadra</span>'):'<span class="muted">—</span>'}</td></tr>`}).join("")
-     :`<tr><td colspan="9" class="muted">${devList.length?"No hay devoluciones con este filtro.":"Todavía no hay devoluciones. Las cargan los celulares fijos de producción, retail y distribución."}</td></tr>`)+"</tbody>";
+     :`<tr><td colspan="9" class="muted">${devList.length?"No hay devoluciones con este filtro.":"Todavía no hay devoluciones. Las cargan desde el celular los usuarios de producción, retail y distribución."}</td></tr>`)+"</tbody>";
   $$("#dvTbl [data-di]").forEach(tr=>tr.onclick=()=>{devSel=tr.dataset.di;store.set("inv_devsel",devSel);devRender();$("#dvDet").scrollIntoView({behavior:"smooth",block:"start"})});
   devDetRender();
 }
@@ -9126,7 +9000,7 @@ async function ucOpenCam(t){
 async function ucStopCam(){if(ucCamI){await detenerLector(ucCamI);ucCamI=null}ucHold=false;const w=$("#ucCamWrap");if(w)w.hidden=true}
 $$("#v-ubiccel [data-ucam]").forEach(b=>b.onclick=()=>ucOpenCam(b.dataset.ucam));$("#ucCamStop").onclick=ucStopCam;
 
-updStatus();renderSess();applyMode();renderGh();renderConteos();checkExpiry();renderFact();renderConteoBox();
+updStatus();renderSess();applyMode();renderAppUrl();renderConteos();checkExpiry();renderFact();renderConteoBox();
 renderSB();renderSync();
 {let lk=false;try{const q=new URLSearchParams(location.search);lk=!!(q.get("nube")||q.get("c")||q.get("mov"))}catch(e){}
  if(!isOp()&&!isSupDevice()&&!prodMode()&&!puestoMode())lockScreen(lk?"Abriendo el conteo…":"",lk?"Un momento":"",lk?"⏳":"");}

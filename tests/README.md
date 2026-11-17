@@ -21,7 +21,6 @@ de prueba. Así una prueba no depende de lo que dejó otra.
 | Carpeta | Contenido |
 |---|---|
 | `e2e/` | Pruebas vigentes. Deben pasar todas antes de publicar una versión. |
-| `obsoletas/` | Pruebas de flujos que ya no existen (celulares fijos, links de conteo). Quedan como referencia para reescribirlas. |
 | `sql/post.sql` | Función auxiliar `rpc_test`, que imita las llamadas de la app a Supabase. Solo existe en la base local. |
 | `sql/supervisores.sql` | Copia de la actualización 17 (supervisores de área), tal como va dentro de `index.html`. |
 

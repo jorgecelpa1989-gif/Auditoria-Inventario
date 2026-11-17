@@ -8,7 +8,7 @@ async function ctx(b,dev){const c=await b.newContext(dev||{...devices['iPhone 13
 (async()=>{const b=await chromium.launch();rpc('cb_configurar',{p_clave:ADMIN});const UCONT=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMIN,p_id:'',p_nombre:'Contador T',p_area:'Bodega',p_permisos:['conteo'],p_activo:true}).body);
  const [cS,pS]=await ctx(b,{viewport:{width:1366,height:900},deviceScaleFactor:2});await pS.goto(B+'#panel');
  await pS.evaluate(([u,a])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
- await pS.goto(B+'#erp');await pS.reload();await pS.waitForTimeout(1200);await pS.click('#btnDemo');await pS.waitForTimeout(800);
+ await pS.goto(B+'#erp');await pS.reload();await pS.waitForTimeout(1200);await pS.setInputFiles('#fileErp',__dirname+'/../datos/Ejemplo_informe_ERP.xlsx');await pS.waitForTimeout(800);
  await pS.click('#sideNav [data-v="resultado"]');await pS.waitForTimeout(1500);
  const codes=await pS.evaluate(()=>factItems().slice(0,4).map(i=>String(i.cod)));
  await pS.evaluate(c=>{const t=document.querySelector('#rotCodes');t.value=c.join('\n');t.dispatchEvent(new Event('input',{bubbles:true}))},codes.slice(0,2));

@@ -13,7 +13,7 @@ const PC={viewport:{width:1366,height:900},deviceScaleFactor:2};
  const [cS,pS]=await ctx(b,PC);await pS.goto(B+'#panel');
  await pS.evaluate(([u,a,id])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}));localStorage.setItem('inv_conteos',JSON.stringify([{id,nube:true,nombre:'Conteo sacos',creado:new Date().toISOString(),productos:2,link:'x'}]));localStorage.setItem('inv_rsel',JSON.stringify(id))},[SBU,ADMIN,cr.id]);
  await pS.goto(B+'#erp');await pS.reload();await pS.waitForTimeout(1200);
- await pS.click('#btnDemo');await pS.waitForTimeout(800);
+ await pS.setInputFiles('#fileErp',__dirname+'/../datos/Ejemplo_informe_ERP.xlsx');await pS.waitForTimeout(800);
  check(!(await pS.$('#v-erp #maestroCard')),'Panel: ya no tiene el cuadro "Paso 3 · Crear conteo"');
  await pS.click('#sideNav [data-v="resultado"]');await pS.waitForTimeout(2500);
  const ord=await pS.evaluate(()=>[...document.querySelectorAll('#v-resultado .resMain > .card')].filter(e=>!e.hidden).map(e=>e.id||(e.querySelector('#kpis')?'kpis':(e.querySelector('#det')?'detalle':'?'))).join(' > '));
