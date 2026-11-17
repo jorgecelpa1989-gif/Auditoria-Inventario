@@ -8256,7 +8256,8 @@ function pcFotosRender(){
   const card=$("#pcFotosCard");if(!card||!pc)return;const mias=fotoQ.filter(x=>x.id===pc.id),n=(pc.fotosN||0)+mias.length,lleno=n>=FOTO_MAX;
   $("#pcFotosInfo").textContent=`${fmt(pc.fotosN||0)} subida${(pc.fotosN||0)===1?"":"s"}${mias.length?` · ${fmt(mias.length)} por subir`:""} · máx. ${FOTO_MAX}`;
   $("#pcFotoBtn").classList.toggle("disabled",lleno);$("#pcFoto").disabled=lleno;
-  $("#pcFotosList").innerHTML=mias.map(x=>`<div class="ft"><img src="${x.jpg}" alt=""><span>${x.err?"⚠ "+esc(x.err):"⏳ por subir"}</span></div>`).join("");
+  $("#pcFotosList").innerHTML=mias.map(x=>`<div class="ft"${x.err?` data-fdel="${esc(x.k)}" role="button" title="Tocar para quitar"`:""}><img src="${x.jpg}" alt=""><span>${x.err?"⚠ "+esc(x.err)+" · tocar para quitar":"⏳ por subir"}</span></div>`).join("");
+  $$("#pcFotosList [data-fdel]").forEach(el=>el.onclick=async()=>{await fotoDB.del(el.dataset.fdel).catch(()=>{});await fotoCargarQ();pcFotosRender();toast("Foto quitada")});
 }
 async function fotoSubir(){
   if(fotoSub||navigator.onLine===false||!puestoMode())return;fotoSub=true;
