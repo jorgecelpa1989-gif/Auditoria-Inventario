@@ -15,7 +15,7 @@ async function ctx(b,dev){const c=await b.newContext(dev||{...devices['iPhone 13
  // PC supervisor
  const [cS,pS]=await ctx(b,{viewport:{width:1366,height:900},deviceScaleFactor:2});await pS.goto(B+'#panel');
  await pS.evaluate(([u,a])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
- await pS.goto(B+'#erp');await pS.reload();await pS.waitForTimeout(1200);await pS.click('#btnDemo');await pS.waitForTimeout(800);
+ await pS.goto(B+'#erp');await pS.reload();await pS.waitForTimeout(1200);await pS.setInputFiles('#fileErp',__dirname+'/../datos/Ejemplo_informe_ERP.xlsx');await pS.waitForTimeout(800);
  await pS.click('#sideNav [data-v="resultado"]');await pS.waitForTimeout(2500);
  check(!(await pS.$('#maestroCard h2'))&&!/No lleva stock ni costos/.test(await pS.textContent('#maestroCard')),'Crear conteo: se quitó el título y el texto explicativo');
  check(await pS.isVisible('#cPuWrap'),'Crear conteo: aparece "Asignar conteo a" (abriendo Inventario directo)');

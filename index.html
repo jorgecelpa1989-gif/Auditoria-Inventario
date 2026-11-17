@@ -326,7 +326,6 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
     <p>Excel (.xlsx / .xls), CSV o TXT. La app busca la fila de encabezados, quita títulos, encabezados repetidos por página, filas de totales y filas vacías, arregla números con punto de miles y coma decimal, y junta códigos repetidos.</p>
     <div class="drop" id="dropErp" tabindex="0"><b>Arrastra el archivo aquí o toca para elegirlo</b><span class="small">Nada sale de tu equipo: todo se procesa aquí mismo.</span></div>
     <input type="file" id="fileErp" accept=".xlsx,.xls,.xlsm,.csv,.txt,.ods" hidden>
-    <div class="row"><button class="btn sm" id="btnDemo">Probar con un informe de ejemplo</button></div>
   </div>
 
   <div class="card" id="erpMapCard" hidden>
@@ -5235,17 +5234,6 @@ function dropZone(zone,input,cb){
 }
 dropZone($("#dropErp"),$("#fileErp"),f=>f[0]&&loadErpFile(f[0]));
 
-/* informe de ejemplo con toda la suciedad típica */
-$("#btnDemo").onclick=()=>{
-  const prods=[["000123","7801234500011","ACEITE VEGETAL 1LT","45","1.250,50"],["000124","7801234500028","ARROZ GRADO 1 1KG","120","890"],["000125","7801234500035","AZUCAR 1KG","98","1.020"],["000126","7801234500042","FIDEOS SPAGHETTI 400G","210","560"],["000127","7801234500059","HARINA SIN POLVOS 1KG","64","720"],["000128","7801234500066","SAL FINA 1KG","33","310"],["000129","7801234500073","TE NEGRO 100 BOLSAS","27","2.150"],["000130","7801234500080","CAFE INSTANTANEO 170G","18","4.390"],["000131","7801234500097","LECHE ENTERA 1LT","144","980"],["000132","7801234500103","DETERGENTE 3KG","12","6.790"],["000133","","BOLSA CAMISETA (SIN CODIGO BARRA)","1.500","12,5"],["000134","7801234500127","PAPEL HIGIENICO 4 ROLLOS","-3","2.390"],["000135","7801234500134","CABLE ELECTRICO 2,5MM ROJO","1.250","390"],["000136","7801234500141","CEMENTO ESPECIAL","3.000","180"],["000137","","MANGUERA JARDIN 1/2","240","650"]];
-  const UMD={"000135":"MT","000136":"KG","000137":"M"};
-  const aoa=[["EMPRESA DEMO LTDA"],["RUT 76.123.456-7"],["INFORME DE EXISTENCIAS VALORIZADO"],["Fecha: 28-10-2026","","","Hora: 09:14"],[],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega","U.M."]];
-  prods.forEach((p,i)=>{aoa.push([...p,"BOD-CENTRAL",UMD[p[0]]||"UN"]);if(i===5){aoa.push([],["Página 1 de 2"],["Código","Cód. Barra","Descripción","Saldo","Costo Unit.","Bodega","U.M."])}});
-  aoa.push(["000126","7801234500042","FIDEOS SPAGHETTI 400G","15","560","BOD-SALA","UN"]);
-  aoa.push([],["","","TOTAL GENERAL","2.288",""],["Fin del informe"]);
-  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),"Informe");
-  setDraftSheet({file:"Ejemplo_informe_ERP.xlsx",wb},"Informe");
-};
 
 /* ================= CONTAR ================= */
 const audio={ctx:null,beep(ok){try{this.ctx=this.ctx||new (window.AudioContext||window.webkitAudioContext)();const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.frequency.value=ok?1600:320;o.type=ok?"sine":"square";g.gain.value=.08;o.connect(g);g.connect(this.ctx.destination);o.start();o.stop(this.ctx.currentTime+(ok?.08:.28))}catch(e){}
