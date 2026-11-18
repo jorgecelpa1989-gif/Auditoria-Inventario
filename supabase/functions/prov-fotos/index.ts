@@ -1,6 +1,7 @@
 // Fotos de la recepción de proveedores.
 //  · accion "subir" (celular de bodega): valida la sesión del usuario con cb_prov_foto_puede, sube la foto
-//    al bucket privado "prov-fotos" y la anota en cb_prov.fotos (cb_prov_foto_agregar).
+//    al bucket privado "prov-fotos" y la anota en cb_prov.fotos (cb_prov_foto_agregar). tipo "cal" = foto de Control de
+//    calidad (permiso prov_calidad, con el código revisado).
 //  · accion "ver" (panel): valida la clave del supervisor (cb_prov_fotos, permiso prov_ver) y devuelve
 //    enlaces temporales (1 hora) a cada foto.
 // Se despliega con verify_jwt = false porque la app usa la clave publicable; la validación la hacen las
@@ -29,7 +30,9 @@ Deno.serve(async (req: Request) => {
   if (!UUID.test(String(b.id || ""))) return json({ error: "datos_invalidos" }, 400);
 
   if (b.accion === "subir") {
-    const ok = await sb.rpc("cb_prov_foto_puede", { p_puesto: b.puesto, p_ses: b.ses, p_id: b.id });
+    const tipo = b.tipo === "cal" ? "cal" : "rec";   // 'rec' = recepción (bodega) · 'cal' = control de calidad (con su código)
+    const cod = typeof b.cod === "string" && b.cod.trim() ? b.cod.trim().slice(0, 40) : null;
+    const ok = await sb.rpc("cb_prov_foto_puede", { p_puesto: b.puesto, p_ses: b.ses, p_id: b.id, p_tipo: tipo });
     if (ok.error) return err(ok.error);
     let bytes: Uint8Array;
     try { bytes = Uint8Array.from(atob(String(b.jpg || "")), (c) => c.charCodeAt(0)); } catch { return json({ error: "datos_invalidos" }, 400); }
@@ -37,7 +40,7 @@ Deno.serve(async (req: Request) => {
     const path = `${b.id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`;
     const up = await sb.storage.from("prov-fotos").upload(path, bytes, { contentType: "image/jpeg", upsert: false });
     if (up.error) return err(up.error);
-    const add = await sb.rpc("cb_prov_foto_agregar", { p_puesto: b.puesto, p_ses: b.ses, p_id: b.id, p_path: path, p_persona: b.persona || "" });
+    const add = await sb.rpc("cb_prov_foto_agregar", { p_puesto: b.puesto, p_ses: b.ses, p_id: b.id, p_path: path, p_persona: b.persona || "", p_tipo: tipo, p_cod: cod });
     if (add.error) { await sb.storage.from("prov-fotos").remove([path]); return err(add.error); }
     return json({ path, n: add.data?.n });
   }

@@ -242,6 +242,8 @@ nav.tabs{flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;positio
 .fotosGrid .ft{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--chip)}
 .fotosGrid .ft img{width:100%;height:100%;object-fit:cover;display:block}.fotosGrid .ft span{position:absolute;left:0;right:0;bottom:0;font-size:11px;padding:2px 4px;background:rgba(0,0,0,.55);color:#fff}
 .bodBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0}
+.qcCod .eyebrow{margin-top:6px}.qcCod textarea,#qcWork textarea{margin-top:6px}
+.calTbl td{vertical-align:top}
 .anulBox{margin-top:10px;font-size:13px}.anulBox>summary{cursor:pointer;color:var(--muted);font-weight:600}
 .ucTipos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
 .ucTipos .btn{justify-content:center;padding:14px 6px;font-size:15px}
@@ -859,12 +861,21 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
       <div class="fotosGrid" id="pcFotosList"></div>
     </div>
     <div class="card contarCard">
+      <div class="eyebrow">Observaciones de la recepción</div>
+      <textarea id="pcObs" rows="3" maxlength="500" placeholder="Ej: 2 pallets golpeados, cajas húmedas, faltan etiquetas…" style="width:100%"></textarea>
+    </div>
+    <div class="card contarCard">
       <div class="eyebrow">Al terminar de recibir</div>
       <p class="small">Revisa lo recibido y termina la recepción. El supervisor ve el cuadre al instante. Después de terminar ya no se puede modificar desde el celular.</p>
       <button class="btn primary" id="pcFin" style="justify-content:center;font-size:16px;padding:12px">Terminar recepción…</button>
       <div id="pcConfirm"></div>
     </div>
   </div>
+</section>
+<section class="view" id="v-calcel" hidden>
+  <div class="puestoBar"><button class="btn sm" data-menu>← Menú</button><b>Control de calidad</b></div>
+  <div id="qcHome"></div>
+  <div id="qcWork" hidden></div>
 </section>
 <!-- ============ ENTREGA Y RECEPCIÓN DE PT (supervisor y jefe de producción) ============ -->
 <section class="view" id="v-pt" hidden>
@@ -4836,6 +4847,199 @@ begin
   return jsonb_build_object('lid', p_lid, 'qty', p_qty);
 end $$;
 
+-- =====================================================================
+--  RECEPCIÓN DE PROVEEDORES: OBSERVACIONES + CONTROL DE CALIDAD
+--  · obs_rec: observación del operario que recibe (celular). obs_panel: observación del supervisor (panel).
+--  · calidad: inspección por código hecha desde el celular por un usuario con permiso "prov_calidad":
+--    clasificación (conforme / no conforme / conforme con observaciones), acción, muestreo, embalaje,
+--    producto, etiquetado, comentarios y fotos. Queda a nombre del usuario con fecha y hora. Es informativa
+--    (no bloquea el cierre). Los códigos deben ser los de la recepción (recibidos o del packing list).
+--  · Fotos: cada foto lleva tipo ('rec' recepción, máx. 6 · 'cal' calidad, máx. 30) y su código.
+--  Compatible con la app anterior: mismos parámetros (los nuevos tienen valor por defecto).
+-- =====================================================================
+alter table public.cb_prov add column if not exists obs_rec text, add column if not exists obs_panel text,
+  add column if not exists calidad jsonb not null default '{}'::jsonb;
+
+CREATE OR REPLACE FUNCTION public.cb_u_guardar(p_clave text, p_id text, p_nombre text, p_area text, p_permisos jsonb, p_activo boolean DEFAULT true)
+ RETURNS text
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[];
+begin
+  perform cb_puede(p_clave, 'usr_admin');
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('conteo','mp_entregar','mp_recibir','pt_entregar','pt_recibir','pt_retirar','dev_cargar','dev_recibir','prov_recibir','prov_calidad','ubic_mover')) then raise exception 'datos_invalidos'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'mp\_%') > 1 then raise exception 'mp_uno'; end if;
+  if (select count(*) from unnest(v_perm) x where x like 'pt\_%') > 1 then raise exception 'pt_uno'; end if;
+  if v_id is null then
+    v_id := 'u_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_puesto(id, hash, nombre, area, permisos, activo)
+    values (v_id, extensions.crypt(encode(extensions.gen_random_bytes(16), 'hex'), extensions.gen_salt('bf')), left(trim(p_nombre), 80), left(trim(coalesce(p_area,'')), 60), v_perm, coalesce(p_activo, true));
+  else
+    update cb_puesto set nombre = left(trim(p_nombre), 80), area = left(trim(coalesce(p_area,'')), 60), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.cb_prov_recibir(p_puesto text, p_ses text, p_id uuid, p_doc jsonb, p_rec jsonb, p_terminar boolean DEFAULT false)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare p cb_prov; v_fecha date; v_rec jsonb; v_pers text := left(p_doc->>'persona', 80);
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then raise exception 'sin_permiso'; end if;
+  if p_id is null then raise exception 'datos_invalidos'; end if;
+  perform cb_prov_lineas_ok(p_rec);
+  select * into p from cb_prov where id = p_id for update;
+  if not found then
+    insert into cb_prov(id, origen, persona, fecha) values (p_id, p_puesto, v_pers, (now() at time zone 'America/Santiago')::date)
+    returning * into p;
+  end if;
+  if p.finalizado is not null then raise exception 'finalizado'; end if;
+  if p.recibido is not null then raise exception 'ya_recibida'; end if;
+  if p.origen = p_puesto then
+    begin v_fecha := nullif(p_doc->>'fecha','')::date; exception when others then v_fecha := null; end;
+    update cb_prov set tipo = case when p_doc->>'tipo' = 'importacion' then 'importacion' else 'nacional' end,
+           proveedor = left(trim(coalesce(p_doc->>'proveedor','')), 120), guia = left(trim(coalesce(p_doc->>'guia','')), 40),
+           referencia = left(trim(coalesce(p_doc->>'referencia','')), 60), contenedor = left(trim(coalesce(p_doc->>'contenedor','')), 40), fecha = coalesce(v_fecha, fecha), nota = left(p_doc->>'nota', 300)
+     where id = p_id
+    returning * into p;
+  else
+    -- Recepción cargada en el panel: bodega solo completa lo que quedó vacío (no cambia lo que escribió el supervisor).
+    update cb_prov set guia = case when coalesce(guia, '') = '' then left(trim(coalesce(p_doc->>'guia','')), 40) else guia end,
+           referencia = case when coalesce(referencia, '') = '' then left(trim(coalesce(p_doc->>'referencia','')), 60) else referencia end,
+           contenedor = case when coalesce(contenedor, '') = '' then left(trim(coalesce(p_doc->>'contenedor','')), 40) else contenedor end
+     where id = p_id
+    returning * into p;
+  end if;
+  v_rec := cb_rec_mezclar(p.rec, p_rec, p_puesto);
+  if p_terminar then
+    if jsonb_array_length(v_rec) = 0 then raise exception 'sin_productos'; end if;
+    if coalesce(p.guia, '') = '' and coalesce(p.referencia, '') = '' then raise exception 'falta_documento'; end if;
+  end if;
+  update cb_prov set rec = v_rec, rec_persona = v_pers, obs_rec = case when p_doc ? 'obs' then nullif(left(trim(p_doc->>'obs'), 500), '') else obs_rec end, rec_inicio = coalesce(rec_inicio, now()), actualizado = now(),
+         recibido = case when p_terminar then now() else null end
+   where id = p_id;
+  return jsonb_build_object('id', p_id, 'recibido', case when p_terminar then now() end, 'rec', v_rec);
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.cb_prov_mis(p_puesto text, p_ses text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_recibir') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'tipo', p.tipo, 'proveedor', p.proveedor, 'guia', p.guia, 'referencia', p.referencia, 'contenedor', p.contenedor,
+      'fecha', p.fecha, 'nota', p.nota, 'origen', p.origen, 'persona', p.persona, 'esperado', p.esperado, 'rec', p.rec,
+      'rec_persona', p.rec_persona, 'rec_inicio', p.rec_inicio, 'recibido', p.recibido, 'nfotos', (select count(*) from jsonb_array_elements(p.fotos) x where coalesce(x->>'tipo','rec') = 'rec'), 'obs_rec', p.obs_rec) order by p.creado)
+    from cb_prov p where p.anulado is null and p.finalizado is null and (p.recibido is null or p.recibido > now() - interval '18 hours')), '[]'::jsonb);
+end $function$;
+
+create or replace function public.cb_prov_obs(p_clave text, p_id uuid, p_obs text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'prov_operar');
+  update cb_prov set obs_panel = nullif(left(trim(coalesce(p_obs, '')), 1000), ''), actualizado = now() where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+-- Códigos de una recepción: los recibidos (rec y man) y los del packing list
+create or replace function public.cb_prov_codigos(p cb_prov) returns text[]
+language sql immutable set search_path = public as $$
+  select coalesce(array_agg(distinct upper(c)), '{}') from (
+    select coalesce(nullif(e->>'k',''), e->>'code') c from jsonb_array_elements(coalesce(p.rec,'[]')||coalesce(p.man,'[]')||coalesce(p.esperado,'[]')) e) x
+  where coalesce(c,'') <> ''
+$$;
+
+create or replace function public.cb_prov_calidad_mis(p_puesto text, p_ses text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_calidad') then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'tipo', p.tipo, 'proveedor', p.proveedor, 'guia', p.guia, 'referencia', p.referencia,
+      'contenedor', p.contenedor, 'fecha', p.fecha, 'recibido', p.recibido, 'finalizado', p.finalizado, 'esperado', p.esperado, 'rec', p.rec, 'man', p.man,
+      'obs_rec', p.obs_rec, 'obs_panel', p.obs_panel, 'calidad', p.calidad,
+      'fotos', coalesce((select jsonb_agg(jsonb_build_object('cod', x->>'cod', 't', x->>'t')) from jsonb_array_elements(p.fotos) x where x->>'tipo' = 'cal'), '[]'::jsonb)) order by p.creado desc)
+    from cb_prov p where p.anulado is null and p.creado > now() - interval '15 days'
+      and (jsonb_array_length(coalesce(p.rec,'[]')) > 0 or jsonb_array_length(coalesce(p.man,'[]')) > 0 or jsonb_array_length(coalesce(p.esperado,'[]')) > 0)), '[]'::jsonb);
+end $$;
+
+create or replace function public.cb_prov_calidad_guardar(p_puesto text, p_ses text, p_id uuid, p_cal jsonb, p_terminar boolean default false) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; a cb_puesto; v_cods text[]; v_mal text; v_old jsonb; v_new jsonb;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if not cb_u_tiene(p_puesto, 'prov_calidad') then raise exception 'sin_permiso'; end if;
+  if p_cal is null or jsonb_typeof(p_cal) <> 'object' or length(p_cal::text) > 200000 then raise exception 'datos_invalidos'; end if;
+  if p_cal ? 'codigos' and jsonb_typeof(p_cal->'codigos') <> 'object' then raise exception 'datos_invalidos'; end if;
+  select * into p from cb_prov where id = p_id for update;
+  if not found then raise exception 'no_existe'; end if;
+  if p.anulado is not null then raise exception 'anulado'; end if;
+  v_cods := cb_prov_codigos(p);
+  select k into v_mal from jsonb_object_keys(coalesce(p_cal->'codigos','{}'::jsonb)) k where not (upper(k) = any(v_cods)) limit 1;
+  if v_mal is not null then raise exception 'codigo_no_existe'; end if;
+  select * into a from cb_puesto where id = p_puesto;
+  v_old := coalesce(p.calidad, '{}'::jsonb);
+  v_new := jsonb_build_object('general', coalesce(p_cal->'general', '{}'::jsonb), 'codigos', coalesce(p_cal->'codigos', '{}'::jsonb),
+    'resp', jsonb_build_object('puesto', p_puesto, 'nombre', a.nombre, 'persona', left(coalesce(p_cal->>'persona', ''), 80)),
+    'inicio', coalesce(v_old->'inicio', to_jsonb(now())), 't', now(),
+    'estado', case when p_terminar or v_old->>'estado' = 'terminada' then 'terminada' else 'en_curso' end,
+    'fin', case when p_terminar then to_jsonb(now()) else v_old->'fin' end,
+    'hist', coalesce(v_old->'hist', '[]'::jsonb) || case when not p_terminar then '[]'::jsonb when v_old->>'estado' = 'terminada' then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'modificada'))
+                                                       when p_terminar then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'terminada')) else '[]'::jsonb end);
+  update cb_prov set calidad = v_new, actualizado = now() where id = p_id;
+  return jsonb_build_object('id', p_id, 'estado', v_new->>'estado', 't', now());
+end $$;
+
+-- Fotos: tipo 'rec' (recepción, permiso prov_recibir, máx. 6) o 'cal' (calidad, permiso prov_calidad, máx. 30, también con la recepción cerrada)
+drop function if exists public.cb_prov_foto_puede(text, text, uuid);
+create or replace function public.cb_prov_foto_puede(p_puesto text, p_ses text, p_id uuid, p_tipo text default 'rec') returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; v_cal boolean := p_tipo = 'cal'; n int; v_max int := case when p_tipo = 'cal' then 30 else 6 end;
+begin
+  perform cb_puesto_ok(p_puesto, p_ses);
+  if p_tipo not in ('rec','cal') then raise exception 'datos_invalidos'; end if;
+  if not cb_u_tiene(p_puesto, (case when v_cal then 'prov_calidad' else 'prov_recibir' end)) then raise exception 'sin_permiso'; end if;
+  select * into p from cb_prov where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  if p.anulado is not null then raise exception 'anulado'; end if;
+  if p.finalizado is not null and not v_cal then raise exception 'finalizado'; end if;
+  select count(*) into n from jsonb_array_elements(p.fotos) x where coalesce(x->>'tipo','rec') = p_tipo;
+  if n >= v_max then raise exception 'max_fotos'; end if;
+end $$;
+drop function if exists public.cb_prov_foto_agregar(text, text, uuid, text, text);
+create or replace function public.cb_prov_foto_agregar(p_puesto text, p_ses text, p_id uuid, p_path text, p_persona text, p_tipo text default 'rec', p_cod text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare p cb_prov; n int; v_max int := case when p_tipo = 'cal' then 30 else 6 end;
+begin
+  perform cb_prov_foto_puede(p_puesto, p_ses, p_id, p_tipo);
+  if p_path is null or p_path not like p_id::text || '/%' or length(p_path) > 120 then raise exception 'datos_invalidos'; end if;
+  select * into p from cb_prov where id = p_id for update;
+  if p_cod is not null and p_cod <> '' and not (upper(p_cod) = any(cb_prov_codigos(p))) then raise exception 'codigo_no_existe'; end if;
+  select count(*) into n from jsonb_array_elements(p.fotos) x where coalesce(x->>'tipo','rec') = p_tipo;
+  if n >= v_max then raise exception 'max_fotos'; end if;
+  update cb_prov set fotos = fotos || jsonb_build_array(jsonb_build_object('path', p_path, 't', now(), 'persona', left(coalesce(p_persona, ''), 80), 'pu', p_puesto,
+           'tipo', p_tipo, 'cod', nullif(left(coalesce(p_cod, ''), 40), ''))), actualizado = now()
+   where id = p_id;
+  return jsonb_build_object('n', n + 1);
+end $$;
+
+revoke execute on function public.cb_prov_foto_puede(text, text, uuid, text), public.cb_prov_foto_agregar(text, text, uuid, text, text, text, text),
+  public.cb_prov_codigos(cb_prov) from public, anon, authenticated;
+grant execute on function public.cb_prov_foto_puede(text, text, uuid, text), public.cb_prov_foto_agregar(text, text, uuid, text, text, text, text) to service_role;
+grant execute on function public.cb_prov_obs(text, uuid, text), public.cb_prov_calidad_mis(text, text), public.cb_prov_calidad_guardar(text, text, uuid, jsonb, boolean) to anon, authenticated;
+
 </script>
   </div>
 
@@ -4969,6 +5173,8 @@ end $$;
     <div class="small muted" id="pvDetS"></div>
     <div class="kpis" id="pvDetK"></div>
     <div id="pvFotos" style="margin:6px 0"></div>
+    <div id="pvObs" style="margin:6px 0"></div>
+    <div id="pvCal" style="margin:6px 0"></div>
     <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvModTog">✎ Modificar recibido</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Anular…</button></div>
     <div class="cbox" id="pvAdd" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Agregar un registro recibido que faltó</b>
@@ -5937,7 +6143,7 @@ const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"in
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_corregir:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
   cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
-  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
+  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_obs:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
 async function rpc(conf,fn,args){
   if(SUP_FN[fn]&&args&&args.p_clave){let s=false;try{s=supOn()&&args.p_clave===SUPI.ses}catch(e){}
@@ -6317,7 +6523,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 const SUP_SIEMPRE="#sbCard,#appUrlCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpModTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
-  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg]",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
+  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg],#pvObsOk",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
   let st=$("#supStyle");if(!st){st=document.createElement("style");st.id="supStyle";document.head.appendChild(st)}
@@ -7176,7 +7382,7 @@ checkPuestoLink();
 function puestoApply(){
   const b=document.body;b.classList.add("puesto");b.classList.remove("prodv","locked");$("#lockBox").innerHTML="";
   b.classList.toggle("op",puVista==="conteo");b.classList.toggle("mov",puVista==="mp");
-  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel",prov:"provcel",ubic:"ubiccel"}[puVista]||"puesto";
+  const v={conteo:"contar",mp:"opmov",pt:"ptcel",dev:"devcel",prov:"provcel",ubic:"ubiccel",cal:"calcel"}[puVista]||"puesto";
   if($("#v-"+v).hidden){show(v);window.scrollTo(0,0)}   // cada pantalla del celular parte arriba (no queda corrida por el menú)
 }
 function puestoMenu(){puVista="menu";if(typeof stopCam==="function")stopCam();if(typeof omStopCam==="function")omStopCam();ptStopCam();if(typeof dvStopCam==="function")dvStopCam();if(typeof pcStopCam==="function")pcStopCam();puestoApply();renderPuesto();puRefresh()}
@@ -7194,6 +7400,7 @@ async function puRefresh(){
     if(nuevas.length){puVistos=puVistos.concat(nuevas).slice(-200);store.set("inv_puvistos",puVistos);audio.beep(true);setTimeout(()=>audio.beep(true),220);toast("🔴 Tienes una tarea nueva")}
     if(puVista==="menu"){const mpOn=puMpOn&&$("#puMpNew"),ref=mpOn?$("#puMpRef").value:"";renderPuesto();if(mpOn)puMpLista(puTareas.mp,ref)}
     if(puVista==="dev"&&dv==null&&!$("#dvHome").hidden){await puDevRefresh(dvModo).catch(()=>{});dvHomeRender()}
+    if(puVista==="cal"&&can("prov_calidad")&&!$("#qcHome").hidden){await qcRefresh().catch(()=>{});qcHome()}
     if(puVista==="prov"&&can("prov_recibir")){let ok=true;await pcRefresh().catch(()=>{ok=false});
       if(!$("#pcHome").hidden)pcHomeRender();
       else if(pcDescartar(ok)){toast("El supervisor eliminó o cerró esta recepción");pcHomeRender()}}
@@ -7218,6 +7425,7 @@ function renderPuesto(){
   if(can("pt_recibir"))items.push({k:"pt",ic:"🏷️",t:"Recepción de producto terminado (PT)",s:"Siempre disponible: registra cada pallet que llega"});
   if(can("ubic_mover"))items.push({k:"ubic",ic:"📍",t:"Almacenamiento y ubicaciones",s:"Registra ingresos, traslados y salidas de pallets en sus ubicaciones"});
   if(can("prov_recibir"))items.push({k:"prov",ic:"🚚",t:"Recepción de proveedores",s:"Recibe lo que llega de proveedores, con o sin packing list"});
+  if(can("prov_calidad"))items.push({k:"cal",ic:"🔍",t:"Control de calidad",s:"Inspección por código de las recepciones de proveedores"});
   if(can("pt_retirar"))items.push({k:"pt",ic:"🛒",t:"Retiro de PT para despacho",s:"Siempre disponible: registra cada pallet que retiras directo de máquina para despacho"});
   if(can("conteo"))items.push({k:"conteo",ic:"📋",t:"Conteo de inventario",s:nC?`${nC} conteo${nC>1?"s":""} asignado${nC>1?"s":""}`:"Sin conteos asignados",dot:pC});
   if(can("dev_cargar"))items.push({k:"dev",ic:"↩️",t:"Cargar devolución"+(PST.area?" · "+PST.area:""),s:"Devolución a bodega: N° de guía o de factura, fecha y productos"});
@@ -7231,6 +7439,7 @@ function puAbrir(k){
   if(!PST.persona){toast("Escribe tu nombre arriba");return $("#puPersona").focus()}
   if(k==="pt")return ptAbrir();
   if(k==="prov")return pcAbrir();
+  if(k==="cal")return qcAbrir();
   if(k==="ubic")return ucAbrir();
   if(k==="dev"||k==="devrec")return dvAbrir(k==="devrec"?"rec":"carga");
   const lista=k==="mp"?puTareas.mp:puTareas.conteos;
@@ -7294,7 +7503,7 @@ async function puAbrirConteo(t){
 
 /* ---------- Supervisor: USUARIOS (PC y celulares) con sus permisos — pestaña 6 · Permisos ---------- */
 var USERS=store.get("inv_users",[]), uEdit=null, uBusy=false;
-const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones",ubic_mover:"Almacenamiento",prov_recibir:"Recibe proveedores"};
+const PERM_TXT={conteo:"Conteos",mp_entregar:"Entrega MP",mp_recibir:"Recibe MP",pt_entregar:"Entrega PT",pt_recibir:"Recibe PT",pt_retirar:"Retira PT (despacho)",dev_cargar:"Carga devoluciones",dev_recibir:"Recepciona devoluciones",ubic_mover:"Almacenamiento",prov_recibir:"Recibe proveedores",prov_calidad:"Control de calidad"};
 const AREAS=["Bodega","Producción","Picking retail","Distribución","Compras","Despacho","Calidad"];
 function usersCon(p){return (USERS||[]).filter(u=>u.activo!==false&&(u.permisos||[]).includes(p))}
 function uNombre(id){const u=(USERS||[]).find(x=>x.id===id);return u?(u.nombre||u.id):(PUN[id]?"Celular de "+PUN[id]:id)}
@@ -7359,12 +7568,12 @@ function uEditor(u,keep){
     <fieldset><legend>Materia prima (MP)</legend>${rad("uMp","",mp,"No")}${rad("uMp","mp_entregar",mp,"Entrega MP (bodega)")}${rad("uMp","mp_recibir",mp,"Recibe MP (producción)")}</fieldset>
     <fieldset><legend>Producto terminado (PT)</legend>${rad("uPt","",pt,"No")}${rad("uPt","pt_entregar",pt,"Entrega PT (producción)")}${rad("uPt","pt_recibir",pt,"Recibe PT (bodega)")}${rad("uPt","pt_retirar",pt,"Retira PT para despacho (retail)")}</fieldset>
     <fieldset><legend>Devoluciones</legend><label><input type="checkbox" id="uP_dev_cargar" ${P.has("dev_cargar")?"checked":""}> Carga devoluciones</label><label><input type="checkbox" id="uP_dev_recibir" ${P.has("dev_recibir")?"checked":""}> Recepciona devoluciones</label></fieldset>
-    <fieldset><legend>Proveedores</legend><label><input type="checkbox" id="uP_prov_recibir" ${P.has("prov_recibir")?"checked":""}> Recibe proveedores (bodega)</label></fieldset>
+    <fieldset><legend>Proveedores</legend><label><input type="checkbox" id="uP_prov_recibir" ${P.has("prov_recibir")?"checked":""}> Recibe proveedores (bodega)</label><label><input type="checkbox" id="uP_prov_calidad" ${P.has("prov_calidad")?"checked":""}> Control de calidad (inspecciona recepciones)</label></fieldset>
     <fieldset><legend>Almacenamiento</legend><label><input type="checkbox" id="uP_ubic_mover" ${P.has("ubic_mover")?"checked":""}> Registra ingresos, traslados y salidas en ubicaciones (bodega)</label></fieldset>
     <div class="row"><button class="btn primary" id="uSave">${u?"Guardar cambios":"Crear usuario y su link"}</button>${u?'<button class="btn" id="uCancel">Cancelar</button>':""}</div></div>`;
   if($("#uCancel"))$("#uCancel").onclick=()=>{uEdit=null;uEditor(null,true)};
   $("#uSave").onclick=()=>{const perm=[];if($("#uP_conteo").checked)perm.push("conteo");const m=(document.querySelector('input[name="uMp"]:checked')||{}).value,t=(document.querySelector('input[name="uPt"]:checked')||{}).value;
-    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");if($("#uP_prov_recibir").checked)perm.push("prov_recibir");if($("#uP_ubic_mover").checked)perm.push("ubic_mover");
+    if(m)perm.push(m);if(t)perm.push(t);if($("#uP_dev_cargar").checked)perm.push("dev_cargar");if($("#uP_dev_recibir").checked)perm.push("dev_recibir");if($("#uP_prov_recibir").checked)perm.push("prov_recibir");if($("#uP_prov_calidad")&&$("#uP_prov_calidad").checked)perm.push("prov_calidad");if($("#uP_ubic_mover").checked)perm.push("ubic_mover");
     uGuardar(u,{nombre:norm($("#uNom").value),area:norm($("#uArea").value),permisos:perm},!u)};
   if(!keep)setTimeout(()=>{try{$("#uNom").focus()}catch(e){}},50);
 }
@@ -8217,7 +8426,7 @@ async function pcElegir(id){
   if(await pcPendiente(id))return;
   if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
   if(d.recibido)return toast("Esta recepción ya se terminó");
-  pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",contenedor:d.contenedor||"",fecha:d.fecha||hoyISO(),nota:d.nota||""},
+  pc={id:d.id,puesto:PST.puesto,propia:d.origen===PST.puesto,doc:{tipo:d.tipo||"nacional",proveedor:d.proveedor||"",guia:d.guia||"",referencia:d.referencia||"",contenedor:d.contenedor||"",fecha:d.fecha||hoyISO(),nota:d.nota||"",obs:d.obs_rec||""},
       decl:Array.isArray(d.esperado)?d.esperado:[],lect:Array.isArray(d.rec)?d.rec:[],dirty:false,ver:0,fotosN:+d.nfotos||0,
       vacios:["guia","referencia","contenedor"].filter(k=>!String(d[k]||"").trim())};pcSave();pcWork();
 }
@@ -8232,7 +8441,7 @@ async function fotoComprimir(file){const u=URL.createObjectURL(file);try{const i
   c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",0.7)}finally{URL.revokeObjectURL(u)}}
 async function fotoCargarQ(){try{fotoQ=(await fotoDB.all()).filter(x=>x.puesto===PST.puesto)}catch(e){fotoQ=[]}}
 function pcFotosRender(){
-  const card=$("#pcFotosCard");if(!card||!pc)return;const mias=fotoQ.filter(x=>x.id===pc.id),n=(pc.fotosN||0)+mias.length,lleno=n>=FOTO_MAX;
+  const card=$("#pcFotosCard");if(!card||!pc)return;const mias=fotoQ.filter(x=>x.id===pc.id&&x.tipo!=="cal"),n=(pc.fotosN||0)+mias.length,lleno=n>=FOTO_MAX;
   $("#pcFotosInfo").textContent=`${fmt(pc.fotosN||0)} subida${(pc.fotosN||0)===1?"":"s"}${mias.length?` · ${fmt(mias.length)} por subir`:""} · máx. ${FOTO_MAX}`;
   $("#pcFotoBtn").classList.toggle("disabled",lleno);$("#pcFoto").disabled=lleno;
   $("#pcFotosList").innerHTML=mias.map(x=>`<div class="ft"${x.err?` data-fdel="${esc(x.k)}" role="button" title="Tocar para quitar"`:""}><img src="${x.jpg}" alt=""><span>${x.err?"⚠ "+esc(x.err)+" · tocar para quitar":"⏳ por subir"}</span></div>`).join("");
@@ -8242,22 +8451,102 @@ async function fotoSubir(){
   if(fotoSub||navigator.onLine===false||!puestoMode())return;fotoSub=true;
   try{await fotoCargarQ();for(const x of fotoQ){if(x.err)continue;let r,j={};
       try{const h={"Content-Type":"application/json",apikey:PST.key};if(/^eyJ/.test(PST.key))h.Authorization="Bearer "+PST.key;
-        r=await fetch(PST.url+"/functions/v1/prov-fotos",{method:"POST",headers:h,body:JSON.stringify({accion:"subir",puesto:PST.puesto,ses:PST.ses,id:x.id,persona:x.persona,jpg:x.jpg.split(",")[1]})});
+        r=await fetch(PST.url+"/functions/v1/prov-fotos",{method:"POST",headers:h,body:JSON.stringify({accion:"subir",puesto:PST.puesto,ses:PST.ses,id:x.id,persona:x.persona,tipo:x.tipo==="cal"?"cal":"rec",cod:x.cod||null,jpg:x.jpg.split(",")[1]})});
         j=await r.json().catch(()=>({}))}catch(e){break}
-      if(r.ok){await fotoDB.del(x.k);if(pc&&pc.id===x.id){pc.fotosN=+j.n||(pc.fotosN||0)+1;pcSave()}}
+      if(r.ok){await fotoDB.del(x.k);if(x.tipo==="cal"){if(qc&&qc.id===x.id){qc.d.fotos=(qc.d.fotos||[]).concat([{cod:x.cod,t:new Date().toISOString()}]);qcSave()}}else if(pc&&pc.id===x.id){pc.fotosN=+j.n||(pc.fotosN||0)+1;pcSave()}}
       else if(j.error==="no_existe"&&pc&&pc.id===x.id&&pc.propia&&!pc.syncAt){}   // recepción propia aún no guardada: se reintenta
       else if(/^(max_fotos|anulado|finalizado|no_existe|sin_permiso|foto_invalida|datos_invalidos)$/.test(j.error||"")){x.err=j.error==="max_fotos"?"ya hay 6 fotos":pcMsg({message:j.error});await fotoDB.put(x)}
       else break}
     await fotoCargarQ()}
-  finally{fotoSub=false;pcFotosRender()}
+  finally{fotoSub=false;pcFotosRender();if(typeof qcFotosTxt==="function")qcFotosTxt()}
 }
 $("#pcFoto").addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(!f||!pc)return;
-  if((pc.fotosN||0)+fotoQ.filter(x=>x.id===pc.id).length>=FOTO_MAX)return toast(`Máximo ${FOTO_MAX} fotos por recepción`);
+  if((pc.fotosN||0)+fotoQ.filter(x=>x.id===pc.id&&x.tipo!=="cal").length>=FOTO_MAX)return toast(`Máximo ${FOTO_MAX} fotos por recepción`);
   try{const jpg=await fotoComprimir(f);await fotoDB.put({k:uuid4(),id:pc.id,puesto:PST.puesto,persona:PST.persona||"",jpg,t:new Date().toISOString()});await fotoCargarQ();pcFotosRender();toast("Foto guardada · se sube sola");fotoSubir()}
   catch(er){toast("No se pudo guardar la foto. Intenta de nuevo.")}});
 addEventListener("online",()=>fotoSubir());setInterval(()=>{if(puestoMode()&&fotoQ.length)fotoSubir()},30000);
+/* ---------- Control de calidad (celular, permiso "prov_calidad"): inspección por código de las recepciones de proveedores.
+   Es informativa (no bloquea el cierre). Queda a nombre del usuario con fecha y hora; se guarda sola y espera la señal. ---------- */
+const QC_CLAS=[["conforme","Conforme","p-ok"],["obs","Conforme con observaciones","p-warn"],["no","No conforme","p-bad"]];
+const QC_ACC=["Aceptado","Rechazado parcial","Devuelto","Reclamo a proveedor"],QC_EMB=["Golpes","Humedad","Roturas"],QC_PRO=["Daños visibles","Defectos"],QC_ETQ=["Idioma","Normativa","Fecha de vencimiento","No aplica"];
+var qcList=[],qc=store.get("inv_qc",null),qcT=0,qcSyncing=false;
+const qcSave=()=>store.set("inv_qc",qc);
+const qcMsg=e=>({sin_permiso:"Tu usuario no tiene permiso de Control de calidad.",anulado:"Esta recepción fue anulada por el supervisor.",codigo_no_existe:"Hay un código que no es de esta recepción.",no_existe:"La recepción ya no existe."})[e.message]||puMsg(e);
+async function qcRefresh(){qcList=await prpc("cb_prov_calidad_mis")||[]}
+async function qcAbrir(){puVista="cal";puestoApply();await dvCatalogo().catch(()=>{});try{await qcRefresh()}catch(e){toast(qcMsg(e))}
+  if(qc&&qc.puesto===PST.puesto&&qc.dirty)return qcWork();qcHome()}
+function qcEstado(d){const c=d.calidad||{};return c.estado==="terminada"?["Inspeccionada","p-ok"]:c.estado?["En inspección","p-info"]:["Sin inspeccionar","p-mut"]}
+function qcHome(){$("#qcWork").hidden=true;$("#qcHome").hidden=false;
+  $("#qcHome").innerHTML=`<div class="card contarCard"><h2 style="margin:0">Recepciones (últimos 15 días)</h2>${qcList.length?qcList.map(d=>{const [t,c]=qcEstado(d);return `<button class="dvRow" data-qc="${esc(d.id)}"><span class="dd"><b>${esc(d.proveedor||"Proveedor sin nombre")}</b><span>Guía ${esc(d.guia||"—")} · Ref. ${esc(d.referencia||"—")} · ${fechaCL(d.fecha)}${d.recibido?" · recibida":" · en recepción"}</span></span><span class="pill ${c}">${t}</span></button>`}).join(""):'<p class="muted" style="margin:0">No hay recepciones para inspeccionar.</p>'}</div>`;
+  $$("#qcHome [data-qc]").forEach(b=>b.onclick=()=>qcElegir(b.dataset.qc))}
+function qcCodigos(d){const m=new Map(),add=(l,k)=>{const c=String(l.k||l.code||"").trim();if(!c)return;const K=c.toUpperCase(),it=ptFind(c)||{};
+    const r=m.get(K)||{cod:c,desc:l.desc||it.desc||"",ce:"",f:1,um:l.um||umTxt(it.um||""),esp:0,rec:0};if(!r.desc)r.desc=l.desc||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}r[k]+=+l.qty||0;m.set(K,r)};
+  (d.esperado||[]).forEach(l=>add(l,"esp"));[...(d.rec||[]),...(d.man||[])].forEach(l=>add(l,"rec"));return [...m.values()].sort((a,b)=>a.cod.localeCompare(b.cod))}
+function qcElegir(id){const d=qcList.find(x=>x.id===id);if(!d)return;if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
+  if(qc&&qc.dirty&&qc.puesto===PST.puesto){if(qc.id!==id)toast("Tienes una inspección sin guardar: se abre esa. Guárdala con señal.");return qcWork()}   // lo editado sin señal no se pierde
+  const c=d.calidad||{};qc={id,puesto:PST.puesto,d,cal:{general:c.general||{},codigos:c.codigos||{}},estado:c.estado||"",dirty:false,ver:0};qcSave();qcWork()}
+function qcFotosTxt(){if(!qc||$("#qcWork").hidden)return;$$("#qcWork [data-qfn]").forEach(e=>{const cod=e.dataset.qfn,n=(qc.d.fotos||[]).filter(f=>f.cod===cod).length,q=fotoQ.filter(x=>x.id===qc.id&&x.tipo==="cal"&&x.cod===cod).length;
+  e.textContent=`📷 Foto de este código${n||q?` · ${n} subida${n===1?"":"s"}${q?` · ${q} por subir`:""}`:""}`})}
+function qcPct(card){const rv=num(card.querySelector('[data-q="rev"]').value),tt=num(card.querySelector('[data-q="tot"]').value);card.querySelector("[data-pct]").textContent=rv!=null&&tt?`(${Math.round(rv*100/tt)}%)`:""}
+function qcWork(){window.scrollTo(0,0);$("#qcHome").hidden=true;$("#qcWork").hidden=false;const d=qc.d,cods=qcCodigos(d),C=qc.cal.codigos,G=qc.cal.general;
+  const chips=(q,arr,sel,multi)=>arr.map(v=>`<button type="button" class="chip" data-q="${q}" data-v="${esc(v)}" aria-pressed="${multi?(sel||[]).includes(v):sel===v}">${esc(v)}</button>`).join("");
+  $("#qcWork").innerHTML=`<div class="card contarCard"><div class="row"><div class="eyebrow">Recepción a inspeccionar</div><span class="sep"></span><button class="btn sm" id="qcBack">← Lista</button></div>
+     <div><b>${esc(d.proveedor||"Proveedor sin nombre")}</b> · Guía ${esc(d.guia||"—")} · Ref. ${esc(d.referencia||"—")}${d.contenedor?" · Cont. "+esc(d.contenedor):""} · ${fechaCL(d.fecha)}</div>
+     ${d.obs_rec?`<div class="small">📝 Bodega: ${esc(d.obs_rec)}</div>`:""}${d.obs_panel?`<div class="small">📝 Supervisor: ${esc(d.obs_panel)}</div>`:""}
+     <div class="small muted">${fmt(cods.length)} códigos. Toca lo que corresponde en cada uno: se guarda solo.</div><div id="qcSync"></div></div>`+
+    cods.map(r=>{const x=C[r.cod]||{},u=r.ce?plural(r.ce).toLowerCase():umTxt(r.um);return `<div class="card contarCard qcCod" data-cod="${esc(r.cod)}">
+      <div><span class="code">${esc(r.cod)}</span> · <b>${esc(r.desc||"")}</b><div class="small muted">Recibido: ${fmt2(r.rec)} ${esc(u)}${r.ce?` = ${fmt2(r.rec*r.f)} ${esc(umTxt(r.um))}`:""}${r.esp?` · packing list: ${fmt2(r.esp)} ${esc(u)}`:""}</div></div>
+      <div class="eyebrow">Clasificación</div><div class="chips">${QC_CLAS.map(([v,l])=>`<button type="button" class="chip" data-q="clas" data-v="${v}" aria-pressed="${x.clas===v}">${l}</button>`).join("")}</div>
+      <div class="eyebrow">Acción tomada</div><div class="chips">${chips("acc",QC_ACC,x.acc)}</div>
+      <div class="eyebrow">Muestreo</div><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><input data-q="rev" inputmode="decimal" value="${esc(x.rev??"")}" placeholder="0" style="width:80px"> revisadas de <input data-q="tot" inputmode="decimal" value="${esc(x.tot??(r.rec||r.esp||""))}" style="width:80px"> ${esc(u)} <span class="small muted" data-pct></span></div>
+      <div class="eyebrow">Estado del embalaje</div><div class="chips">${chips("emb",["OK",...QC_EMB],x.emb,1)}</div>
+      <div class="eyebrow">Estado del producto</div><div class="chips">${chips("pro",["OK",...QC_PRO],x.pro,1)}</div>
+      <div class="eyebrow">Etiquetado (idioma, normativa, vencimiento)</div><div class="chips">${chips("etq",["OK",...QC_ETQ],x.etq,1)}</div>
+      <textarea data-q="com" rows="2" maxlength="500" placeholder="Comentarios / observaciones de este código" style="width:100%">${esc(x.com||"")}</textarea>
+      <label class="btn sm" style="margin-top:6px"><span data-qfn="${esc(r.cod)}">📷 Foto de este código</span><input type="file" accept="image/*" capture="environment" data-qfoto="${esc(r.cod)}" hidden></label></div>`}).join("")+
+    `<div class="card contarCard" id="qcGen"><div class="eyebrow">Resumen general de la recepción</div>
+      <div class="chips">${QC_CLAS.map(([v,l])=>`<button type="button" class="chip" data-g="clas" data-v="${v}" aria-pressed="${G.clas===v}">${l}</button>`).join("")}</div>
+      <div class="eyebrow">Acción tomada</div><div class="chips">${QC_ACC.map(v=>`<button type="button" class="chip" data-g="acc" data-v="${esc(v)}" aria-pressed="${G.acc===v}">${esc(v)}</button>`).join("")}</div>
+      <textarea id="qcGCom" rows="2" maxlength="1000" placeholder="Comentario general" style="width:100%">${esc(G.com||"")}</textarea>
+      <p class="small muted" style="margin:6px 0">Responsable: <b>${esc(PST.persona||"")}</b> (usuario ${esc(PST.nombre||PST.puesto)}). Queda con fecha y hora.</p>
+      <button class="btn primary" id="qcFin" style="justify-content:center;font-size:16px;padding:12px">${qc.estado==="terminada"?"Guardar cambios":"Terminar inspección…"}</button><div id="qcConfirm"></div></div>`;
+  $$("#qcWork .qcCod").forEach(qcPct);qcFotosTxt();qcRenderSync();
+  $("#qcBack").onclick=async()=>{if(qc.dirty)await qcSync(false);window.scrollTo(0,0);await qcRefresh().catch(()=>{});if(!qc.dirty){qc=null;qcSave()}qcHome()};
+  $("#qcFin").onclick=()=>{const sin=cods.filter(r=>!(C[r.cod]&&C[r.cod].clas)).length;
+    if(!G.clas){const v=cods.map(r=>(C[r.cod]||{}).clas).filter(Boolean);G.clas=v.includes("no")?"no":v.includes("obs")?"obs":v.length?"conforme":"";}
+    confirmBox(`${qc.estado==="terminada"?"Guardar los cambios de":"Terminar"} la inspección${sin?` (${fmt(sin)} código${sin===1?"":"s"} sin clasificar)`:""}. Queda a nombre de ${esc(PST.persona||"")}, con fecha y hora.`,()=>qcSync(true),"#qcConfirm")};
+}
+document.addEventListener("click",e=>{const b=e.target.closest("#qcWork .chip");if(!b||!qc)return;const card=b.closest(".qcCod"),v=b.dataset.v;
+  if(b.dataset.g){const G=qc.cal.general;G[b.dataset.g]=G[b.dataset.g]===v?"":v;b.parentNode.querySelectorAll(".chip").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===G[b.dataset.g]));return qcDirty()}
+  if(!card)return;const cod=card.dataset.cod,x=qcX(card),q=b.dataset.q;
+  if(["emb","pro","etq"].includes(q)){let a=Array.isArray(x[q])?x[q]:[];a=a.includes(v)?a.filter(z=>z!==v):(v==="OK"||v==="No aplica"?[v]:a.filter(z=>z!=="OK"&&z!=="No aplica").concat([v]));x[q]=a;
+    b.parentNode.querySelectorAll(".chip").forEach(z=>z.setAttribute("aria-pressed",a.includes(z.dataset.v)))}
+  else{x[q]=x[q]===v?"":v;b.parentNode.querySelectorAll(".chip").forEach(z=>z.setAttribute("aria-pressed",z.dataset.v===x[q]))}
+  qcDirty()});
+document.addEventListener("input",e=>{const t=e.target;if(!qc||!t.closest||!t.closest("#qcWork"))return;
+  if(t.id==="qcGCom"){qc.cal.general.com=t.value;return qcDirty()}
+  const card=t.closest(".qcCod");if(!card||!t.dataset.q)return;const x=qcX(card);
+  x[t.dataset.q]=t.dataset.q==="com"?t.value:(num(t.value)??"");if(t.dataset.q!=="com")qcPct(card);qcDirty()});
+document.addEventListener("change",async e=>{const t=e.target;if(!t.dataset||!t.dataset.qfoto||!qc)return;const f=t.files&&t.files[0];t.value="";if(!f)return;
+  try{const jpg=await fotoComprimir(f);await fotoDB.put({k:uuid4(),id:qc.id,puesto:PST.puesto,persona:PST.persona||"",tipo:"cal",cod:t.dataset.qfoto,jpg,t:new Date().toISOString()});await fotoCargarQ();qcFotosTxt();toast("Foto guardada · se sube sola");fotoSubir()}
+  catch(er){toast("No se pudo guardar la foto. Intenta de nuevo.")}});
+function qcX(card){const x=qc.cal.codigos[card.dataset.cod]=qc.cal.codigos[card.dataset.cod]||{};   // el total del muestreo viene escrito (lo recibido): se guarda aunque no se toque
+  if(x.tot==null){const v=num(card.querySelector('[data-q="tot"]').value);if(v!=null)x.tot=v}return x}
+function qcDirty(){qc.dirty=true;qc.ver=(qc.ver||0)+1;qcSave();clearTimeout(qcT);qcT=setTimeout(()=>qcSync(false),1500);qcRenderSync()}
+function qcRenderSync(){const el=$("#qcSync");if(!el||!qc)return;
+  el.innerHTML=qcSyncing?'<span class="sync s-run">☁ Guardando…</span>':qc.err?`<span class="sync s-bad">⚠ ${esc(qc.err)}</span>`:qc.dirty?`<span class="sync s-wait">⏳ ${navigator.onLine===false?"Sin señal: se guardará solo al volver":"Pendiente de guardar"}</span>`:qc.syncAt?`<span class="sync s-ok">☁ Guardado · ${hhmm(qc.syncAt)}</span>`:""}
+async function qcSync(final){if(!qc||qcSyncing)return false;if(!final&&!qc.dirty)return true;if(navigator.onLine===false&&!final){qcRenderSync();return false}
+  qcSyncing=true;qcRenderSync();const v=qc.ver||0;
+  try{await prpc("cb_prov_calidad_guardar",{p_id:qc.id,p_cal:{general:qc.cal.general,codigos:qc.cal.codigos,persona:PST.persona||""},p_terminar:!!final});
+    if((qc.ver||0)===v)qc.dirty=false;qc.err="";qc.syncAt=new Date().toISOString();qcSave();
+    if(final){toast(qc.estado==="terminada"?"✓ Cambios guardados":"✓ Inspección terminada");qc=null;qcSave();qcSyncing=false;await qcRefresh().catch(()=>{});qcHome()}
+    return true}
+  catch(e){if(final)toast(qcMsg(e));else if(!e.net)qc.err=qcMsg(e);qcSave();return false}
+  finally{qcSyncing=false;qcRenderSync()}}
+addEventListener("online",()=>{if(qc&&qc.dirty)qcSync(false)});setInterval(()=>{if(puestoMode()&&qc&&qc.dirty&&!qcSyncing)qcSync(false)},30000);
+$("#pcObs").addEventListener("input",e=>{if(!pc)return;pc.doc.obs=e.target.value;pcDirty()});
 function pcWork(){
-  $("#pcHome").hidden=true;$("#pcWork").hidden=false;window.scrollTo(0,0);const D=pc.doc;fotoCargarQ().then(()=>{pcFotosRender();fotoSubir()});
+  $("#pcHome").hidden=true;$("#pcWork").hidden=false;window.scrollTo(0,0);const D=pc.doc;$("#pcObs").value=D.obs||"";fotoCargarQ().then(()=>{pcFotosRender();fotoSubir()});
   if(pc.propia){
     $("#pcDocEb").textContent="1 · Datos de la recepción";
     $("#pcDoc").innerHTML=`<div class="dvGrid"><label class="f">Tipo<select id="pcTipo"><option value="nacional">Nacional</option><option value="importacion">Importación</option></select></label>
@@ -8484,14 +8773,30 @@ async function pvFotosVer(d){const box=$("#pvFotosG");if(!box)return;box.innerHT
   try{const c=movC(),h={"Content-Type":"application/json",apikey:c.key};if(/^eyJ/.test(c.key))h.Authorization="Bearer "+c.key;
     const r=await fetch(c.url+"/functions/v1/prov-fotos",{method:"POST",headers:h,body:JSON.stringify({accion:"ver",clave:c.clave,id:d.id})}),j=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(j.error||"error_"+r.status);
-    box.innerHTML=(j.fotos||[]).map(f=>`<a class="ft" href="${esc(f.url||"#")}" target="_blank" rel="noopener"><img src="${esc(f.url||"")}" alt="Foto" loading="lazy"><span>${esc(f.persona||"")} ${f.t?hm24(f.t):""}</span></a>`).join("")||'<span class="small muted">Sin fotos.</span>'}
+    box.innerHTML=(j.fotos||[]).map(f=>`<a class="ft" href="${esc(f.url||"#")}" target="_blank" rel="noopener"><img src="${esc(f.url||"")}" alt="Foto" loading="lazy"><span>${f.tipo==="cal"?"🔍 "+esc(f.cod||"Calidad"):"📦"} ${esc(f.persona||"")} ${f.t?hm24(f.t):""}</span></a>`).join("")||'<span class="small muted">Sin fotos.</span>'}
   catch(e){box.innerHTML=`<span class="small" style="color:var(--bad)">No se pudieron cargar las fotos: ${esc(SBMSG[e.message]||e.message)}</span>`}}
 function pvFotosRender(d){const n=(d.fotos||[]).length,b=$("#pvFotos");if(!b)return;
   if(b.dataset.id===d.id&&b.dataset.n===String(n))return;b.dataset.id=d.id;b.dataset.n=String(n);
-  b.innerHTML=n?`<button class="btn sm" id="pvFotosB">📷 Ver fotos de bodega · ${fmt(n)}</button><div class="fotosGrid" id="pvFotosG"></div>`:'<span class="small muted">📷 Sin fotos de bodega.</span>';
+  b.innerHTML=n?`<button class="btn sm" id="pvFotosB">📷 Ver fotos (bodega y calidad) · ${fmt(n)}</button><div class="fotosGrid" id="pvFotosG"></div>`:'<span class="small muted">📷 Sin fotos de bodega.</span>';
   const bt=$("#pvFotosB");if(bt)bt.onclick=()=>pvFotosVer(d)}
+function pvObsRender(d){const b=$("#pvObs");if(!b)return;const k=d.id+"|"+(d.obs_rec||"")+"|"+(d.obs_panel||"");if(b.dataset.k===k||(document.activeElement&&document.activeElement.id==="pvObsTxt"))return;b.dataset.k=k;
+  b.innerHTML=`<div class="cbox" style="max-width:none;gap:6px"><b>📝 Observaciones</b><div class="small">Bodega (celular): ${d.obs_rec?esc(d.obs_rec):'<span class="muted">sin observaciones</span>'}</div>
+    <label class="f">Supervisor<textarea id="pvObsTxt" rows="2" maxlength="1000" placeholder="Observación del supervisor" style="width:100%">${esc(d.obs_panel||"")}</textarea></label>
+    <div class="row"><button class="btn sm" id="pvObsOk">Guardar observación</button></div></div>`;
+  const ok=$("#pvObsOk");if(ok){ok.hidden=!pvCan("prov_operar");$("#pvObsTxt").readOnly=!pvCan("prov_operar");
+    ok.onclick=async()=>{ok.disabled=true;try{await mrpc("cb_prov_obs",{p_id:d.id,p_obs:$("#pvObsTxt").value});toast("Observación guardada");await pvRefresh(true)}catch(e){toast(pvMsg(e))}finally{ok.disabled=false}}}}
+const QC_TXT={conforme:["Conforme","p-ok"],obs:["Conforme con observaciones","p-warn"],no:["No conforme","p-bad"]};
+const qcLista=a=>Array.isArray(a)&&a.length?a.join(", "):"—";
+function pvCalRender(d){const b=$("#pvCal");if(!b)return;const c=d.calidad||{};
+  if(!c.estado){b.innerHTML='<div class="small muted">🔍 Control de calidad: sin inspección todavía (la hace un usuario con permiso «Control de calidad» desde su celular).</div>';return}
+  const G=c.general||{},cods=Object.entries(c.codigos||{}),R=c.resp||{},g=QC_TXT[G.clas];
+  b.innerHTML=`<div class="cbox" style="max-width:none;gap:6px"><div class="row" style="gap:8px"><b>🔍 Control de calidad</b><span class="pill ${c.estado==="terminada"?"p-ok":"p-info"}">${c.estado==="terminada"?"Inspeccionada":"En inspección"}</span>${g?`<span class="pill ${g[1]}">${g[0]}</span>`:""}${G.acc?`<span class="pill p-mut">${esc(G.acc)}</span>`:""}</div>
+    <div class="small">Responsable: <b>${esc(R.persona||R.nombre||"")}</b>${R.nombre&&R.persona?` (usuario ${esc(R.nombre)})`:""} · inicio ${c.inicio?fmtDT(c.inicio):"—"}${c.fin?" · terminada "+fmtDT(c.fin):""}${(c.hist||[]).filter(h=>h.que==="modificada").length?` · modificada ${fmt((c.hist||[]).filter(h=>h.que==="modificada").length)} vez/veces`:""}</div>
+    ${G.com?`<div class="small">Comentario general: ${esc(G.com)}</div>`:""}
+    <div class="tbl"><table class="calTbl"><thead><tr><th>Código</th><th>Descripción</th><th>Clasificación</th><th>Acción</th><th>Muestreo</th><th>Embalaje</th><th>Producto</th><th>Etiquetado</th><th>Comentario</th><th>Fotos</th></tr></thead><tbody>${cods.length?cods.sort((a,b)=>a[0].localeCompare(b[0])).map(([cod,x])=>{const t=QC_TXT[x.clas],it=ptFind(cod)||{},nf=(d.fotos||[]).filter(f=>f.tipo==="cal"&&f.cod===cod).length;
+      return `<tr><td class="code">${esc(cod)}</td><td>${esc(it.desc||"")}</td><td>${t?`<span class="pill ${t[1]}">${t[0]}</span>`:"—"}</td><td>${esc(x.acc||"—")}</td><td style="white-space:nowrap">${x.rev!==""&&x.rev!=null?`${fmt2(+x.rev)} de ${fmt2(+x.tot||0)}${+x.tot?` (${Math.round(+x.rev*100/+x.tot)}%)`:""}`:"—"}</td><td>${esc(qcLista(x.emb))}</td><td>${esc(qcLista(x.pro))}</td><td>${esc(qcLista(x.etq))}</td><td>${esc(x.com||"")}</td><td>${nf?"📷 "+nf:""}</td></tr>`}).join(""):'<tr><td colspan="10" class="muted">Sin códigos inspeccionados todavía.</td></tr>'}</tbody></table></div></div>`}
 function pvDetRender(){
-  const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;if(!d)return;pvFotosRender(d);
+  const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;if(!d)return;pvFotosRender(d);pvObsRender(d);pvCalRender(d);
   const rows=pvCuadre(d),cnt=s=>rows.filter(r=>r.st===s).length,[t]=PVST[pvSt(d)];
   $("#pvDetT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}${d.contenedor?" · Cont. "+d.contenedor:""}`;
   $("#pvDetS").innerHTML=`${esc(PCTIPO[d.tipo]||"")} · Fecha ${fechaCL(d.fecha)} · ${t}${d.persona?" · creó "+esc(d.persona):d.origen&&d.origen!=="panel"?" · creada desde el celular":""}${d.rec_persona?" · recibe "+esc(d.rec_persona):""}${d.recibido?" · terminada "+fmtDT(d.recibido):""}${d.nota?`<br>Observación: ${esc(d.nota)}`:""}`;
@@ -8653,6 +8958,10 @@ function pvFilasXls(d){const cv=r=>r.ce&&r.f!==1,ord={falta:0,norec:1,noesp:2,so
 $("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,sheetFrom(pvFilasXls(d)),"Cuadre");
   XLSX.utils.book_append_sheet(wb,sheetFrom(pvRegs(d).map(l=>({"N° de guía":d.guia||"","N° de referencia":d.referencia||"","N° de contenedor":d.contenedor||"","Origen":l.src==="man"?"Agregado a mano":"Celular","Hora":l.t?fmtDT(l.t):"","Persona":l.user||"","Código":l.code,"Descripción":l.desc||"","Cantidad":+l.qty||0,"Bulto":l.ce||umTxt(l.um),"Conversión":(+l.qty||0)*(+l.f||1)}))),"Registros");
+  {const c=d.calidad||{},R=c.resp||{},G=c.general||{};if(c.estado||d.obs_rec||d.obs_panel)XLSX.utils.book_append_sheet(wb,sheetFrom([
+      ...Object.entries(c.codigos||{}).map(([cod,x])=>({"Código":cod,"Descripción":(ptFind(cod)||{}).desc||"","Clasificación":(QC_TXT[x.clas]||[""])[0],"Acción":x.acc||"","Revisadas":x.rev??"","De un total de":x.tot??"","Muestreo %":x.rev!==""&&x.rev!=null&&+x.tot?Math.round(+x.rev*100/+x.tot):"",
+        "Embalaje":qcLista(x.emb),"Producto":qcLista(x.pro),"Etiquetado":qcLista(x.etq),"Comentario":x.com||"","Fotos":(d.fotos||[]).filter(f=>f.tipo==="cal"&&f.cod===cod).length})),
+      {"Código":"GENERAL","Descripción":G.com||"","Clasificación":(QC_TXT[G.clas]||[""])[0],"Acción":G.acc||"","Comentario":`Responsable: ${R.persona||R.nombre||""} · ${c.fin?fmtDT(c.fin):c.inicio?fmtDT(c.inicio):""} · Obs. bodega: ${d.obs_rec||"—"} · Obs. supervisor: ${d.obs_panel||"—"}`}]),"Control de calidad")}
   saveWb(wb,`Recepcion_${(d.proveedor||d.contenedor||"proveedor").replace(/[^\w-]+/g,"_")}_${(d.guia||d.referencia||"").replace(/[^\w-]+/g,"_")}.xlsx`)};
 $("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;
 $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};

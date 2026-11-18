@@ -10,9 +10,9 @@ const usr=(nom,perm)=>{const id=JSON.parse(rpc('cb_u_guardar',{p_clave:ADMIN,p_i
 const BUCKET=new Map();let llamadas=0;
 const route=async c=>{await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request().url().split('/').pop();const x=rpc(fn,JSON.parse(r.request().postData()||'{}'));await r.fulfill({status:x.ok?200:400,contentType:'application/json',body:x.body})});
   await c.route(SBU+'/functions/v1/prov-fotos',async r=>{llamadas++;const b=JSON.parse(r.request().postData()||'{}'),q=s=>"'"+String(s).replace(/'/g,"''")+"'";let out,st=200;
-    if(b.accion==='subir'){const ok=sqlE(`select cb_prov_foto_puede(${q(b.puesto)},${q(b.ses)},${q(b.id)})`);
+    if(b.accion==='subir'){const tp=b.tipo==='cal'?'cal':'rec',cd=b.cod?q(b.cod):'null';const ok=sqlE(`select cb_prov_foto_puede(${q(b.puesto)},${q(b.ses)},${q(b.id)},${q(tp)})`);
       if(!ok.ok){out={error:ok.v};st=400}else{const path=`${b.id}/${Date.now()}-${Math.random().toString(16).slice(2,10)}.jpg`;BUCKET.set(path,b.jpg);
-        const a=sqlE(`select cb_prov_foto_agregar(${q(b.puesto)},${q(b.ses)},${q(b.id)},${q(path)},${q(b.persona||'')})::text`);if(!a.ok){BUCKET.delete(path);out={error:a.v};st=400}else out={path,n:JSON.parse(a.v).n}}}
+        const a=sqlE(`select cb_prov_foto_agregar(${q(b.puesto)},${q(b.ses)},${q(b.id)},${q(path)},${q(b.persona||'')},${q(tp)},${cd})::text`);if(!a.ok){BUCKET.delete(path);out={error:a.v};st=400}else out={path,n:JSON.parse(a.v).n}}}
     else if(b.accion==='ver'){const f=sqlE(`select cb_prov_fotos(${q(b.clave)},${q(b.id)})::text`);if(!f.ok){out={error:f.v};st=400}else out={fotos:JSON.parse(f.v).map(x=>({...x,url:'data:image/jpeg;base64,'+BUCKET.get(x.path)}))}}
     await r.fulfill({status:st,contentType:'application/json',body:JSON.stringify(out)})})};
 (async()=>{rpc('cb_configurar',{p_clave:ADMIN});sql("delete from cb_prov; delete from cb_puesto");
@@ -47,7 +47,7 @@ const route=async c=>{await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.re
  const cs=await b.newContext({viewport:{width:1366,height:900},timezoneId:'America/Santiago'});await route(cs);const s=await cs.newPage();s.on('pageerror',e=>errs.push('panel: '+e.message));
  await s.goto(B+'#panel');await s.evaluate(([u,a])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
  await s.goto(B+'#prov');await s.reload();await s.waitForTimeout(3000);await s.click(`#pvTbl [data-pv="${idP}"]`);await s.waitForTimeout(500);
- check(/Ver fotos de bodega · 6/.test(await s.textContent('#pvFotos')),'Panel: botón "Ver fotos de bodega · 6"');
+ check(/Ver fotos \(bodega y calidad\) · 6/.test(await s.textContent('#pvFotos')),'Panel: botón "Ver fotos de bodega · 6"');
  await s.click('#pvFotosB');await s.waitForTimeout(1500);
  const imgs=await s.$$eval('#pvFotosG img',x=>x.filter(i=>i.complete&&i.naturalWidth>0).length);
  check(imgs===6&&/FELIPE/.test(await s.textContent('#pvFotosG')),'Panel: se ven las 6 fotos con quién las tomó → '+imgs);
