@@ -147,7 +147,7 @@ begin
     'inicio', coalesce(v_old->'inicio', to_jsonb(now())), 't', now(),
     'estado', case when p_terminar or v_old->>'estado' = 'terminada' then 'terminada' else 'en_curso' end,
     'fin', case when p_terminar then to_jsonb(now()) else v_old->'fin' end,
-    'hist', coalesce(v_old->'hist', '[]'::jsonb) || case when v_old->>'estado' = 'terminada' then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'modificada'))
+    'hist', coalesce(v_old->'hist', '[]'::jsonb) || case when not p_terminar then '[]'::jsonb when v_old->>'estado' = 'terminada' then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'modificada'))
                                                        when p_terminar then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'terminada')) else '[]'::jsonb end);
   update cb_prov set calidad = v_new, actualizado = now() where id = p_id;
   return jsonb_build_object('id', p_id, 'estado', v_new->>'estado', 't', now());

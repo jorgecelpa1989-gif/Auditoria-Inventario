@@ -4996,7 +4996,7 @@ begin
     'inicio', coalesce(v_old->'inicio', to_jsonb(now())), 't', now(),
     'estado', case when p_terminar or v_old->>'estado' = 'terminada' then 'terminada' else 'en_curso' end,
     'fin', case when p_terminar then to_jsonb(now()) else v_old->'fin' end,
-    'hist', coalesce(v_old->'hist', '[]'::jsonb) || case when v_old->>'estado' = 'terminada' then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'modificada'))
+    'hist', coalesce(v_old->'hist', '[]'::jsonb) || case when not p_terminar then '[]'::jsonb when v_old->>'estado' = 'terminada' then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'modificada'))
                                                        when p_terminar then jsonb_build_array(jsonb_build_object('t', now(), 'por', left(coalesce(p_cal->>'persona', a.nombre), 80), 'que', 'terminada')) else '[]'::jsonb end);
   update cb_prov set calidad = v_new, actualizado = now() where id = p_id;
   return jsonb_build_object('id', p_id, 'estado', v_new->>'estado', 't', now());
@@ -8483,7 +8483,7 @@ function qcCodigos(d){const m=new Map(),add=(l,k)=>{const c=String(l.k||l.code||
     const r=m.get(K)||{cod:c,desc:l.desc||it.desc||"",ce:"",f:1,um:l.um||umTxt(it.um||""),esp:0,rec:0};if(!r.desc)r.desc=l.desc||"";if(l.ce&&+l.f>0&&+l.f!==1){r.ce=l.ce;r.f=+l.f}r[k]+=+l.qty||0;m.set(K,r)};
   (d.esperado||[]).forEach(l=>add(l,"esp"));[...(d.rec||[]),...(d.man||[])].forEach(l=>add(l,"rec"));return [...m.values()].sort((a,b)=>a.cod.localeCompare(b.cod))}
 function qcElegir(id){const d=qcList.find(x=>x.id===id);if(!d)return;if(!PST.persona){toast("Escribe tu nombre en el menú");return puestoMenu()}
-  if(qc&&qc.dirty&&qc.id!==id&&qc.puesto===PST.puesto){toast("Tienes una inspección sin guardar: se abre esa. Guárdala con señal.");return qcWork()}
+  if(qc&&qc.dirty&&qc.puesto===PST.puesto){if(qc.id!==id)toast("Tienes una inspección sin guardar: se abre esa. Guárdala con señal.");return qcWork()}   // lo editado sin señal no se pierde
   const c=d.calidad||{};qc={id,puesto:PST.puesto,d,cal:{general:c.general||{},codigos:c.codigos||{}},estado:c.estado||"",dirty:false,ver:0};qcSave();qcWork()}
 function qcFotosTxt(){if(!qc||$("#qcWork").hidden)return;$$("#qcWork [data-qfn]").forEach(e=>{const cod=e.dataset.qfn,n=(qc.d.fotos||[]).filter(f=>f.cod===cod).length,q=fotoQ.filter(x=>x.id===qc.id&&x.tipo==="cal"&&x.cod===cod).length;
   e.textContent=`📷 Foto de este código${n||q?` · ${n} subida${n===1?"":"s"}${q?` · ${q} por subir`:""}`:""}`})}
