@@ -57,6 +57,12 @@ const route=async c=>{await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.re
  const pc=await s.textContent('#pvCal');
  check(/Inspeccionada/.test(pc)&&/Conforme con observaciones/.test(pc)&&/Reclamo a proveedor/.test(pc)&&/MARIA/.test(pc)&&/2 de 10 \(20%\)/.test(pc)&&/Golpes, Humedad/.test(pc)&&/📷 1/.test(pc),'Panel: ficha de calidad por código, responsable y fotos');
  check(/2 pallets golpeados/.test(await s.textContent('#pvObs')),'Panel: observación de bodega');
+ // Informe Word (formato estándar, con fotos)
+ const [dl]=await Promise.all([s.waitForEvent('download',{timeout:20000}),s.click('#pvCalDoc')]);const fp=(process.argv[2]||'/tmp')+'/cc.docx';await dl.saveAs(fp);
+ const info=require('child_process').execFileSync('python3',['-I','-c',"import zipfile,sys;z=zipfile.ZipFile(sys.argv[1]);n=z.namelist();d=z.read('word/document.xml').decode();print('|'.join(sorted(n)));print(d)",fp],{encoding:'utf8'});
+ const [names,docx]=[info.split('\n')[0],info.slice(info.indexOf('\n')+1)];
+ check(/\.docx$/.test(dl.suggestedFilename())&&/word\/document\.xml/.test(names)&&/word\/media\/foto1\.jpeg/.test(names),'Informe Word descargado (.docx) con la foto de calidad incrustada → '+names);
+ check(/INFORME DE CONTROL DE CALIDAD/.test(docx)&&/Aceros Uno/i.test(docx)&&/221317/.test(docx)&&/Conforme con observaciones/.test(docx)&&/Reclamo a proveedor/.test(docx)&&/2 revisadas de 10 \(20%\)/.test(docx)&&/Golpes, Humedad/.test(docx)&&/Cajas mojadas/.test(docx)&&/MARIA/.test(docx)&&/2 pallets golpeados/.test(docx)&&/Firma/.test(docx),'El Word trae datos de la recepción, resultado, detalle por código, observaciones, responsable y firma');
  await s.fill('#pvObsTxt','Revisar con proveedor');await s.click('#pvObsOk');await s.waitForTimeout(1500);
  check(sql(`select obs_panel from cb_prov where id='${idP}'`)==='Revisar con proveedor','Panel: observación del supervisor guardada');
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));

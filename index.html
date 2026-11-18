@@ -5188,7 +5188,7 @@ grant execute on function public.cb_prov_obs(text, uuid, text), public.cb_prov_c
     <div id="pvObs" style="margin:10px 0 0"></div>
   </div>
   <div class="card" id="pvCalCard" hidden>
-    <div class="row"><div class="eyebrow">🔍 Control de calidad</div><span class="sep"></span><span class="small muted" id="pvCalT"></span></div>
+    <div class="row"><div class="eyebrow">🔍 Control de calidad</div><span class="sep"></span><span class="small muted" id="pvCalT"></span><button class="btn sm primary" id="pvCalDoc" type="button">📄 Informe Word</button></div>
     <div id="pvCal"></div>
   </div>
 </section>
@@ -8798,6 +8798,51 @@ function pvCalRender(d){const b=$("#pvCal");if(!b)return;const c=d.calidad||{};
     ${G.com?`<div class="small">Comentario general: ${esc(G.com)}</div>`:""}
     <div class="tbl"><table class="calTbl"><thead><tr><th>Código</th><th>Descripción</th><th>Clasificación</th><th>Acción</th><th>Muestreo</th><th>Embalaje</th><th>Producto</th><th>Etiquetado</th><th>Comentario</th><th>Fotos</th></tr></thead><tbody>${cods.length?cods.sort((a,b)=>a[0].localeCompare(b[0])).map(([cod,x])=>{const t=QC_TXT[x.clas],it=ptFind(cod)||{},nf=(d.fotos||[]).filter(f=>f.tipo==="cal"&&f.cod===cod).length;
       return `<tr><td class="code">${esc(cod)}</td><td>${esc(it.desc||"")}</td><td>${t?`<span class="pill ${t[1]}">${t[0]}</span>`:"—"}</td><td>${esc(x.acc||"—")}</td><td style="white-space:nowrap">${x.rev!==""&&x.rev!=null?`${fmt2(+x.rev)} de ${fmt2(+x.tot||0)}${+x.tot?` (${Math.round(+x.rev*100/+x.tot)}%)`:""}`:"—"}</td><td>${esc(qcLista(x.emb))}</td><td>${esc(qcLista(x.pro))}</td><td>${esc(qcLista(x.etq))}</td><td>${esc(x.com||"")}</td><td>${nf?"📷 "+nf:""}</td></tr>`}).join(""):'<tr><td colspan="10" class="muted">Sin códigos inspeccionados todavía.</td></tr>'}</tbody></table></div></div>`}
+/* ---------- Informe Word de Control de calidad (formato estándar, con fotos). Se arma en el navegador (.docx = zip de XML). ---------- */
+const xe=t=>String(t??"").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+function docxRun(t,o){o=o||{};return `<w:r><w:rPr>${o.b?"<w:b/>":""}${o.c?`<w:color w:val="${o.c}"/>`:""}${o.sz?`<w:sz w:val="${o.sz}"/>`:""}</w:rPr>${String(t??"").split(/\r?\n/).map(l=>`<w:t xml:space="preserve">${xe(l)}</w:t>`).join("<w:br/>")}</w:r>`}
+const docxP=(t,o)=>`<w:p><w:pPr>${o&&o.h?`<w:spacing w:before="240" w:after="80"/>`:""}${o&&o.center?'<w:jc w:val="center"/>':""}</w:pPr>${docxRun(t,o)}</w:p>`;
+function docxTabla(filas,anchos){const tc=(t,w,o)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${o&&o.fill?`<w:shd w:val="clear" w:color="auto" w:fill="${o.fill}"/>`:""}</w:tcPr><w:p>${docxRun(t,o)}</w:p></w:tc>`;
+  return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(b=>`<w:${b} w:val="single" w:sz="4" w:space="0" w:color="A0AEB8"/>`).join("")}</w:tblBorders><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${anchos.map(w=>`<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`+
+    filas.map((f,ri)=>`<w:tr>${f.map((c,ci)=>tc(c,anchos[ci],ci===0&&f.length===2||ri===0&&f.length>2?{b:true,fill:"E6EDF2"}:{})).join("")}</w:tr>`).join("")+`</w:tbl><w:p/>`}
+function docxFoto(rid,id,cx,cy,nom){return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="${xe(nom)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="${xe(nom)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r><w:r><w:t xml:space="preserve">  </w:t></w:r>`}
+async function qcFotosBin(d){   // fotos de calidad: enlaces temporales de la Edge Function → bytes + tamaño
+  const out=[];if(!(d.fotos||[]).some(f=>f.tipo==="cal"))return out;
+  try{const c=movC(),h={"Content-Type":"application/json",apikey:c.key};if(/^eyJ/.test(c.key))h.Authorization="Bearer "+c.key;
+    const r=await fetch(c.url+"/functions/v1/prov-fotos",{method:"POST",headers:h,body:JSON.stringify({accion:"ver",clave:c.clave,id:d.id})}),j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"error");
+    for(const f of (j.fotos||[]).filter(f=>f.tipo==="cal"&&f.url)){try{const b=await (await fetch(f.url)).blob(),bm=await createImageBitmap(b);out.push({cod:f.cod||"",t:f.t,persona:f.persona||"",bytes:new Uint8Array(await b.arrayBuffer()),w:bm.width,h:bm.height});try{bm.close()}catch(e){}}catch(e){out.fallo=(out.fallo||0)+1}}}
+  catch(e){toast("No se pudieron incluir las fotos: "+(SBMSG[e.message]||e.message))}
+  return out}
+async function qcWord(d){const c=d.calidad||{},G=c.general||{},R=c.resp||{},b=$("#pvCalDoc");b.disabled=true;b.textContent="Armando informe…";
+  try{const fotos=await qcFotosBin(d),rels=[],media=[];let fid=1;
+    const fotoXml=f=>{const n=media.length+1,rid="rIdF"+n,maxW=2880000,k=Math.min(1,maxW/(f.w*9525)),cx=Math.round(f.w*9525*k),cy=Math.round(f.h*9525*k);media.push(f.bytes);rels.push(`<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/foto${n}.jpeg"/>`);return docxFoto(rid,fid++,cx,cy,"foto"+n)};
+    const tx=k=>(QC_TXT[k]||["—"])[0],ls=a=>Array.isArray(a)&&a.length?a.join(", "):"—";
+    let body=docxP("INFORME DE CONTROL DE CALIDAD",{b:true,sz:32,center:true})+docxP("Recepción de proveedores · Grupo Vector",{center:true,c:"5A6B78"})+
+      docxP("1. Datos de la recepción",{b:true,sz:26,h:true})+docxTabla([["Proveedor",d.proveedor||"—"],["Tipo",PCTIPO[d.tipo]||d.tipo||"—"],["N° de guía",d.guia||"—"],["N° de referencia",d.referencia||"—"],["N° de contenedor",d.contenedor||"—"],["Fecha de recepción",fechaCL(d.fecha)],["Recibió (bodega)",d.rec_persona||"—"],["Observación de bodega",d.obs_rec||"—"],["Observación del supervisor",d.obs_panel||"—"]],[3000,6400])+
+      docxP("2. Resultado de la inspección",{b:true,sz:26,h:true})+docxTabla([["Estado",c.estado==="terminada"?"Inspeccionada":c.estado?"En inspección":"Sin inspección"],["Clasificación general",tx(G.clas)],["Acción tomada",G.acc||"—"],["Comentario general",G.com||"—"],["Responsable de la inspección",(R.persona||"")+(R.nombre?` (usuario ${R.nombre})`:"")],["Inicio",c.inicio?fmtDT(c.inicio):"—"],["Término",c.fin?fmtDT(c.fin):"—"]],[3000,6400])+
+      docxP("3. Detalle por código",{b:true,sz:26,h:true});
+    const cods=Object.entries(c.codigos||{}).sort((a,b)=>a[0].localeCompare(b[0]));
+    if(!cods.length)body+=docxP("Sin códigos inspeccionados.");
+    for(const [cod,x] of cods){const it=ptFind(cod)||{};
+      body+=docxP(it.desc?`${cod} · ${it.desc}`:cod,{b:true,sz:24,h:true})+docxTabla([["Clasificación",tx(x.clas)],["Acción tomada",x.acc||"—"],["Muestreo",x.rev!==""&&x.rev!=null?`${fmt2(+x.rev)} revisadas de ${fmt2(+x.tot||0)}${+x.tot?` (${Math.round(+x.rev*100/+x.tot)}%)`:""}`:"—"],["Estado del embalaje",ls(x.emb)],["Estado del producto",ls(x.pro)],["Etiquetado (idioma, normativa, vencimiento)",ls(x.etq)],["Comentarios / observaciones",x.com||"—"]],[3000,6400]);
+      const fs=fotos.filter(f=>f.cod===cod);if(fs.length)body+=`<w:p>${fs.map(fotoXml).join("")}</w:p>`+docxP(`Evidencia fotográfica: ${fs.length} foto${fs.length===1?"":"s"}`,{c:"5A6B78",sz:18})}
+    const sueltas=fotos.filter(f=>!f.cod||!(c.codigos||{})[f.cod]);if(sueltas.length)body+=docxP("Otras fotos de calidad",{b:true,sz:24,h:true})+`<w:p>${sueltas.map(fotoXml).join("")}</w:p>`;
+    body+=docxP("4. Validación",{b:true,sz:26,h:true})+docxTabla([["Responsable de la inspección",R.persona||R.nombre||""],["Validado en la app",c.fin?`${fmtDT(c.fin)} · usuario ${R.nombre||""}`:"Inspección no terminada"],["Firma",""]],[3000,6400])+
+      docxP(`Informe generado el ${fmtDT(new Date().toISOString())} desde Control de Operaciones.`,{c:"5A6B78",sz:16});
+    const doc=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+    const z=XLSX.CFB.utils.cfb_new(),add=(n,t)=>XLSX.CFB.utils.cfb_add(z,n,typeof t==="string"?new TextEncoder().encode(t):t);
+    add("[Content_Types].xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+    add("_rels/.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    add("word/document.xml",doc);
+    add("word/_rels/document.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join("")}</Relationships>`);
+    media.forEach((m,i)=>add(`word/media/foto${i+1}.jpeg`,m));
+    XLSX.CFB.utils.cfb_del(z,"\u0001Sh33tJ5");
+    const bin=XLSX.CFB.write(z,{fileType:"zip",type:"array",compression:true});
+    const nombre=`Control_calidad_${(d.proveedor||"proveedor").replace(/[^\w-]+/g,"_")}_${(d.guia||d.referencia||"").replace(/[^\w-]+/g,"_")}.docx`;
+    await saveData(nombre,new Blob([bin],{type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}));toast("Informe Word descargado"+(fotos.length?` · ${fotos.length} foto${fotos.length===1?"":"s"}`:"")+(fotos.fallo?` · ⚠ ${fotos.fallo} foto${fotos.fallo===1?"":"s"} no se pudo incluir`:""))}
+  catch(e){console.error(e);toast("No se pudo armar el informe: "+e.message)}
+  finally{b.disabled=false;b.textContent="📄 Informe Word"}}
+$("#pvCalDoc").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(d)qcWord(d)};
 function pvDetRender(){
   const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;$("#pvCalCard").hidden=!d;if(!d)return;pvFotosRender(d);pvObsRender(d);pvCalRender(d);
   $("#pvCalT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}`;
@@ -8962,10 +9007,6 @@ function pvFilasXls(d){const cv=r=>r.ce&&r.f!==1,ord={falta:0,norec:1,noesp:2,so
 $("#pvXls").onclick=()=>{const d=pvList.find(x=>x.id===pvSel);if(!d)return;const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,sheetFrom(pvFilasXls(d)),"Cuadre");
   XLSX.utils.book_append_sheet(wb,sheetFrom(pvRegs(d).map(l=>({"N° de guía":d.guia||"","N° de referencia":d.referencia||"","N° de contenedor":d.contenedor||"","Origen":l.src==="man"?"Agregado a mano":"Celular","Hora":l.t?fmtDT(l.t):"","Persona":l.user||"","Código":l.code,"Descripción":l.desc||"","Cantidad":+l.qty||0,"Bulto":l.ce||umTxt(l.um),"Conversión":(+l.qty||0)*(+l.f||1)}))),"Registros");
-  {const c=d.calidad||{},R=c.resp||{},G=c.general||{};if(c.estado||d.obs_rec||d.obs_panel)XLSX.utils.book_append_sheet(wb,sheetFrom([
-      ...Object.entries(c.codigos||{}).map(([cod,x])=>({"Código":cod,"Descripción":(ptFind(cod)||{}).desc||"","Clasificación":(QC_TXT[x.clas]||[""])[0],"Acción":x.acc||"","Revisadas":x.rev??"","De un total de":x.tot??"","Muestreo %":x.rev!==""&&x.rev!=null&&+x.tot?Math.round(+x.rev*100/+x.tot):"",
-        "Embalaje":qcLista(x.emb),"Producto":qcLista(x.pro),"Etiquetado":qcLista(x.etq),"Comentario":x.com||"","Fotos":(d.fotos||[]).filter(f=>f.tipo==="cal"&&f.cod===cod).length})),
-      {"Código":"GENERAL","Descripción":G.com||"","Clasificación":(QC_TXT[G.clas]||[""])[0],"Acción":G.acc||"","Comentario":`Responsable: ${R.persona||R.nombre||""} · ${c.fin?fmtDT(c.fin):c.inicio?fmtDT(c.inicio):""} · Obs. bodega: ${d.obs_rec||"—"} · Obs. supervisor: ${d.obs_panel||"—"}`}]),"Control de calidad")}
   saveWb(wb,`Recepcion_${(d.proveedor||d.contenedor||"proveedor").replace(/[^\w-]+/g,"_")}_${(d.guia||d.referencia||"").replace(/[^\w-]+/g,"_")}.xlsx`)};
 $("#pvRef").onclick=()=>pvRefresh(false);$("#pvQ").oninput=pvRender;
 $("#pvDia").onchange=()=>{store.set("inv_pvdia",$("#pvDia").value);pvRender()};
