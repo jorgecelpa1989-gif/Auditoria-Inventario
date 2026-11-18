@@ -5173,8 +5173,6 @@ grant execute on function public.cb_prov_obs(text, uuid, text), public.cb_prov_c
     <div class="small muted" id="pvDetS"></div>
     <div class="kpis" id="pvDetK"></div>
     <div id="pvFotos" style="margin:6px 0"></div>
-    <div id="pvObs" style="margin:6px 0"></div>
-    <div id="pvCal" style="margin:6px 0"></div>
     <div class="row" style="gap:6px"><button class="btn" id="pvAddTog">＋ Agregar registro</button><button class="btn" id="pvModTog">✎ Modificar recibido</button><button class="btn" id="pvEdTog">✎ Editar datos y packing list</button><span class="sep"></span><button class="btn" id="pvXls">Excel</button><button class="btn" id="pvCerrar">Cerrar recepción</button><button class="btn danger" id="pvDel">Anular…</button></div>
     <div class="cbox" id="pvAdd" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Agregar un registro recibido que faltó</b>
@@ -5187,6 +5185,11 @@ grant execute on function public.cb_prov_obs(text, uuid, text), public.cb_prov_c
     </div>
     <div class="tbl" style="max-height:560px"><table id="pvCmp"></table></div>
     <div id="pvConfirm"></div>
+    <div id="pvObs" style="margin:10px 0 0"></div>
+  </div>
+  <div class="card" id="pvCalCard" hidden>
+    <div class="row"><div class="eyebrow">🔍 Control de calidad</div><span class="sep"></span><span class="small muted" id="pvCalT"></span></div>
+    <div id="pvCal"></div>
   </div>
 </section>
 </main>
@@ -8788,15 +8791,16 @@ function pvObsRender(d){const b=$("#pvObs");if(!b)return;const k=d.id+"|"+(d.obs
 const QC_TXT={conforme:["Conforme","p-ok"],obs:["Conforme con observaciones","p-warn"],no:["No conforme","p-bad"]};
 const qcLista=a=>Array.isArray(a)&&a.length?a.join(", "):"—";
 function pvCalRender(d){const b=$("#pvCal");if(!b)return;const c=d.calidad||{};
-  if(!c.estado){b.innerHTML='<div class="small muted">🔍 Control de calidad: sin inspección todavía (la hace un usuario con permiso «Control de calidad» desde su celular).</div>';return}
+  if(!c.estado){b.innerHTML='<div class="small muted">Sin inspección todavía. La hace un usuario con permiso «Control de calidad» desde su celular (🔍 Control de calidad).</div>';return}
   const G=c.general||{},cods=Object.entries(c.codigos||{}),R=c.resp||{},g=QC_TXT[G.clas];
-  b.innerHTML=`<div class="cbox" style="max-width:none;gap:6px"><div class="row" style="gap:8px"><b>🔍 Control de calidad</b><span class="pill ${c.estado==="terminada"?"p-ok":"p-info"}">${c.estado==="terminada"?"Inspeccionada":"En inspección"}</span>${g?`<span class="pill ${g[1]}">${g[0]}</span>`:""}${G.acc?`<span class="pill p-mut">${esc(G.acc)}</span>`:""}</div>
+  b.innerHTML=`<div style="display:flex;flex-direction:column;gap:6px"><div class="row" style="gap:8px"><span class="pill ${c.estado==="terminada"?"p-ok":"p-info"}">${c.estado==="terminada"?"Inspeccionada":"En inspección"}</span>${g?`<span class="pill ${g[1]}">${g[0]}</span>`:""}${G.acc?`<span class="pill p-mut">${esc(G.acc)}</span>`:""}</div>
     <div class="small">Responsable: <b>${esc(R.persona||R.nombre||"")}</b>${R.nombre&&R.persona?` (usuario ${esc(R.nombre)})`:""} · inicio ${c.inicio?fmtDT(c.inicio):"—"}${c.fin?" · terminada "+fmtDT(c.fin):""}${(c.hist||[]).filter(h=>h.que==="modificada").length?` · modificada ${fmt((c.hist||[]).filter(h=>h.que==="modificada").length)} vez/veces`:""}</div>
     ${G.com?`<div class="small">Comentario general: ${esc(G.com)}</div>`:""}
     <div class="tbl"><table class="calTbl"><thead><tr><th>Código</th><th>Descripción</th><th>Clasificación</th><th>Acción</th><th>Muestreo</th><th>Embalaje</th><th>Producto</th><th>Etiquetado</th><th>Comentario</th><th>Fotos</th></tr></thead><tbody>${cods.length?cods.sort((a,b)=>a[0].localeCompare(b[0])).map(([cod,x])=>{const t=QC_TXT[x.clas],it=ptFind(cod)||{},nf=(d.fotos||[]).filter(f=>f.tipo==="cal"&&f.cod===cod).length;
       return `<tr><td class="code">${esc(cod)}</td><td>${esc(it.desc||"")}</td><td>${t?`<span class="pill ${t[1]}">${t[0]}</span>`:"—"}</td><td>${esc(x.acc||"—")}</td><td style="white-space:nowrap">${x.rev!==""&&x.rev!=null?`${fmt2(+x.rev)} de ${fmt2(+x.tot||0)}${+x.tot?` (${Math.round(+x.rev*100/+x.tot)}%)`:""}`:"—"}</td><td>${esc(qcLista(x.emb))}</td><td>${esc(qcLista(x.pro))}</td><td>${esc(qcLista(x.etq))}</td><td>${esc(x.com||"")}</td><td>${nf?"📷 "+nf:""}</td></tr>`}).join(""):'<tr><td colspan="10" class="muted">Sin códigos inspeccionados todavía.</td></tr>'}</tbody></table></div></div>`}
 function pvDetRender(){
-  const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;if(!d)return;pvFotosRender(d);pvObsRender(d);pvCalRender(d);
+  const d=pvList.find(x=>x.id===pvSel);$("#pvDet").hidden=!d;$("#pvCalCard").hidden=!d;if(!d)return;pvFotosRender(d);pvObsRender(d);pvCalRender(d);
+  $("#pvCalT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}`;
   const rows=pvCuadre(d),cnt=s=>rows.filter(r=>r.st===s).length,[t]=PVST[pvSt(d)];
   $("#pvDetT").textContent=`${d.proveedor||"Proveedor sin nombre"} · Guía ${d.guia||"—"} · Ref. ${d.referencia||"—"}${d.contenedor?" · Cont. "+d.contenedor:""}`;
   $("#pvDetS").innerHTML=`${esc(PCTIPO[d.tipo]||"")} · Fecha ${fechaCL(d.fecha)} · ${t}${d.persona?" · creó "+esc(d.persona):d.origen&&d.origen!=="panel"?" · creada desde el celular":""}${d.rec_persona?" · recibe "+esc(d.rec_persona):""}${d.recibido?" · terminada "+fmtDT(d.recibido):""}${d.nota?`<br>Observación: ${esc(d.nota)}`:""}`;

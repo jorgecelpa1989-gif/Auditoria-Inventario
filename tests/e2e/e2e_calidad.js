@@ -53,6 +53,7 @@ const route=async c=>{await c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.re
  const cs=await b.newContext({viewport:{width:1366,height:900},timezoneId:'America/Santiago'});await route(cs);const s=await cs.newPage();s.on('pageerror',e=>errs.push('panel: '+e.message));
  await s.goto(B+'#panel');await s.evaluate(([u,a])=>{localStorage.clear();localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
  await s.goto(B+'#prov');await s.reload();await s.waitForTimeout(3000);await s.click(`#pvTbl [data-pv="${idP}"]`);await s.waitForTimeout(600);
+ check(await s.isVisible('#pvCalCard')&&await s.evaluate(()=>{const a=document.querySelector('#pvDet').getBoundingClientRect(),b=document.querySelector('#pvCalCard').getBoundingClientRect();return b.top>=a.bottom-1&&!document.querySelector('#pvDet').contains(document.querySelector('#pvCal'))}),'Control de calidad en su propia tarjeta, debajo del cuadre (no mezclado)');
  const pc=await s.textContent('#pvCal');
  check(/Inspeccionada/.test(pc)&&/Conforme con observaciones/.test(pc)&&/Reclamo a proveedor/.test(pc)&&/MARIA/.test(pc)&&/2 de 10 \(20%\)/.test(pc)&&/Golpes, Humedad/.test(pc)&&/📷 1/.test(pc),'Panel: ficha de calidad por código, responsable y fotos');
  check(/2 pallets golpeados/.test(await s.textContent('#pvObs')),'Panel: observación de bodega');
