@@ -24,10 +24,10 @@ const B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN=
  const fr=s.frame({url:/about:blank/})||s.frames().find(f=>f!==s.mainFrame());
  const lbl=await (await s.$('#ppFrame')).contentFrame();const tx=await lbl.textContent('body');
  check(/P000001/.test(tx)&&/140101/.test(tx)&&/2000001401019/.test(tx)&&/SACO HARINA/.test(tx)&&/4 SACOS/.test(tx)&&/100 KG/i.test(tx)&&/Impresión: \d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}/.test(tx)&&!/REIMPRESIÓN/.test(tx),'Etiqueta: pallet, código, EAN-13, descripción, bultos, conversión, fecha y hora');
- check(await lbl.$$eval('svg',v=>v.length)===2,'Etiqueta con 2 códigos de barra');
+ check(await lbl.$$eval('.bc svg',v=>v.length)===2&&await lbl.$$eval('.cod svg',v=>v.length===1&&/140101/.test(v[0].textContent)),'Etiqueta con 2 códigos de barra y el código numérico grande');
  // leer los códigos de barra con el lector del celular
  const leidos=await s.evaluate(async()=>{const fr=document.querySelector('#ppFrame').contentDocument;const out=[];
-   for(const sv of fr.querySelectorAll('svg')){const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(sv.outerHTML);await img.decode();
+   for(const sv of fr.querySelectorAll('.bc svg')){const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(sv.outerHTML);await img.decode();
      const cv=document.createElement('canvas');cv.width=900;cv.height=220;const g=cv.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,900,220);g.drawImage(img,20,20,860,180);
      const blob=await new Promise(r=>cv.toBlob(r,'image/png'));let d=document.getElementById('tstRd');if(!d){d=document.createElement('div');d.id='tstRd';d.style.display='none';document.body.appendChild(d)}
      try{out.push(await new Html5Qrcode('tstRd').scanFile(new File([blob],'b.png',{type:'image/png'}),false))}catch(e){out.push('ERR:'+e)}}return out});
@@ -46,9 +46,13 @@ const B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN=
  check(sql("select (data->>'qty')||'|'||(data->'ed'->0->>'de')||'→'||(data->'ed'->0->>'a') from cb_pt where pallet='P000001'")==='5|4→5','Corregir: 4 → 5 con historial');
  DQ.push('0','');await s.click('#ppTbl [data-pped] >> nth=0');await s.waitForTimeout(1800);
  check(sql("select data->>'qty' from cb_pt where pallet='P000002'")==='0'&&/1 anulado/.test(await s.textContent('#ppRes')),'Anular (0): queda en 0 y se ve anulado');
+ // Bodega recibe con el celular "sin número" (como hoy): Recepción PT cuadra el pallet del PC por producto
+ sql(`insert into cb_pt(lid,puesto,pallet,data,t,lado) values ('bod1','u_bod','SN-BOD1',jsonb_build_object('lid','bod1','sn',true,'k','140101','code','140101','desc','SACO HARINA 25KG','qty',5,'um','KG','ce','SACO','f',25,'pallet','SN-BOD1','user','FELIPE','t',to_char(now() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')),now(),'R')`);
+ await s.click('nav.tabs button[data-v="pt"]');await s.waitForTimeout(2500);
+ const pt=await s.textContent('#ptRes');check(/140101/.test(pt)&&/Recibido OK/.test(pt)&&!/En tránsito/.test(pt)&&!/Sin registro de producción/.test(pt),'Recepción PT: pallet del PC (5 sacos) cuadra con lo recibido sin N° → Recibido OK');
  // Recepción PT del panel los ve como producción
  const L=JSON.parse(rpc('cb_pt_listar',{p_clave:ADMIN,p_desde:new Date(Date.now()-86400000).toISOString()}).body);
- check(L.pallets.length===2&&L.pallets.every(p=>p.puesto==='produccion'),'Recepción PT: los pallets salen como "Producción entrega"');
+ check(L.pallets.length===3&&L.pallets.filter(p=>p.puesto==='produccion').length===2&&true,'Recepción PT: los pallets salen como "Producción entrega"');
  // permisos
  const sv=rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:'',p_nombre:'Prod PC',p_permisos:['pt_producir']});
  check(sv.ok,'Supervisor con solo "pt_producir" se puede crear');

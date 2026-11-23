@@ -46,7 +46,7 @@ language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform cb_puede(p_clave, 'pt_producir');
   update cb_pt set data = data || jsonb_build_object('imp', coalesce(data->'imp', '[]'::jsonb) || to_jsonb(now()))
-   where lid = p_lid and puesto = 'panel_prod';
+   where lid = p_lid and puesto = 'panel_prod' and data->>'via' = 'pc';
   if not found then raise exception 'no_existe'; end if;
 end $$;
 
@@ -57,7 +57,7 @@ declare r cb_pt;
 begin
   perform cb_puede(p_clave, 'pt_producir');
   if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
-  select * into r from cb_pt where lid = p_lid and puesto = 'panel_prod' for update;
+  select * into r from cb_pt where lid = p_lid and puesto = 'panel_prod' and data->>'via' = 'pc' for update;
   if not found then raise exception 'no_existe'; end if;
   if r.t < now() - interval '15 days' then raise exception 'muy_antiguo'; end if;
   update cb_pt set data = data || jsonb_build_object('qty', p_qty, 'ed', coalesce(data->'ed', '[]'::jsonb) ||

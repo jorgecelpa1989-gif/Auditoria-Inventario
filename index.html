@@ -5089,7 +5089,7 @@ language plpgsql security definer set search_path = public, extensions as $$
 begin
   perform cb_puede(p_clave, 'pt_producir');
   update cb_pt set data = data || jsonb_build_object('imp', coalesce(data->'imp', '[]'::jsonb) || to_jsonb(now()))
-   where lid = p_lid and puesto = 'panel_prod';
+   where lid = p_lid and puesto = 'panel_prod' and data->>'via' = 'pc';
   if not found then raise exception 'no_existe'; end if;
 end $$;
 
@@ -5100,7 +5100,7 @@ declare r cb_pt;
 begin
   perform cb_puede(p_clave, 'pt_producir');
   if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
-  select * into r from cb_pt where lid = p_lid and puesto = 'panel_prod' for update;
+  select * into r from cb_pt where lid = p_lid and puesto = 'panel_prod' and data->>'via' = 'pc' for update;
   if not found then raise exception 'no_existe'; end if;
   if r.t < now() - interval '15 days' then raise exception 'muy_antiguo'; end if;
   update cb_pt set data = data || jsonb_build_object('qty', p_qty, 'ed', coalesce(data->'ed', '[]'::jsonb) ||
@@ -5186,7 +5186,7 @@ grant execute on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt
   </div>
   <datalist id="ppList"></datalist>
   <div id="ppInfo" style="margin-top:10px;min-height:22px"></div>
-  <p class="small muted" style="margin:8px 0 0">Cada pallet recibe un N° correlativo (P000001, P000002…) que nunca se repite. La etiqueta es para impresora térmica de 10×15 cm. Bodega escanea el N° de pallet en su celular (Recepción PT) y se cuadra solo.</p>
+  <p class="small muted" style="margin:8px 0 0">Cada pallet recibe un N° correlativo (P000001, P000002…) que nunca se repite. La etiqueta es para impresora térmica de 10×15 cm. Bodega escanea el código del producto (EAN-13) en su celular, como hoy, y Recepción PT lo cuadra por producto.</p>
  </div>
  <div class="card">
   <div class="row" style="gap:8px;flex-wrap:wrap"><div class="eyebrow">Pallets registrados en este PC</div><span class="sep"></span><input type="date" id="ppDia" aria-label="Día"><button class="btn sm" id="ppTraer" type="button">Actualizar</button></div>
@@ -7844,6 +7844,7 @@ async function ptPalletRead(v){
 }
 function ptProducto(v,silent){
   v=codeStr(v);if(!v)return null;
+  if(!PT_PALLET&&/^P\d{6}$/.test(v)&&!ptFind(v)){$("#ptScan").value="";ptChk=v;toast("Ese es el N° de pallet. Escanea el código de barras del producto (EAN-13).");return null}
   const it=ptFind(v);
   if(!it&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){const res=buscarNombre(ptItems(),v),box=$("#ptSugg");box.hidden=false;
     box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(v)}"</span></button>`;
@@ -8396,10 +8397,12 @@ function ptRows(){
   if(!ini){const c=ptData.cierres.filter(x=>x.puesto==="produccion").map(x=>x.t).sort().at(-1);ini=c?new Date(c):new Date(new Date().setHours(0,0,0,0))}
   const E=new Map(),R=new Map();
   const SN=new Map();
+  const Rnum=new Set(ptData.pallets.filter(d=>d.puesto!=="produccion"&&!ptSNd(d)).map(d=>codeStr(d.pallet)));
+  const snOf=d=>ptSNd(d)||(d.via==="pc"&&d.puesto==="produccion"&&!Rnum.has(codeStr(d.pallet)));   // pallet etiquetado en el PC: si bodega no escaneó su N°, se cuadra por producto
   const cvSku=new Map();for(const d of ptData.pallets){convFix(d);if(d.ce&&+d.f>0&&+d.f!==1){const k=key(d.k||d.code);if(!cvSku.has(k))cvSku.set(k,{ce:d.ce,f:+d.f,um:d.um})}}
   for(const d of ptData.pallets){const cv=!(d.ce&&+d.f>0&&+d.f!==1)&&cvSku.get(key(d.k||d.code));
     if(cv){d.ce=cv.ce;d.f=cv.f;if(!d.um||UMN(d.um)==="un")d.um=cv.um||d.um;d.convAp=true}   // registro antiguo sin conversión (p. ej. "10 un"): se lee como 10 ROLLOS
-    if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
+    if(snOf(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
       if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);SN.set(k,o);if(!(+d.qty>0))continue;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
   const rows=[];
@@ -8944,15 +8947,15 @@ const ppCv=d=>!!(d&&d.ce&&+d.f>0&&+d.f!==1);
 function ppEtiqueta(d,re){const cv=ppCv(d),cod=d.k||d.code,ean=eanInt(cod),um=umTxt(d.um),q=+d.qty||0,now=new Date().toISOString();
   const bul=cv?`${fmt2(q)} ${esc(q===1?d.ce:plural(d.ce))}`:`${fmt2(q)} ${esc(um)}`,conv=cv?`${fmt2(q*(+d.f))} ${esc(um)}`:`${fmt2(q)} ${esc(um)}`;
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Etiqueta ${esc(d.pallet)}</title><style>@page{size:100mm 150mm;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif}
-  .lb{width:100mm;height:150mm;padding:5mm;display:flex;flex-direction:column;gap:2.2mm;overflow:hidden;page-break-after:always}.hd{display:flex;justify-content:space-between;align-items:baseline;font-size:9pt;font-weight:700;border-bottom:.6mm solid #000;padding-bottom:1.5mm}
-  .k{font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.3pt}.big{font-size:28pt;font-weight:900;letter-spacing:1pt;line-height:1}.bc svg{display:block;width:100%;height:17mm}.hr{text-align:center;font-size:10pt;letter-spacing:2pt;font-family:"Courier New",monospace;font-weight:700}
+  .lb{width:100mm;height:150mm;padding:4mm 2.5mm;display:flex;flex-direction:column;gap:1.6mm;overflow:hidden;page-break-after:always}.hd{display:flex;justify-content:space-between;align-items:baseline;font-size:9pt;font-weight:700;border-bottom:.6mm solid #000;padding-bottom:1.5mm}
+  .k{font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.3pt}.big{font-size:28pt;font-weight:900;letter-spacing:1pt;line-height:1}.bc svg{display:block;width:100%;height:15mm}.cod svg{display:block;width:95mm;height:25mm}.hr{text-align:center;font-size:10pt;letter-spacing:2pt;font-family:"Courier New",monospace;font-weight:700}
   .desc{font-size:13pt;font-weight:700;line-height:1.15;max-height:3.5em;overflow:hidden}.g{display:grid;grid-template-columns:1fr 1fr;gap:2mm}.box{border:.4mm solid #000;padding:1.5mm 2mm}.v{font-size:16pt;font-weight:800;line-height:1.1}
   .ft{margin-top:auto;font-size:8pt;display:flex;justify-content:space-between;gap:2mm;border-top:.4mm solid #000;padding-top:1.5mm}.re{font-weight:900}</style></head><body><div class="lb">
   <div class="hd"><span>GRUPO VECTOR</span><span>PRODUCTO TERMINADO</span></div>
   <div><div class="k">N° de pallet</div><div class="big">${esc(d.pallet)}</div></div>
   <div class="bc">${barSvg(c128Bits(d.pallet))}</div><div class="hr">${esc(d.pallet)}</div>
-  <div class="row" style="display:flex;justify-content:space-between;align-items:baseline"><div><div class="k">Código de producto</div><div class="big" style="font-size:22pt">${esc(cod)}</div></div>${ean?'<div class="k">EAN-13</div>':""}</div>
-  <div class="bc">${barSvg(ean?eanBits(ean):c128Bits(cod),ean?9:10)}</div><div class="hr">${esc(ean||cod)}</div>
+  <div class="k">Código de producto</div><div class="cod"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 250" preserveAspectRatio="none"><text x="475" y="246" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="340" textLength="946" lengthAdjust="spacingAndGlyphs">${esc(cod)}</text></svg></div>
+  <div class="bc">${barSvg(ean?eanBits(ean):c128Bits(cod),ean?9:10)}</div><div class="hr">${ean?"EAN-13 · ":""}${esc(ean||cod)}</div>
   <div><div class="k">Descripción</div><div class="desc">${esc(d.desc||"")}</div></div>
   <div class="g"><div class="box"><div class="k">Cantidad${cv?" en bultos":""}</div><div class="v">${bul}</div></div><div class="box"><div class="k">Conversión${UMN(um)==="m"?" · metros lineales":""}</div><div class="v">${conv}</div></div></div>
   <div class="ft"><span>Impresión: ${esc(xF(now))} ${esc(xH(now))}${re?' · <span class="re">REIMPRESIÓN</span>':""}</span><span>${esc(d.user||"")}</span></div>

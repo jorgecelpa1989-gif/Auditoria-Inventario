@@ -88,14 +88,14 @@ check(rpc('cb_pt_listar',{p_clave:sB,p_desde:new Date().toISOString()}).err==='a
 const FN={cb_listar:'inv_ver',cb_lecturas_de:'inv_ver',cb_conteo_codigos:'inv_ver',cb_catalogo_stock:'inv_ver',
   cb_crear:'inv_operar',cb_conteo_editar:'inv_operar',cb_conteo_asignar:'inv_operar',cb_finalizar:'inv_operar',cb_bloquear:'inv_operar',cb_liberar:'inv_operar',cb_catalogo_subir:'inv_operar',
   cb_mov_listar:'mp_ver',cb_mov_lecturas:'mp_ver',cb_mov_crear:'mp_solicitar',cb_mov_agregar_panel:'mp_operar',cb_mov_corregir:'mp_operar',cb_mov_activar:'mp_operar',cb_mov_extender:'mp_operar',cb_mov_asignar:'mp_operar',cb_mov_bloquear:'mp_operar',cb_mov_liberar:'mp_operar',cb_mov_eliminar:'mp_eliminar',cb_mov_restaurar:'mp_eliminar',cb_mov_anulados:'mp_ver',
-  cb_pt_listar:'pt_ver',cb_pt_editar_panel:'pt_corregir',cb_pt_agregar_panel:'pt_corregir',
+  cb_pt_listar:'pt_ver',cb_pt_editar_panel:'pt_corregir',cb_pt_agregar_panel:'pt_corregir',cb_pt_prod_registrar:'pt_producir',cb_pt_prod_dia:'pt_producir',cb_pt_prod_impreso:'pt_producir',cb_pt_prod_corregir:'pt_producir',
   cb_dev_listar:'dev_ver',cb_dev_crear_panel:'dev_crear',cb_dev_cerrar:'dev_cerrar',cb_dev_reabrir:'dev_cerrar',cb_dev_recibir_panel:'dev_cerrar',cb_dev_eliminar:'dev_eliminar',cb_dev_restaurar:'dev_eliminar',cb_dev_anulados:'dev_ver',
   cb_u_listar:'usr_admin|inv_operar|mp_operar',cb_puesto_estado:'usr_admin|inv_operar|mp_operar',cb_u_guardar:'usr_admin',cb_u_liberar:'usr_admin',cb_u_eliminar:'usr_admin',cb_puesto_link:'usr_admin',
   cb_prov_listar:'prov_ver',cb_prov_guardar:'prov_operar',cb_prov_agregar_panel:'prov_operar',cb_prov_corregir:'prov_operar',cb_prov_obs:'prov_operar',cb_prov_cerrar:'prov_operar',cb_prov_eliminar:'prov_eliminar',cb_prov_restaurar:'prov_eliminar',cb_prov_anulados:'prov_ver',cb_ubic_datos:'ubi_ver',cb_ubic_guardar:'ubi_operar',cb_ubic_mover_panel:'ubi_operar',cb_ubic_anular:'ubi_operar',
   cb_catalogo_ver:'*',cb_sup_yo:'*',cb_mov_finalizar:'mp_operar'};   // finalizar una entrega cualquiera exige "operar" (sin él, solo el cierre automático)
 const FIJOS={cb_conteo_asignar:{p_puesto:''}};   // argumentos que evitan errores de negocio ajenos a los permisos
 const SOLO_ADMIN=['cb_eliminar','cb_configurar','cb_prod_clave','cb_prod_estado','cb_prod_eliminar','cb_sup_listar','cb_sup_guardar','cb_sup_link','cb_sup_eliminar'];
-const PERMS=['inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar','pt_ver','pt_corregir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','prov_ver','prov_operar','prov_eliminar','usr_admin'];
+const PERMS=['inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar','pt_ver','pt_corregir','pt_producir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','prov_ver','prov_operar','prov_eliminar','usr_admin'];
 const fns2=sql(`select string_agg(p.proname||'|'||(select string_agg(n||':'||format_type(t,null), ',') from unnest(p.proargnames, p.proargtypes::oid[]) x(n,t)), ';' order by p.proname)
   from pg_proc p where p.pronamespace='public'::regnamespace and 'p_clave' = any(p.proargnames) and has_function_privilege('anon', p.oid, 'execute')`).split(';').map(f=>{const [name,ar]=f.split('|');return {name,ar:ar.split(',').map(a=>a.split(':'))}});
 const sinMapa=fns2.map(f=>f.name).filter(n=>!FN[n]&&!SOLO_ADMIN.includes(n));
