@@ -46,6 +46,9 @@ const route=async c=>c.route(SBU+'/rest/v1/rpc/*',async r=>{const fn=r.request()
  // PT
  await p.click('nav.tabs button[data-v="pt"]');await p.waitForTimeout(2500);
  check(/PAL-1/.test(await p.textContent('#ptRes'))&&(await p.$$('#ptRes [data-pted]')).length===0&&await p.isHidden('#ptAddTog')&&await p.isVisible('#ptExp'),'PT: ve la cuadratura y el botón Excel, sin "corregir" ni "agregar registro"');
+{const [dl]=await Promise.all([p.waitForEvent('download'),p.click('#ptExp')]);const fp=await dl.path();
+ const r=await p.evaluate(async b=>{const wb=XLSX.read(new Uint8Array(b),{type:'array'});const ws=wb.Sheets.Pallets;const j=XLSX.utils.sheet_to_json(ws);return {h:Object.keys(j[0]||{}),f:(j.find(x=>x['Fecha producción'])||{})['Fecha producción']||'',hr:(j.find(x=>x['Hora producción'])||{})['Hora producción']||''}},[...require('fs').readFileSync(fp)]);
+ check(r.h.includes('Fecha producción')&&r.h.includes('Hora producción')&&/^\d{2}-\d{2}-\d{4}$/.test(r.f)&&/^\d{2}:\d{2}:\d{2}/.test(r.hr)&&!/-/.test(r.hr),'PT Excel: fecha y hora en columnas separadas → '+r.f+' | '+r.hr);}
  // Devoluciones
  await p.click('nav.tabs button[data-v="devol"]');await p.waitForTimeout(2500);
  const dt=await p.textContent('#dvTbl');check(/G-PROD/.test(dt)&&!/G-DIST/.test(dt),'Devoluciones: ve solo las de Producción');
