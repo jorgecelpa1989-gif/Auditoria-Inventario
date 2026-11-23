@@ -5143,6 +5143,91 @@ revoke all on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt_pr
 grant execute on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt_prod_dia(text, date),
   public.cb_pt_prod_impreso(text, text), public.cb_pt_prod_corregir(text, text, numeric) to anon, authenticated;
 
+-- =====================================================================
+--  Inventario → Almacenamiento: pasar un conteo (con sus ubicaciones) al stock por ubicación.
+--  · Ajusta cada ubicación/SKU elegido a lo contado: ingreso o salida "ajuste por inventario" (queda en el historial, se puede anular).
+--  · Crea las ubicaciones que no existían (las que el supervisor marcó).
+--  · Guarda el IRA (precisión del stock por ubicación) de cada pase.
+--  Permiso: ubi_operar (el panel además necesita inv_ver para leer las lecturas del conteo). Solo agrega: lo demás sigue igual.
+-- =====================================================================
+create table if not exists public.cb_ubic_inv (
+  id       uuid primary key default gen_random_uuid(),
+  t        timestamptz not null default now(),
+  conteo   uuid,
+  nombre   text,
+  persona  text,
+  n        int not null default 0,      -- líneas comparadas (ubicación + SKU)
+  ok       int not null default 0,      -- líneas que cuadraban antes del ajuste
+  ira      numeric,                     -- ok / n (0 a 1)
+  ingresos int not null default 0,
+  salidas  int not null default 0,
+  nuevas   int not null default 0,      -- ubicaciones creadas
+  detalle  jsonb
+);
+create index if not exists cb_ubic_inv_t_idx on public.cb_ubic_inv (t desc);
+alter table public.cb_ubic_inv enable row level security;
+revoke all on public.cb_ubic_inv from public, anon, authenticated;
+
+create or replace function public.cb_ubic_inv_aplicar(p_clave text, p_conteo uuid, p_nuevas jsonb, p_lineas jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'ubi_operar'); v_nom text; v_per text := coalesce(cb_sup_nombre(p_clave), 'Supervisor');
+        e jsonb; v_u text; v_k text; v_obj numeric; v_f numeric; v_hay numeric; v_dif numeric; v_apl boolean; v_ira boolean;
+        n int := 0; v_ok int := 0; v_in int := 0; v_out int := 0; v_nu int := 0; v_det jsonb := '[]'::jsonb; v_nota text;
+begin
+  select nombre into v_nom from cb_conteos where id = p_conteo;
+  if not found then raise exception 'no_existe'; end if;
+  if p_lineas is null or jsonb_typeof(p_lineas) <> 'array' or jsonb_array_length(p_lineas) = 0 or jsonb_array_length(p_lineas) > 5000 then raise exception 'datos_invalidos'; end if;
+  if p_nuevas is not null and (jsonb_typeof(p_nuevas) <> 'array' or jsonb_array_length(p_nuevas) > 2000) then raise exception 'datos_invalidos'; end if;
+  v_nota := left('Ajuste por inventario: ' || coalesce(v_nom, ''), 200);
+  -- ubicaciones nuevas (si ya existía inactiva, se reactiva sin tocar sus datos)
+  for e in select * from jsonb_array_elements(coalesce(p_nuevas, '[]'::jsonb)) loop
+    v_u := upper(trim(coalesce(e->>'cod', '')));
+    if v_u = '' or length(v_u) > 40 then raise exception 'datos_invalidos'; end if;
+    insert into cb_ubic(cod, pasillo, rack, nivel, pos, tipo, nota, orden, activo)
+    values (v_u, left(nullif(trim(e->>'pasillo'), ''), 20), left(nullif(trim(e->>'rack'), ''), 40), left(nullif(trim(e->>'nivel'), ''), 20), null,
+            left(nullif(trim(e->>'tipo'), ''), 30), 'Creada desde el inventario ' || coalesce(v_nom, ''), 100000, true)
+    on conflict (cod) do update set activo = true where cb_ubic.activo = false;
+    if found then v_nu := v_nu + 1; end if;
+  end loop;
+  -- ajuste de cada ubicación + SKU a lo contado (el stock actual lo calcula el servidor)
+  for e in select * from jsonb_array_elements(p_lineas) loop
+    v_u := upper(trim(coalesce(e->>'u', ''))); v_k := nullif(trim(coalesce(e->>'k', '')), '');
+    begin v_obj := (e->>'obj')::numeric; v_f := coalesce(nullif(e->>'f', '')::numeric, 1);
+          v_apl := coalesce((e->>'aplicar')::boolean, true); v_ira := coalesce((e->>'ira')::boolean, true);
+    exception when others then raise exception 'datos_invalidos'; end;
+    if v_u = '' or v_k is null or length(v_k) > 40 or v_obj is null or v_obj < 0 or v_obj > 100000000 or v_f <= 0 or v_f > 100000 then raise exception 'datos_invalidos'; end if;
+    if not exists (select 1 from cb_ubic where cod = v_u and activo) then raise exception 'ubicacion_no_existe'; end if;
+    perform pg_advisory_xact_lock(hashtext('cb_ubic:' || v_u));
+    v_hay := cb_ubic_hay(v_u, v_k); v_dif := v_obj - v_hay;
+    if v_ira then n := n + 1; if abs(v_dif) < 1e-9 then v_ok := v_ok + 1; end if; end if;   -- IRA: solo ubicaciones que ya existían
+    if abs(v_dif) < 1e-9 or not v_apl then null;   -- cuadra, o el supervisor no la marcó: no se mueve
+    elsif v_dif > 0 then
+      perform cb_ubic_registrar(jsonb_build_object('tipo', 'ingreso', 'hacia', v_u, 'k', v_k, 'qty', v_dif / v_f, 'f', v_f, 'ce', e->>'ce', 'um', e->>'um', 'desc', e->>'desc', 'nota', v_nota), 'inventario', v_per);
+      v_in := v_in + 1;
+    else
+      perform cb_ubic_registrar(jsonb_build_object('tipo', 'salida', 'desde', v_u, 'k', v_k, 'qty', -v_dif / v_f, 'f', v_f, 'ce', e->>'ce', 'um', e->>'um', 'desc', e->>'desc', 'nota', v_nota), 'inventario', v_per);
+      v_out := v_out + 1;
+    end if;
+    v_det := v_det || jsonb_build_array(jsonb_build_object('u', v_u, 'k', v_k, 'antes', v_hay, 'contado', v_obj, 'aplicado', v_apl and abs(v_dif) >= 1e-9));
+  end loop;
+  insert into cb_ubic_inv(conteo, nombre, persona, n, ok, ira, ingresos, salidas, nuevas, detalle)
+  values (p_conteo, v_nom, v_per, n, v_ok, case when n > 0 then round(v_ok::numeric / n, 4) end, v_in, v_out, v_nu, v_det);
+  return jsonb_build_object('n', n, 'ok', v_ok, 'ira', case when n > 0 then round(v_ok::numeric / n, 4) end, 'ingresos', v_in, 'salidas', v_out, 'nuevas', v_nu);
+end $$;
+
+-- Historial de pases (IRA de cada uno), para el panel.
+create or replace function public.cb_ubic_inv_hist(p_clave text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r text := cb_puede(p_clave, 'ubi_ver');
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('t', t, 'nombre', nombre, 'persona', persona, 'n', n, 'ok', ok, 'ira', ira,
+                    'ingresos', ingresos, 'salidas', salidas, 'nuevas', nuevas) order by t desc)
+                   from (select * from cb_ubic_inv order by t desc limit 30) x), '[]'::jsonb);
+end $$;
+
+revoke all on function public.cb_ubic_inv_aplicar(text, uuid, jsonb, jsonb), public.cb_ubic_inv_hist(text) from public;
+grant execute on function public.cb_ubic_inv_aplicar(text, uuid, jsonb, jsonb), public.cb_ubic_inv_hist(text) to anon, authenticated;
+
 </script>
   </div>
 
@@ -5198,7 +5283,7 @@ grant execute on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt
   <div class="card">
     <div class="row"><div class="eyebrow">6 · Almacenamiento y ubicaciones</div><span class="sep"></span><span class="small muted" id="ubAt"></span></div>
     <div class="row"><h2 style="margin:0">Mapa de la bodega</h2><span class="sep"></span>
-      <button class="btn primary" id="ubRef">Actualizar</button><button class="btn" id="ubXls">Excel</button><button class="btn" id="ubMovTog">＋ Registrar movimiento</button><button class="btn" id="ubCargaTog">Cargar ubicaciones</button></div>
+      <button class="btn primary" id="ubRef">Actualizar</button><button class="btn" id="ubXls">Excel</button><button class="btn" id="ubMovTog">＋ Registrar movimiento</button><button class="btn" id="ubCargaTog">Cargar ubicaciones</button><button class="btn" id="ubInvTog">📋 Pasar inventario</button></div>
     <div class="notice" id="ubNote" hidden></div>
     <div class="cbox" id="ubCarga" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Cargar las ubicaciones de la bodega</b>
@@ -5210,6 +5295,15 @@ grant execute on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt
       <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ubReempl"> Reemplazar la lista: las ubicaciones que no vengan quedan inactivas (solo si están vacías; su historial se guarda)</label>
       <div class="small" id="ubCargaInfo"></div>
       <div class="row" style="gap:8px"><button class="btn sm" id="ubPrev" type="button">Revisar</button><button class="btn primary" id="ubCargaOk" type="button" disabled>Guardar ubicaciones</button><button class="btn" id="ubCargaX" type="button">Cancelar</button></div>
+    </div>
+    <div class="cbox" id="ubInv" hidden style="max-width:none;gap:8px;margin:8px 0">
+      <b>Pasar un inventario a las ubicaciones</b>
+      <div class="small muted">Compara lo contado en cada ubicación con lo que dice Almacenamiento y calcula el <b>IRA</b> (precisión del stock por ubicación). Lo que marques se <b>ajusta a lo contado</b> con un movimiento «ajuste por inventario» (queda en el historial y se puede anular). Lo que Almacenamiento tenía en una ubicación contada y no se contó queda como <b>faltante</b>.</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label class="f" style="flex:1 1 280px">Conteo<select id="ubInvC"></select></label>
+        <button class="btn primary" id="ubInvVer" type="button">Revisar</button><button class="btn" id="ubInvXls" type="button" disabled>Excel</button><button class="btn" id="ubInvX" type="button">Cerrar</button></div>
+      <div id="ubInvRes"></div>
+      <div id="ubInvHist" class="small"></div>
     </div>
     <div class="cbox" id="ubMovBox" hidden style="max-width:none;gap:8px;margin:8px 0">
       <b>Registrar un movimiento desde el panel</b> <span class="small muted">(carga inicial o corrección; queda a tu nombre)</span>
@@ -6271,7 +6365,7 @@ const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"in
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_corregir:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
   cb_pt_listar:"pt_ver",cb_pt_prod_registrar:"pt_producir",cb_pt_prod_dia:"pt_producir",cb_pt_prod_impreso:"pt_producir",cb_pt_prod_corregir:"pt_producir",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
-  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_obs:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
+  cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_obs:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_inv_aplicar:"ubi_operar",cb_ubic_inv_hist:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
 async function rpc(conf,fn,args){
   if(SUP_FN[fn]&&args&&args.p_clave){let s=false;try{s=supOn()&&args.p_clave===SUPI.ses}catch(e){}
@@ -6651,7 +6745,7 @@ const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la list
 const SUP_SIEMPRE="#sbCard,#appUrlCard,#supAdm,#mpAcc";
 const SUP_HIDE={inv_operar:"#v-erp>.card:first-child,#erpMapCard,#factCard,#maestroCard,#edCard,#reCard,#btnReset,#btnResetAll,[data-fz],[data-lb],[data-lbl],[data-lbb],[data-lbf],select[data-lba]",
   mp_solicitar:"#solCard",mp_operar:"#v-mp .supOnly,#btnAct,#actAsig,#btnFinMov,#btnExt,#mpAddTog,#mpModTog,#mpAddPanel,[data-sa],[data-lbml],[data-lbmb]",mp_eliminar:"[data-mx]",
-  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg],#pvObsOk",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban]",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
+  pt_corregir:"[data-pted],[data-ptsn],#ptAddTog,#ptAddPanel",dev_crear:"#dpCard",dev_cerrar:"#dvCerrar,#dvReabrir,#dvRecPanel",dev_eliminar:"#dvDel",prov_operar:"#pvNewTog,#pvForm,#pvAddTog,#pvAdd,#pvEdTog,#pvCerrar,#pvModTog,[data-pvq],[data-pvg],#pvObsOk",prov_eliminar:"#pvDel",ubi_operar:"#ubCargaTog,#ubCarga,#ubMovTog,#ubMovBox,[data-uban],#ubInvTog,#ubInv",usr_admin:"#uEdCard,#puAdm,[data-lbu],[data-lbk]"};
 function supApply(){
   const on=supOn();document.body.classList.toggle("supv",on);
   let st=$("#supStyle");if(!st){st=document.createElement("style");st.id="supStyle";document.head.appendChild(st)}
@@ -9242,6 +9336,77 @@ const ubCod=v=>norm(String(v||"")).toUpperCase().replace(/\s+/g,"");
 /* stock agrupado: ubicación → [{k,base,f,ce,um,descr,ult}] (solo lo que hay) */
 function ubStockMap(){const m=new Map();for(const s of ub.stock||[]){if(!(+s.base>1e-9))continue;const it=pvFind(s.k)||{};
   const x=Object.assign({},s,{descr:s.descr||it.desc||"",um:s.um||umTxt(it.um||""),ce:s.ce||(conv(it)?it.ce:""),f:+s.f||(conv(it)?+it.f:1)});(m.get(s.u)||m.set(s.u,[]).get(s.u)).push(x)}return m}
+/* ---------- Inventario → Almacenamiento: revisar un conteo por ubicación, IRA y ajustar a lo contado ---------- */
+var ubInvR=null;
+const ubInvN=v=>norm(String(v||"")).toUpperCase().replace(/[\s\-._\/]+/g,"");   // B-09-03, b.09.03, B 09 03 → B0903
+const ubInvFuera=v=>{const c=ubInvN(v);return !c||/^SINUBICACI/.test(c)};
+function ubInvNueva(txt){const c=ubInvN(txt);if(/^[A-Z]{1,2}\d{4}$/.test(c)){const p=ubPartes(c);return {cod:c,pasillo:p.pasillo,rack:p.rack,nivel:p.nivel,tipo:"rack"}}
+  const z=norm(String(txt||"")).toUpperCase().replace(/\s+/g," ").trim().slice(0,40);return {cod:z,pasillo:"PISO",rack:z,nivel:"",tipo:"zona"}}
+async function ubInvAbrir(){const b=$("#ubInv");b.hidden=!b.hidden;if(b.hidden)return;$("#ubInvRes").innerHTML="";$("#ubInvXls").disabled=true;ubInvR=null;
+  const sel=$("#ubInvC");sel.innerHTML='<option value="">Cargando conteos…</option>';
+  try{const L=(await mrpc("cb_listar")||[]).filter(x=>+x.n_lecturas>0).sort((a,b)=>(!!(b.finalizado||b.terminado)-!!(a.finalizado||a.terminado)));
+    sel.innerHTML=L.length?L.map(x=>{const fin=x.finalizado||x.terminado;return `<option value="${esc(x.id)}"${fin?"":" disabled"}>${esc(x.nombre)} · ${new Date(x.creado).toLocaleDateString("es-CL")} · ${fmt(x.n_lecturas)} lecturas${fin?"":" · en curso: termínalo primero"}</option>`}).join(""):'<option value="">No hay conteos con lecturas</option>'}
+  catch(e){sel.innerHTML=`<option value="">${esc(e.message==="sin_permiso"?"Necesitas también el permiso «Inventario · ver»":ubMsg(e))}</option>`}
+  ubInvHist()}
+async function ubInvHist(){try{const H=await mrpc("cb_ubic_inv_hist")||[];$("#ubInvHist").innerHTML=H.length?'<div style="margin-top:6px"><b>Pases anteriores</b></div>'+H.slice(0,8).map(h=>`<div>${fmtDT(h.t)} · ${esc(h.nombre||"")} · IRA <b>${h.ira==null?"—":fmt2(Math.round(h.ira*1000)/10)+" %"}</b> (${fmt(h.ok)} de ${fmt(h.n)} cuadraban) · ${fmt(h.ingresos)} ingresos · ${fmt(h.salidas)} salidas${h.nuevas?` · ${fmt(h.nuevas)} ubicaciones nuevas`:""} · ${esc(h.persona||"")}</div>`).join(""):""}catch(e){}}
+$("#ubInvTog").onclick=ubInvAbrir;$("#ubInvX").onclick=()=>{$("#ubInv").hidden=true};
+$("#ubInvVer").onclick=async()=>{const id=$("#ubInvC").value;if(!id)return toast("Elige un conteo");const b=$("#ubInvVer");b.disabled=true;
+  try{await ubRefresh(false);const arr=await mrpc("cb_lecturas_de",{p_id:id})||[];let cods=null;try{const d=await mrpc("cb_conteo_codigos",{p_ids:[id]});cods=d&&d[id]&&d[id].codes}catch(e){}
+    ubInvR=ubInvArmar(id,$("#ubInvC").selectedOptions[0].textContent.split(" · ")[0],arr,cods);ubInvRender()}
+  catch(e){toast(ubMsg(e))}finally{b.disabled=false}};
+function ubInvArmar(id,nombre,arr,cods){
+  const enConteo=Array.isArray(cods)&&cods.length?new Set(cods.map(c=>key(c))):null;   // faltantes: solo SKU que estaban en la lista del conteo
+  const ex=new Map((ub.ubic||[]).map(u=>[ubInvN(u.cod),u.cod])),C=new Map(),nuevas=new Map(),fuera={n:0,ubic:new Set()};
+  for(const d0 of arr){const d=convFix(Object.assign({},d0)),txt=String(d.ubic||"").trim();if(ubInvFuera(txt)){fuera.n++;fuera.ubic.add(txt||"(vacía)");continue}
+    let u=ex.get(ubInvN(txt)),nv=false;if(!u){const z=ubInvNueva(txt);u=z.cod;nv=true;const o=nuevas.get(u)||Object.assign(z,{txt:new Set(),n:0,on:z.tipo==="rack"});o.txt.add(txt);o.n++;nuevas.set(u,o)}
+    const it=pvFind(d.k||d.code)||null,k=it?it.cod:codeStr(d.k||d.code),f=+d.f>0?+d.f:1,K=u+"\u0000"+key(k);
+    const o=C.get(K)||{u,k,nv,desc:(it&&it.desc)||d.desc||"",ce:conv(it)?it.ce:(d.ce||""),f:conv(it)?+it.f:(+d.f>0&&+d.f!==1?+d.f:1),um:umTxt((it&&it.um)||d.um||""),c:0};o.c+=(+d.qty||0)*f;C.set(K,o)}
+  const locs=new Set([...C.values()].map(o=>o.u)),S=new Map();for(const s of ub.stock||[])if(locs.has(s.u)&&Math.abs(+s.base)>1e-9)S.set(s.u+"\u0000"+key(s.k),s);
+  const L=[];for(const [K,o] of C){const s=S.get(K),h=s?+s.base:0;L.push(Object.assign(o,{h,st:Math.abs(o.c-h)<1e-9?"ok":h<=1e-9?"nuevo":"dif"}))}
+  for(const [K,s] of S)if(!C.has(K)&&(!enConteo||enConteo.has(key(s.k)))){const it=pvFind(s.k)||{};L.push({u:s.u,k:s.k,nv:false,desc:s.descr||it.desc||"",ce:s.ce||(conv(it)?it.ce:""),f:+s.f||(conv(it)?+it.f:1),um:s.um||umTxt(it.um||""),c:0,h:+s.base,st:"falta"})}
+  const neg=L.filter(l=>l.c<-1e-9);for(const l of neg){l.st="neg";l.on=false}
+  for(const l of L)if(l.st!=="neg")l.on=l.st!=="ok";
+  L.sort((a,b)=>ubCmp(a.u,b.u)||String(a.k).localeCompare(String(b.k)));
+  return {id,nombre,L,nuevas,fuera,verOk:false}}
+const UBINV={neg:["Total negativo: revisar (no pasa)","p-bad"],ok:["Cuadra","p-ok"],dif:["Diferencia","p-bad"],nuevo:["No estaba en Almacenamiento","p-info"],falta:["Faltante (no se contó aquí)","p-warn"]};
+function ubInvIra(L){const n=L.length,ok=L.filter(l=>l.st==="ok").length;return {n,ok,ira:n?ok/n:null}}
+const ubInvPct=x=>x==null?"—":fmt2(Math.round(x*1000)/10)+" %";
+function ubInvRender(){const R=ubInvR,box=$("#ubInvRes");if(!R){box.innerHTML="";return}
+  const nvOff=new Set([...R.nuevas.values()].filter(z=>!z.on).map(z=>z.cod)),L=R.L.filter(l=>!(l.nv&&nvOff.has(l.u)));
+  const comp=L.filter(l=>!l.nv&&l.st!=="neg"),I=ubInvIra(comp),cnt=st=>L.filter(l=>l.st===st).length,sel=L.filter(l=>l.on&&l.st!=="ok");
+  const porU=new Map();for(const l of comp){const o=porU.get(l.u)||{u:l.u,n:0,ok:0};o.n++;if(l.st==="ok")o.ok++;porU.set(l.u,o)}
+  const malas=[...porU.values()].filter(o=>o.ok<o.n).sort((a,b)=>a.ok/a.n-b.ok/b.n||ubCmp(a.u,b.u));
+  const qx=(b,l)=>qBC(b,l.ce,l.f,l.um);
+  box.innerHTML=`<div class="kpis" style="margin:6px 0">${[[ubInvPct(I.ira),"IRA por ubicación"],[fmt(cnt("ok")),"Cuadran"],[fmt(cnt("dif")),"Con diferencia"],[fmt(cnt("falta")),"Faltantes"],[fmt(cnt("nuevo")),"No estaban"],[fmt(porU.size),"Ubicaciones comparadas"]].map(([v,l])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("")}</div>
+  <div class="small muted">IRA = líneas (ubicación + SKU) donde Almacenamiento coincidía con lo contado ÷ líneas comparadas. Las ubicaciones nuevas no entran al IRA.${R.fuera.n?` · ${fmt(R.fuera.n)} lecturas sin ubicación no pasan (${esc([...R.fuera.ubic].slice(0,4).join(", "))}).`:""}</div>`+
+  (R.nuevas.size?`<div style="margin-top:8px"><b>Ubicaciones que no existen en el mapa</b> <span class="small muted">· marca las que se crean; las desmarcadas no pasan. Las zonas de piso vienen desmarcadas: revisa que no sea una ubicación mal escrita.</span><div class="tbl"><table><thead><tr><th></th><th>En el conteo</th><th>Se crea como</th><th>Tipo</th><th class="num">Lecturas</th></tr></thead><tbody>${[...R.nuevas.values()].sort((a,b)=>ubCmp(a.cod,b.cod)).map(z=>`<tr><td><input type="checkbox" data-ubnv="${esc(z.cod)}" ${z.on?"checked":""} aria-label="Crear ${esc(z.cod)}"></td><td>${esc([...z.txt].join(" · "))}</td><td class="code"><b>${esc(z.cod)}</b></td><td>${z.tipo==="rack"?`Rack · hilera ${esc(z.pasillo)}, posición ${esc(z.rack)}, nivel ${esc(z.nivel)}`:"Zona de piso"}</td><td class="num">${fmt(z.n)}</td></tr>`).join("")}</tbody></table></div></div>`:"")+
+  (malas.length?`<details style="margin-top:8px"><summary><b>IRA por ubicación</b> · ${fmt(malas.length)} ubicaciones con diferencias de ${fmt(porU.size)}</summary><div class="tbl" style="max-height:260px"><table><thead><tr><th>Ubicación</th><th class="num">Líneas</th><th class="num">Cuadran</th><th class="num">IRA</th></tr></thead><tbody>${malas.map(o=>`<tr><td class="code">${esc(o.u)}</td><td class="num">${fmt(o.n)}</td><td class="num">${fmt(o.ok)}</td><td class="num">${ubInvPct(o.ok/o.n)}</td></tr>`).join("")}</tbody></table></div></details>`:"")+
+  `<div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><b>Líneas</b><span class="sep"></span><label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ubInvVerOk" ${R.verOk?"checked":""}> Ver también las que cuadran</label><button class="btn sm" id="ubInvTodas" type="button">Marcar todas</button><button class="btn sm" id="ubInvNada" type="button">Desmarcar todas</button></div>
+  <div class="tbl" style="max-height:420px"><table><thead><tr><th></th><th>Ubicación</th><th>Código</th><th>Descripción</th><th class="num">Almacenamiento</th><th class="num">Contado</th><th class="num">Ajuste</th><th>Estado</th></tr></thead><tbody>${L.filter(l=>R.verOk||l.st!=="ok").map(l=>{const i=R.L.indexOf(l),d=l.c-l.h;
+    return `<tr${l.on||l.st==="ok"?"":' style="opacity:.55"'}><td>${l.st==="ok"||l.st==="neg"?"":`<input type="checkbox" data-ubil="${i}" ${l.on?"checked":""} aria-label="Ajustar ${esc(l.u)} ${esc(l.k)}">`}</td><td class="code">${esc(l.u)}${l.nv?' <span class="pill p-info">nueva</span>':""}</td><td class="code">${esc(l.k)}</td><td>${esc(l.desc)}</td><td class="num">${l.h>1e-9?qx(l.h,l):"—"}</td><td class="num">${l.c>1e-9?qx(l.c,l):(l.st==="falta"?"0":"—")}</td><td class="num" style="color:${Math.abs(d)<1e-9?"inherit":d>0?"var(--ok)":"var(--bad)"}">${Math.abs(d)<1e-9?"—":(d>0?"+":"−")+qx(Math.abs(d),l)}</td><td><span class="pill ${UBINV[l.st][1]}">${UBINV[l.st][0]}</span></td></tr>`}).join("")||'<tr><td colspan="8" class="muted">Todo cuadra: no hay nada que ajustar.</td></tr>'}</tbody></table></div>
+  <div class="row" style="margin-top:8px;gap:8px"><button class="btn primary" id="ubInvOk" type="button" ${sel.length?"":"disabled"}>Ajustar ${fmt(sel.length)} línea${sel.length===1?"":"s"} a lo contado</button><span class="small muted">${fmt(sel.filter(l=>l.c>l.h).length)} ingresos · ${fmt(sel.filter(l=>l.c<l.h).length)} salidas${[...R.nuevas.values()].filter(z=>z.on&&sel.some(l=>l.u===z.cod)).length?` · ${fmt([...R.nuevas.values()].filter(z=>z.on&&sel.some(l=>l.u===z.cod)).length)} ubicaciones nuevas`:""}</span></div>`;
+  $("#ubInvXls").disabled=false;
+  $$("#ubInvRes [data-ubnv]").forEach(c=>c.onchange=()=>{R.nuevas.get(c.dataset.ubnv).on=c.checked;ubInvRender()});
+  $$("#ubInvRes [data-ubil]").forEach(c=>c.onchange=()=>{R.L[+c.dataset.ubil].on=c.checked;ubInvRender()});
+  $("#ubInvVerOk").onchange=e=>{R.verOk=e.target.checked;ubInvRender()};
+  $("#ubInvTodas").onclick=()=>{for(const l of L)if(l.st!=="ok"&&l.st!=="neg")l.on=true;ubInvRender()};$("#ubInvNada").onclick=()=>{for(const l of L)l.on=false;ubInvRender()};
+  $("#ubInvOk").onclick=()=>ubInvAplicar(L,sel)}
+async function ubInvAplicar(L,sel){const R=ubInvR;if(!sel.length)return;
+  const usadas=new Set(sel.map(l=>l.u)),nuevas=[...R.nuevas.values()].filter(z=>z.on&&usadas.has(z.cod)).map(z=>({cod:z.cod,pasillo:z.pasillo,rack:z.rack,nivel:z.nivel,tipo:z.tipo}));
+  // también se mandan las líneas que cuadran de esas ubicaciones: así el IRA del servidor queda completo
+  const env=L.filter(l=>l.st!=="neg"&&(!l.nv||(l.on&&l.st!=="ok")));
+  if(env.length>5000)return toast(`Son ${fmt(env.length)} líneas: el máximo por pase es 5.000. Pasa el inventario por partes (un conteo por zona).`);   // todas las comparadas (para el IRA) + las nuevas marcadas
+  if(!confirm(`¿Ajustar ${sel.length} línea${sel.length===1?"":"s"} de Almacenamiento a lo contado en «${R.nombre}»?\n${sel.filter(l=>l.c>l.h).length} ingresos · ${sel.filter(l=>l.c<l.h).length} salidas${nuevas.length?` · ${nuevas.length} ubicaciones nuevas`:""}\nQueda en el historial como «ajuste por inventario» y cada movimiento se puede anular.`))return;
+  const b=$("#ubInvOk");b.disabled=true;b.textContent="Ajustando…";
+  try{const r=await mrpc("cb_ubic_inv_aplicar",{p_conteo:R.id,p_nuevas:nuevas,p_lineas:env.map(l=>({u:l.u,k:l.k,obj:l.c,aplicar:!!l.on&&l.st!=="ok",ira:!l.nv,f:l.f||1,ce:l.ce||"",um:l.um||"",desc:l.desc||""}))});
+    toast(`✓ Almacenamiento ajustado · IRA ${ubInvPct(r.ira)} · ${fmt(r.ingresos)} ingresos · ${fmt(r.salidas)} salidas${r.nuevas?` · ${fmt(r.nuevas)} ubicaciones nuevas`:""}`);
+    ubInvR=null;$("#ubInvRes").innerHTML="";$("#ubInvXls").disabled=true;await ubRefresh(true);ubInvHist()}
+  catch(e){toast(ubMsg(e));b.disabled=false;b.textContent=`Ajustar ${sel.length} líneas a lo contado`}}
+$("#ubInvXls").onclick=()=>{const R=ubInvR;if(!R)return;const wb=XLSX.utils.book_new(),bu=(b,l)=>(+b||0)/(+l.f||1);
+  XLSX.utils.book_append_sheet(wb,sheetFrom(R.L.map(l=>({"Ubicación":l.u,"Ubicación nueva":l.nv?"Sí":"","Código":l.k,"Descripción":l.desc,"Bulto":l.ce&&+l.f!==1?l.ce:l.um,"Almacenamiento (bultos)":bu(l.h,l),"Contado (bultos)":bu(l.c,l),"Diferencia (bultos)":bu(l.c-l.h,l),"Almacenamiento (unidad ERP)":l.h,"Contado (unidad ERP)":l.c,"Unidad ERP":l.um,"Estado":UBINV[l.st][0],"Se ajusta":l.st==="ok"?"":l.on?"Sí":"No"}))),"Revisión");
+  const porU=new Map();for(const l of R.L.filter(l=>!l.nv)){const o=porU.get(l.u)||{n:0,ok:0};o.n++;if(l.st==="ok")o.ok++;porU.set(l.u,o)}
+  XLSX.utils.book_append_sheet(wb,sheetFrom([...porU].sort((a,b)=>ubCmp(a[0],b[0])).map(([u,o])=>({"Ubicación":u,"Líneas":o.n,"Cuadran":o.ok,"IRA %":Math.round(o.ok*1000/o.n)/10}))),"IRA por ubicación");
+  saveWb(wb,`IRA_ubicaciones_${(R.nombre||"conteo").replace(/[^\w-]+/g,"_")}_${ymd(new Date())}.xlsx`)};
 const ubBul=s=>`${fmt2((+s.base||0)/(+s.f||1))} ${esc(s.ce&&+s.f!==1?plural(s.ce):umTxt(s.um))}`;
 async function ubEnter(){
   const on=movOk();$("#ubNote").hidden=on;
