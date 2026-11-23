@@ -7115,7 +7115,7 @@ $("#btnMpExp").onclick=()=>{
   const m=movById(movSel);if(!m)return;const rows=mpRows(m.id);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,sheetFrom(rows.map(r=>({"Código":r.cod,"Descripción":r.desc,"Unidad ERP":umTxt(r.um),"Equivalencia":r.ce&&r.f!==1?`1 ${r.ce} = ${r.f} ${umTxt(r.um)}`:"","Solicitado":r.S??"","Entregado":r.E??"","Entregado (equiv.)":r.ce&&r.f!==1&&r.E!=null?r.qE:"","Recibido":r.R??"","Recibido (equiv.)":r.ce&&r.f!==1&&r.R!=null?r.qR:"","Diferencia":r.dif??"","Estado":MPST[r.st][0]}))),"Entrega vs Recepción");
-  XLSX.utils.book_append_sheet(wb,sheetFrom((movLect[m.id]||[]).map(d=>({"Rol":ROL[d.rol]||d.rol,"Fecha hora":fmtDT(d.t),"Persona":d.user||"","Código":d.code,"Descripción":d.desc||"","Cantidad leída":d.qty,"Unidad leída":d.ce&&+d.f!==1?d.ce:umTxt(d.um),"Factor":+d.f||1,"Total (unidad ERP)":(+d.qty||0)*(+d.f||1),"Unidad ERP":umTxt(d.um)}))),"Lecturas");
+  XLSX.utils.book_append_sheet(wb,sheetFrom((movLect[m.id]||[]).map(d=>({"Rol":ROL[d.rol]||d.rol,"Fecha":xF(d.t),"Hora":xH(d.t),"Persona":d.user||"","Código":d.code,"Descripción":d.desc||"","Cantidad leída":d.qty,"Unidad leída":d.ce&&+d.f!==1?d.ce:umTxt(d.um),"Factor":+d.f||1,"Total (unidad ERP)":(+d.qty||0)*(+d.f||1),"Unidad ERP":umTxt(d.um)}))),"Lecturas");
   saveWb(wb,("Entrega_MP_"+m.nombre).replace(/[^\w\-]+/g,"_").slice(0,60)+".xlsx");
 };
 
@@ -8296,6 +8296,7 @@ function ptTabla(){
     recs:o.recs||[],hE:ptHoras(o.recs,true),hR:ptHoras(o.recs,false),rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
   return {T,ini,fin};
 }
+const xF=t=>{const d=new Date(t);return isNaN(d)?"":fechaCL(ymd(d))},xH=t=>{const d=new Date(t);return isNaN(d)?"":d.toLocaleTimeString("es-CL",{hour12:false})},xFs=a=>[...new Set((a||[]).map(xF))].join(" · ");   // Excel: fecha y hora en columnas separadas
 const hm24=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hour12:false});
 const ptBul=(base,r)=>base==null?"":(r.ce&&r.f!==1?`<b>${fmt2(base/r.f)}</b> <span class="small muted">${esc(plural(r.ce))}</span>`:`<b>${fmt2(base)}</b> <span class="small muted">${esc(umTxt(r.um))}</span>`);
 const ptConv=(base,r)=>base==null?"":(r.ce&&r.f!==1?`${fmt2(base)} <span class="small muted">${esc(umTxt(r.um))}</span><span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:'<span class="muted">—</span>');
@@ -8364,8 +8365,8 @@ $("#ptExp").onclick=()=>{
   const {T}=ptTabla(), wb=XLSX.utils.book_new(), cv=r=>r.ce&&r.f!==1;
   XLSX.utils.book_append_sheet(wb,sheetFrom(T.map(r=>({"Pallet":r.pallet,"Código":r.cod,"Descripción":r.desc,"Entregado (bultos)":r.pe==null?"":cv(r)?r.pe/r.f:r.pe,"Bulto":cv(r)?r.ce:umTxt(r.um),
     "Conversión":r.pe==null?"":r.pe,"Unidad ERP":umTxt(r.um),"Pallet recibido":r.rec,"Recibido (bultos)":r.pr==null?"":cv(r)?r.pr/r.f:r.pr,"Recibido":r.pr??"","Diferencia":r.dif??"","Estado":PTST[r.st][0],
-    "Hora producción":(r.hE||[]).map(fmtDT).join(" · "),"Hora recepción":(r.hR||[]).map(fmtDT).join(" · ")}))),"Pallets");
-  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Lado":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Cierre de turno":fmtDT(c.t),"Operario":c.persona||""}))),"Cierres de turno");
+    "Fecha producción":xFs(r.hE),"Hora producción":(r.hE||[]).map(xH).join(" · "),"Fecha recepción":xFs(r.hR),"Hora recepción":(r.hR||[]).map(xH).join(" · ")}))),"Pallets");
+  XLSX.utils.book_append_sheet(wb,sheetFrom(ptData.cierres.map(c=>({"Lado":c.puesto==="produccion"?"Producción":PTREC[c.puesto]||c.puesto,"Fecha":xF(c.t),"Hora cierre de turno":xH(c.t),"Operario":c.persona||""}))),"Cierres de turno");
   saveWb(wb,"PT_"+new Date().toISOString().slice(0,10)+".xlsx");
 };
 /* =====================================================================
