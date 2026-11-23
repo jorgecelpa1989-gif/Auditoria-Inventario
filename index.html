@@ -315,6 +315,7 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
   <div class="navGrp">Producción</div>
   <button role="tab" data-v="mp" aria-selected="false"><span class="num">7</span>Entrega MP<span class="n alert" id="nSol" hidden>0</span></button>
   <button role="tab" data-v="pt" aria-selected="false"><span class="num">8</span>Recepción PT</button>
+  <button role="tab" data-v="ptprod" aria-selected="false"><span class="num">9</span>Producción PT · etiquetas</button>
 </nav>
 <div class="navScrim" id="navScrim" hidden></div>
 
@@ -5040,6 +5041,108 @@ revoke execute on function public.cb_prov_foto_puede(text, text, uuid, text), pu
 grant execute on function public.cb_prov_foto_puede(text, text, uuid, text), public.cb_prov_foto_agregar(text, text, uuid, text, text, text, text) to service_role;
 grant execute on function public.cb_prov_obs(text, uuid, text), public.cb_prov_calidad_mis(text, text), public.cb_prov_calidad_guardar(text, text, uuid, jsonb, boolean) to anon, authenticated;
 
+-- =====================================================================
+--  Producción PT (PC del panel): registrar pallets con N° correlativo e imprimir su etiqueta.
+--  Permiso nuevo de supervisor: pt_producir. Solo agrega: los celulares y Recepción PT siguen igual
+--  (el pallet queda en cb_pt como "Producción entrega", lado E, igual que desde el celular).
+-- =====================================================================
+create sequence if not exists public.cb_pt_pallet_seq;
+revoke all on sequence public.cb_pt_pallet_seq from public, anon, authenticated;
+
+create or replace function public.cb_pt_prod_registrar(p_clave text, p_data jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_lid text; v_pal text; v_t timestamptz := now(); v_q numeric; v_f numeric; v_d jsonb;
+begin
+  perform cb_puede(p_clave, 'pt_producir');
+  if coalesce(trim(p_data->>'code'), '') = '' then raise exception 'datos_invalidos'; end if;
+  begin v_q := (p_data->>'qty')::numeric; v_f := coalesce(nullif(p_data->>'f', '')::numeric, 1);
+  exception when others then raise exception 'cantidad_invalida'; end;
+  if v_q is null or v_q <= 0 or v_q > 1000000 then raise exception 'cantidad_invalida'; end if;
+  v_lid := 'pc-' || encode(extensions.gen_random_bytes(8), 'hex');
+  v_pal := 'P' || lpad(nextval('public.cb_pt_pallet_seq')::text, 6, '0');
+  v_d := jsonb_build_object('lid', v_lid, 'pallet', v_pal, 'code', left(trim(p_data->>'code'), 40),
+    'k', left(trim(coalesce(nullif(p_data->>'k', ''), p_data->>'code')), 40), 'desc', left(coalesce(p_data->>'desc', ''), 200),
+    'um', left(coalesce(p_data->>'um', ''), 20), 'qty', v_q, 'user', left(coalesce(cb_sup_nombre(p_clave), nullif(p_data->>'user', ''), 'Supervisor'), 80),
+    't', v_t, 'via', 'pc', 'imp', jsonb_build_array(v_t));
+  if coalesce(p_data->>'ce', '') <> '' and v_f > 0 and v_f <> 1 then
+    v_d := v_d || jsonb_build_object('ce', left(p_data->>'ce', 20), 'f', v_f);
+  end if;
+  insert into cb_pt(lid, puesto, pallet, data, t, lado) values (v_lid, 'panel_prod', v_pal, v_d, v_t, 'E');
+  return v_d;
+end $$;
+
+-- Pallets registrados desde el PC en un día (para reimprimir o corregir).
+create or replace function public.cb_pt_prod_dia(p_clave text, p_dia date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_ini timestamptz;
+begin
+  perform cb_puede(p_clave, 'pt_producir');
+  if p_dia is null then raise exception 'fecha_invalida'; end if;
+  v_ini := p_dia::timestamp at time zone 'America/Santiago';
+  return coalesce((select jsonb_agg(data || jsonb_build_object('rt', t) order by t) from cb_pt
+                    where puesto = 'panel_prod' and data->>'via' = 'pc' and t >= v_ini and t < v_ini + interval '1 day'), '[]'::jsonb);
+end $$;
+
+-- Anota cada reimpresión de la etiqueta (queda el historial en el registro).
+create or replace function public.cb_pt_prod_impreso(p_clave text, p_lid text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'pt_producir');
+  update cb_pt set data = data || jsonb_build_object('imp', coalesce(data->'imp', '[]'::jsonb) || to_jsonb(now()))
+   where lid = p_lid and puesto = 'panel_prod' and data->>'via' = 'pc';
+  if not found then raise exception 'no_existe'; end if;
+end $$;
+
+-- Corrige la cantidad de un pallet hecho desde el PC (0 = anular), igual que el celular de producción.
+create or replace function public.cb_pt_prod_corregir(p_clave text, p_lid text, p_qty numeric) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r cb_pt;
+begin
+  perform cb_puede(p_clave, 'pt_producir');
+  if p_qty is null or p_qty < 0 or p_qty > 1000000 then raise exception 'cantidad_invalida'; end if;
+  select * into r from cb_pt where lid = p_lid and puesto = 'panel_prod' and data->>'via' = 'pc' for update;
+  if not found then raise exception 'no_existe'; end if;
+  if r.t < now() - interval '15 days' then raise exception 'muy_antiguo'; end if;
+  update cb_pt set data = data || jsonb_build_object('qty', p_qty, 'ed', coalesce(data->'ed', '[]'::jsonb) ||
+         jsonb_build_array(jsonb_build_object('de', data->'qty', 'a', p_qty, 'por', left(coalesce(cb_sup_nombre(p_clave), 'Supervisor'), 80), 't', now(), 'via', 'pc')))
+   where lid = p_lid;
+  return (select data from cb_pt where lid = p_lid);
+end $$;
+
+-- Permiso nuevo de supervisor: pt_producir (Producción PT en el PC).
+create or replace function public.cb_sup_guardar(p_clave text, p_id text, p_nombre text, p_permisos jsonb, p_activo boolean default true)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare v_id text := nullif(trim(coalesce(p_id,'')), ''); v_perm text[]; par record;
+begin
+  perform cb_check(p_clave);
+  if coalesce(trim(p_nombre),'') = '' then raise exception 'falta_nombre'; end if;
+  if p_permisos is null or jsonb_typeof(p_permisos) <> 'array' then raise exception 'datos_invalidos'; end if;
+  select coalesce(array_agg(distinct x), '{}') into v_perm from jsonb_array_elements_text(p_permisos) x;
+  if exists (select 1 from unnest(v_perm) x where x not in ('inv_ver','inv_operar','mp_ver','mp_solicitar','mp_operar','mp_eliminar',
+      'pt_ver','pt_corregir','pt_producir','dev_ver','dev_crear','dev_todas','dev_cerrar','dev_eliminar','usr_admin',
+      'prov_ver','prov_operar','prov_eliminar','ubi_ver','ubi_operar')) then raise exception 'datos_invalidos'; end if;
+  -- para operar o eliminar hay que poder ver el módulo
+  for par in select * from (values ('inv_operar','inv_ver'),('mp_solicitar','mp_ver'),('mp_operar','mp_ver'),('mp_operar','mp_solicitar'),('mp_eliminar','mp_ver'),
+      ('pt_corregir','pt_ver'),('dev_crear','dev_ver'),('dev_todas','dev_ver'),('dev_cerrar','dev_ver'),('dev_eliminar','dev_ver'),
+      ('prov_operar','prov_ver'),('prov_eliminar','prov_ver'),('ubi_operar','ubi_ver')) v(hijo, padre) loop
+    if par.hijo = any(v_perm) and not (par.padre = any(v_perm)) then v_perm := v_perm || par.padre; end if;
+  end loop;
+  if v_id is null then
+    if (select count(*) from cb_sup) >= 50 then raise exception 'datos_invalidos'; end if;
+    v_id := 's_' || encode(extensions.gen_random_bytes(5), 'hex');
+    insert into cb_sup(id, nombre, permisos, activo) values (v_id, left(trim(p_nombre), 80), v_perm, coalesce(p_activo, true));
+  else
+    update cb_sup set nombre = left(trim(p_nombre), 80), permisos = v_perm, activo = coalesce(p_activo, activo) where id = v_id;
+    if not found then raise exception 'no_existe'; end if;
+  end if;
+  return v_id;
+end $$;
+
+revoke all on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt_prod_dia(text, date),
+  public.cb_pt_prod_impreso(text, text), public.cb_pt_prod_corregir(text, text, numeric) from public;
+grant execute on function public.cb_pt_prod_registrar(text, jsonb), public.cb_pt_prod_dia(text, date),
+  public.cb_pt_prod_impreso(text, text), public.cb_pt_prod_corregir(text, text, numeric) to anon, authenticated;
+
 </script>
   </div>
 
@@ -5070,6 +5173,27 @@ grant execute on function public.cb_prov_obs(text, uuid, text), public.cb_prov_c
 </section>
 
 <!-- ============ 7 RECEPCIÓN DE PROVEEDORES ============ -->
+<!-- ============ 9 Producción PT (PC): registrar pallet e imprimir etiqueta ============ -->
+<section class="view" id="v-ptprod" hidden>
+ <div class="notice" id="ppNote" hidden></div>
+ <div class="card">
+  <div class="eyebrow">9 · Producción PT · etiquetas de pallet</div>
+  <h2 style="margin:4px 0 10px">Registrar pallet e imprimir etiqueta</h2>
+  <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+   <label style="flex:2 1 260px;display:flex;flex-direction:column;gap:4px"><span class="small muted">Código del producto</span><input id="ppCod" list="ppList" autocomplete="off" spellcheck="false" placeholder="Código o nombre del producto"></label>
+   <label style="flex:1 1 140px;display:flex;flex-direction:column;gap:4px"><span class="small muted" id="ppQL">Cantidad</span><input id="ppQty" inputmode="decimal" autocomplete="off" placeholder="0" style="text-align:right"></label>
+   <button class="btn primary" id="ppOk" type="button" style="min-height:42px">🖨 Registrar e imprimir</button>
+  </div>
+  <datalist id="ppList"></datalist>
+  <div id="ppInfo" style="margin-top:10px;min-height:22px"></div>
+  <p class="small muted" style="margin:8px 0 0">Cada pallet recibe un N° correlativo (P000001, P000002…) que nunca se repite. La etiqueta es para impresora térmica de 10×15 cm. Bodega escanea el código del producto (EAN-13) en su celular, como hoy, y Recepción PT lo cuadra por producto.</p>
+ </div>
+ <div class="card">
+  <div class="row" style="gap:8px;flex-wrap:wrap"><div class="eyebrow">Pallets registrados en este PC</div><span class="sep"></span><input type="date" id="ppDia" aria-label="Día"><button class="btn sm" id="ppTraer" type="button">Actualizar</button></div>
+  <div class="small muted" id="ppRes" style="margin:6px 0"></div>
+  <div class="tbl"><table id="ppTbl"></table></div>
+ </div>
+</section>
 <section class="view" id="v-ubic" hidden>
   <div class="card">
     <div class="row"><div class="eyebrow">6 · Almacenamiento y ubicaciones</div><span class="sep"></span><span class="small muted" id="ubAt"></span></div>
@@ -5320,6 +5444,7 @@ function updStatus(){
 function show(v){
   if(typeof pvViews==="function"){const V=pvViews();if(V&&!V.includes(v))v=V[0]||"mp"}   // producción / supervisor de área: solo sus módulos
   if(v==="pt"&&typeof ptEnter==="function")setTimeout(ptEnter,0);
+  if(v==="ptprod"&&typeof ppEnter==="function")setTimeout(ppEnter,0);
   if(v!=="ptcel"&&typeof ptStopCam==="function")ptStopCam();
   $$("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.v===v));
   menuOpen(false);
@@ -6144,7 +6269,7 @@ const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a
 /* Permiso que exige cada función de panel (igual que en el servidor). "__admin" = solo el administrador. */
 const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_corregir:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
-  cb_pt_listar:"pt_ver",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
+  cb_pt_listar:"pt_ver",cb_pt_prod_registrar:"pt_producir",cb_pt_prod_dia:"pt_producir",cb_pt_prod_impreso:"pt_producir",cb_pt_prod_corregir:"pt_producir",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
   cb_prov_listar:"prov_ver",cb_prov_guardar:"prov_operar",cb_prov_agregar_panel:"prov_operar",cb_prov_corregir:"prov_operar",cb_prov_obs:"prov_operar",cb_prov_cerrar:"prov_operar",cb_prov_eliminar:"prov_eliminar",cb_prov_restaurar:"prov_eliminar",cb_prov_anulados:"prov_ver",cb_ubic_datos:"ubi_ver",cb_ubic_guardar:"ubi_operar",cb_ubic_mover_panel:"ubi_operar",cb_ubic_anular:"ubi_operar",
   cb_eliminar:"__admin",cb_configurar:"__admin",cb_prod_clave:"__admin",cb_prod_estado:"__admin",cb_prod_eliminar:"__admin",cb_sup_listar:"__admin",cb_sup_guardar:"__admin",cb_sup_link:"__admin",cb_sup_eliminar:"__admin"};
@@ -6518,7 +6643,7 @@ const PROD_PERM=["mp_ver","mp_solicitar","pt_ver"];   // acceso antiguo de produ
 const pvCan=p=>p==="mp_cerrar"?(supOn()?pvCan("mp_operar"):true):supOn()?(SUPI.permisos||[]).includes(p):prodMode()?PROD_PERM.includes(p):true;
 /* Títulos de grupo del menú (LOGÍSTICA, PRODUCCIÓN): se ven solo si el grupo tiene alguna sección visible para quien entra. */
 function navGrupos(){for(const g of $$("nav.tabs .navGrp")){let ok=false;for(let e=g.nextElementSibling;e&&!e.classList.contains("navGrp");e=e.nextElementSibling)if(e.tagName==="BUTTON"&&!e.hidden&&e.classList.contains("pvOk"))ok=true;g.classList.toggle("pvOk",ok)}}
-const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["devol","dev_ver"],["permisos","usr_admin"],["prov","prov_ver"],["ubic","ubi_ver"]];
+const SUP_VISTAS=[["erp","inv_ver"],["mp","mp_ver"],["resultado","inv_ver"],["pt","pt_ver"],["ptprod","pt_producir"],["devol","dev_ver"],["permisos","usr_admin"],["prov","prov_ver"],["ubic","ubi_ver"]];
 const pvViews=()=>supOn()?SUP_VISTAS.filter(x=>pvCan(x[1])).map(x=>x[0]):prodMode()?["mp","pt"]:null;   // null = sin límite (administrador)
 const mpLim=()=>prodMode()||(supOn()&&!pvCan("mp_operar"));       // solo solicita: no activa, asigna ni cierra
 const catRemoto=()=>prodMode()||(supOn()&&!pvCan("inv_operar"));  // usa la lista de productos de la nube, no un ERP cargado aquí
@@ -6829,12 +6954,12 @@ async function accSet(){
 var SUPS=null, supEdit=null, supBusy=false;
 const SUP_PERM=[["inv_ver","Inventario","Ver el panel, conteos y resultados"],["inv_operar","Inventario","Cargar el ERP, crear, modificar, asignar y finalizar conteos"],
   ["mp_ver","Entrega MP","Ver el panel y el detalle"],["mp_solicitar","Entrega MP","Crear solicitudes de MP"],["mp_operar","Entrega MP","Crear entregas, asignar, extender, cerrar, liberar y bloquear"],["mp_eliminar","Entrega MP","Eliminar entregas"],
-  ["pt_ver","Recepción PT","Ver cuadraturas y bajar Excel"],["pt_corregir","Recepción PT","Corregir, anular y agregar registros"],
+  ["pt_ver","Recepción PT","Ver cuadraturas y bajar Excel"],["pt_corregir","Recepción PT","Corregir, anular y agregar registros"],["pt_producir","Producción PT · etiquetas","Registrar pallets e imprimir sus etiquetas (PC de producción)"],
   ["dev_ver","Devoluciones","Ver devoluciones y su avance"],["dev_crear","Devoluciones","Crear devoluciones"],["dev_todas","Devoluciones","Todas las áreas (sin esto, solo Producción)"],["dev_cerrar","Devoluciones","Cerrar devoluciones"],["dev_eliminar","Devoluciones","Eliminar devoluciones"],
   ["prov_ver","Recepción proveedores","Ver recepciones, cuadre y bajar Excel"],["prov_operar","Recepción proveedores","Crear recepciones, packing list, agregar, corregir y cerrar"],["prov_eliminar","Recepción proveedores","Eliminar recepciones"],
   ["ubi_ver","Almacenamiento","Ver el mapa, dónde está cada producto, movimientos y Excel"],["ubi_operar","Almacenamiento","Cargar ubicaciones, registrar y anular movimientos"],
   ["usr_admin","Usuarios de celulares","Crear, editar, liberar, bloquear y eliminar usuarios"]];
-const SUP_TXT={inv_ver:"Inventario · ver",inv_operar:"Inventario · operar",mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",mp_operar:"MP · operar",mp_eliminar:"MP · anular",pt_ver:"PT · ver",pt_corregir:"PT · corregir",
+const SUP_TXT={inv_ver:"Inventario · ver",inv_operar:"Inventario · operar",mp_ver:"MP · ver",mp_solicitar:"MP · solicitar",mp_operar:"MP · operar",mp_eliminar:"MP · anular",pt_ver:"PT · ver",pt_corregir:"PT · corregir",pt_producir:"PT · etiquetas producción",
   dev_ver:"Devoluciones · ver",dev_crear:"Devoluciones · crear",dev_todas:"Devoluciones · todas las áreas",dev_cerrar:"Devoluciones · cerrar",dev_eliminar:"Devoluciones · anular",prov_ver:"Proveedores · ver",prov_operar:"Proveedores · operar",prov_eliminar:"Proveedores · anular",ubi_ver:"Almacenamiento · ver",ubi_operar:"Almacenamiento · operar",usr_admin:"Usuarios"};
 /* Para operar o eliminar hay que poder ver el módulo (el servidor lo exige igual). */
 const SUP_PADRES={inv_operar:["inv_ver"],mp_solicitar:["mp_ver"],mp_operar:["mp_ver","mp_solicitar"],mp_eliminar:["mp_ver"],pt_corregir:["pt_ver"],dev_crear:["dev_ver"],dev_todas:["dev_ver"],dev_cerrar:["dev_ver"],dev_eliminar:["dev_ver"],prov_operar:["prov_ver"],prov_eliminar:["prov_ver"],ubi_operar:["ubi_ver"]};
@@ -7647,7 +7772,11 @@ const ptSave=()=>store.set("inv_ptcel",ptCel);
 const ptSN=d=>!!(d&&(d.sn||/^SN-/i.test(String(d.pallet||""))));
 function ptIndex(){ptIdx=new Map();const its=puCat&&puCat.items||[];its.forEach((it,i)=>{if(it.cod)ptIdx.set(key(it.cod),i);if(it.ean)String(it.ean).split(/[;,/ ]+/).forEach(e=>{const k=key(e);if(k&&!ptIdx.has(k))ptIdx.set(k,i)})})}
 const ptItems=()=>(puCat&&puCat.items)||[];
-const ptFind=c=>{const i=ptIdx.get(key(c));return i==null?null:ptItems()[i]};
+/* EAN-13 interno de la etiqueta de pallet: "2" + código (11 dígitos) + dígito verificador. Ej.: 221691 → 2000002216915. */
+const eanChk=b=>{let s=0;for(let i=0;i<12;i++)s+=(+b[i])*(i%2?3:1);return (10-s%10)%10};
+const eanInt=c=>{c=String(c??"").trim();if(!/^\d{1,11}$/.test(c))return "";const b="2"+c.padStart(11,"0");return b+eanChk(b)};
+const eanCod=e=>{e=String(e??"").trim();return /^2\d{12}$/.test(e)&&eanChk(e)===+e[12]?e.slice(1,12).replace(/^0+/,""):""};
+const ptFind=c=>{let i=ptIdx.get(key(c));if(i==null){const d=eanCod(c);if(d)i=ptIdx.get(key(d))}return i==null?null:ptItems()[i]};
 async function ptAbrir(){
   puVista="pt";puestoApply();
   $("#ptTitle").textContent=can("pt_retirar")?"Recepción de PT · retiro para despacho":esReceptorPT()?"Recepción de producto terminado":"Entrega de producto terminado";
@@ -7715,6 +7844,7 @@ async function ptPalletRead(v){
 }
 function ptProducto(v,silent){
   v=codeStr(v);if(!v)return null;
+  if(!PT_PALLET&&/^P\d{6}$/.test(v)&&!ptFind(v)){$("#ptScan").value="";ptChk=v;toast("Ese es el N° de pallet. Escanea el código de barras del producto (EAN-13).");return null}
   const it=ptFind(v);
   if(!it&&/[a-záéíóúñ]{2,}.*\s|^[a-záéíóúñ ]{3,}$/i.test(v)){const res=buscarNombre(ptItems(),v),box=$("#ptSugg");box.hidden=false;
     box.innerHTML=res.length?res.map((i,n)=>`<button data-n="${n}"><span>${esc(i.desc)}</span><span class="code">${esc(i.cod)}</span></button>`).join(""):`<button><span>No encontré "${esc(v)}"</span></button>`;
@@ -8267,10 +8397,12 @@ function ptRows(){
   if(!ini){const c=ptData.cierres.filter(x=>x.puesto==="produccion").map(x=>x.t).sort().at(-1);ini=c?new Date(c):new Date(new Date().setHours(0,0,0,0))}
   const E=new Map(),R=new Map();
   const SN=new Map();
+  const Rnum=new Set(ptData.pallets.filter(d=>d.puesto!=="produccion"&&!ptSNd(d)).map(d=>codeStr(d.pallet)));
+  const snOf=d=>ptSNd(d)||(d.via==="pc"&&d.puesto==="produccion"&&!Rnum.has(codeStr(d.pallet)));   // pallet etiquetado en el PC: si bodega no escaneó su N°, se cuadra por producto
   const cvSku=new Map();for(const d of ptData.pallets){convFix(d);if(d.ce&&+d.f>0&&+d.f!==1){const k=key(d.k||d.code);if(!cvSku.has(k))cvSku.set(k,{ce:d.ce,f:+d.f,um:d.um})}}
   for(const d of ptData.pallets){const cv=!(d.ce&&+d.f>0&&+d.f!==1)&&cvSku.get(key(d.k||d.code));
     if(cv){d.ce=cv.ce;d.f=cv.f;if(!d.um||UMN(d.um)==="un")d.um=cv.um||d.um;d.convAp=true}   // registro antiguo sin conversión (p. ej. "10 un"): se lee como 10 ROLLOS
-    if(ptSNd(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
+    if(snOf(d)){const t=Date.parse(d.t||d.rt);if(t<ini.getTime()||t>=fin)continue;const k=key(d.k||d.code),o=SN.get(k)||{cod:d.k||d.code,desc:d.desc||"",um:d.um||"",ce:d.ce||"",f:+d.f||1,np:0,nr:0,p:0,rc:0,nrb:0,nrr:0,rb:0,rr:0};
       if(!o.desc&&d.desc)o.desc=d.desc;(o.recs=o.recs||[]).push(d);SN.set(k,o);if(!(+d.qty>0))continue;if(d.puesto==="produccion"){o.np++;o.p+=ptBase(d)}else{o.nr++;o.rc+=ptBase(d);if(d.puesto==="retail"){o.nrr++;o.rr+=ptBase(d)}else{o.nrb++;o.rb+=ptBase(d)}}SN.set(k,o);continue}
     const m=d.puesto==="produccion"?E:R,k=codeStr(d.pallet),o=m.get(k);if(!o||String(d.t)>String(o.t))m.set(k,d)}
   const rows=[];
@@ -8799,6 +8931,80 @@ function pvCalRender(d){const b=$("#pvCal");if(!b)return;const c=d.calidad||{};
     ${G.com?`<div class="small">Comentario general: ${esc(G.com)}</div>`:""}
     <div class="tbl"><table class="calTbl"><thead><tr><th>Código</th><th>Descripción</th><th>Clasificación</th><th>Acción</th><th>Muestreo</th><th>Embalaje</th><th>Producto</th><th>Etiquetado</th><th>Comentario</th><th>Fotos</th></tr></thead><tbody>${cods.length?cods.sort((a,b)=>a[0].localeCompare(b[0])).map(([cod,x])=>{const t=QC_TXT[x.clas],it=ptFind(cod)||{},nf=(d.fotos||[]).filter(f=>f.tipo==="cal"&&f.cod===cod).length;
       return `<tr><td class="code">${esc(cod)}</td><td>${esc(it.desc||"")}</td><td>${t?`<span class="pill ${t[1]}">${t[0]}</span>`:"—"}</td><td>${esc(x.acc||"—")}</td><td style="white-space:nowrap">${x.rev!==""&&x.rev!=null?`${fmt2(+x.rev)} de ${fmt2(+x.tot||0)}${+x.tot?` (${Math.round(+x.rev*100/+x.tot)}%)`:""}`:"—"}</td><td>${esc(qcLista(x.emb))}</td><td>${esc(qcLista(x.pro))}</td><td>${esc(qcLista(x.etq))}</td><td>${esc(x.com||"")}</td><td>${nf?"📷 "+nf:""}</td></tr>`}).join(""):'<tr><td colspan="10" class="muted">Sin códigos inspeccionados todavía.</td></tr>'}</tbody></table></div></div>`}
+/* =====================================================================
+   9 · Producción PT en el PC: registrar pallet (N° correlativo del servidor) e imprimir la etiqueta 10×15 cm.
+   Usa cb_pt igual que el celular de producción (lado E): Recepción PT y el celular de bodega no cambian.
+   ===================================================================== */
+const C128=["212222","222122","222221","121223","121322","131222","122213","122312","132212","221213","221312","231212","112232","122132","122231","113222","123122","123221","223211","221132","221231","213212","223112","312131","311222","321122","321221","312212","322112","322211","212123","212321","232121","111323","131123","131321","112313","132113","132311","211313","231113","231311","112133","112331","132131","113123","113321","133121","313121","211331","231131","213113","213311","213131","311123","311321","331121","312113","312311","332111","314111","221411","431111","111224","111422","121124","121421","141122","141221","112214","112412","122114","122411","142112","142211","241211","221114","413111","241112","134111","111242","121142","121241","114212","124112","124211","411212","421112","421211","212141","214121","412121","111143","111341","131141","114113","114311","411113","411311","113141","114131","311141","411131","211412","211214","211232","2331112"];
+function c128Bits(t){t=String(t).replace(/[^\x20-\x7e]/g,"");const v=[104,...[...t].map(c=>c.charCodeAt(0)-32)];let ck=104;v.slice(1).forEach((x,i)=>ck+=x*(i+1));v.push(ck%103,106);
+  let b="";for(const x of v)[...C128[x]].forEach((w,i)=>b+=(i%2?"0":"1").repeat(+w));return b}
+const EAN_L=["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"],EAN_R=EAN_L.map(x=>[...x].map(c=>c==="1"?"0":"1").join("")),EAN_G=EAN_R.map(x=>[...x].reverse().join(""));
+const EAN_P=["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
+function eanBits(e){const d=[...e].map(Number);let b="101";for(let i=1;i<=6;i++)b+=(EAN_P[d[0]][i-1]==="L"?EAN_L:EAN_G)[d[i]];b+="01010";for(let i=7;i<=12;i++)b+=EAN_R[d[i]];return b+"101"}
+function barSvg(bits,q){q=q||10;const W=bits.length+2*q;let r="";for(let i=0;i<bits.length;){if(bits[i]==="1"){let j=i;while(bits[j]==="1")j++;r+=`<rect x="${i+q}" y="0" width="${j-i}" height="50"/>`;i=j}else i++}
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} 50" preserveAspectRatio="none" shape-rendering="crispEdges"><rect width="${W}" height="50" fill="#fff"/><g fill="#000">${r}</g></svg>`}
+const ppCv=d=>!!(d&&d.ce&&+d.f>0&&+d.f!==1);
+function ppEtiqueta(d,re){const cv=ppCv(d),cod=d.k||d.code,ean=eanInt(cod),um=umTxt(d.um),q=+d.qty||0,now=new Date().toISOString();
+  const bul=cv?`${fmt2(q)} ${esc(q===1?d.ce:plural(d.ce))}`:`${fmt2(q)} ${esc(um)}`,conv=cv?`${fmt2(q*(+d.f))} ${esc(um)}`:`${fmt2(q)} ${esc(um)}`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Etiqueta ${esc(d.pallet)}</title><style>@page{size:100mm 150mm;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif}
+  .lb{width:100mm;height:150mm;padding:4mm 2.5mm;display:flex;flex-direction:column;gap:1.6mm;overflow:hidden;page-break-after:always}.hd{display:flex;justify-content:space-between;align-items:baseline;font-size:9pt;font-weight:700;border-bottom:.6mm solid #000;padding-bottom:1.5mm}
+  .k{font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.3pt}.big{font-size:28pt;font-weight:900;letter-spacing:1pt;line-height:1}.bc svg{display:block;width:100%;height:15mm}.cod svg{display:block;width:95mm;height:25mm}.hr{text-align:center;font-size:10pt;letter-spacing:2pt;font-family:"Courier New",monospace;font-weight:700}
+  .desc{font-size:13pt;font-weight:700;line-height:1.15;max-height:3.5em;overflow:hidden}.g{display:grid;grid-template-columns:1fr 1fr;gap:2mm}.box{border:.4mm solid #000;padding:1.5mm 2mm}.v{font-size:16pt;font-weight:800;line-height:1.1}
+  .ft{margin-top:auto;font-size:8pt;display:flex;justify-content:space-between;gap:2mm;border-top:.4mm solid #000;padding-top:1.5mm}.re{font-weight:900}</style></head><body><div class="lb">
+  <div class="hd"><span>GRUPO VECTOR</span><span>PRODUCTO TERMINADO</span></div>
+  <div><div class="k">N° de pallet</div><div class="big">${esc(d.pallet)}</div></div>
+  <div class="bc">${barSvg(c128Bits(d.pallet))}</div><div class="hr">${esc(d.pallet)}</div>
+  <div class="k">Código de producto</div><div class="cod"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 250" preserveAspectRatio="none"><text x="475" y="246" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="340" textLength="946" lengthAdjust="spacingAndGlyphs">${esc(cod)}</text></svg></div>
+  <div class="bc">${barSvg(ean?eanBits(ean):c128Bits(cod),ean?9:10)}</div><div class="hr">${ean?"EAN-13 · ":""}${esc(ean||cod)}</div>
+  <div><div class="k">Descripción</div><div class="desc">${esc(d.desc||"")}</div></div>
+  <div class="g"><div class="box"><div class="k">Cantidad${cv?" en bultos":""}</div><div class="v">${bul}</div></div><div class="box"><div class="k">Conversión${UMN(um)==="m"?" · metros lineales":""}</div><div class="v">${conv}</div></div></div>
+  <div class="ft"><span>Impresión: ${esc(xF(now))} ${esc(xH(now))}${re?' · <span class="re">REIMPRESIÓN</span>':""}</span><span>${esc(d.user||"")}</span></div>
+  </div></body></html>`}
+function ppImprimir(html){let f=$("#ppFrame");if(f)f.remove();f=document.createElement("iframe");f.id="ppFrame";f.setAttribute("aria-hidden","true");f.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(f);const w=f.contentWindow;w.document.open();w.document.write(html);w.document.close();setTimeout(()=>{try{w.focus();w.print()}catch(e){toast("No se pudo abrir la impresión: "+e.message)}},350)}
+var ppL=[],ppBusy=false;
+const ppMsg=e=>/function|PGRST202|404/.test(e.message)?"Falta ejecutar en Supabase la actualización de etiquetas de PT.":e.message==="muy_antiguo"?"Ese pallet tiene más de 15 días: corrígelo desde Recepción PT.":({cantidad_invalida:"Escribe una cantidad mayor que 0.",datos_invalidos:"Elige un producto de la lista.",no_existe:"Ese pallet ya no existe."}[e.message]||movMsg(e));
+function ppItem(){const c=codeStr($("#ppCod").value);if(!c)return null;return pvFind(c)||(eanCod(c)?pvFind(eanCod(c)):null)}
+function ppInfo(){const it=ppItem(),c=$("#ppCod").value.trim(),q=num($("#ppQty").value),cv=it&&conv(it);
+  $("#ppQL").textContent=it?`Cantidad (${cv?plural(it.ce).toLowerCase():umTxt(it.um)})`:"Cantidad";
+  $("#ppInfo").innerHTML=!c?'<span class="small muted">Escribe o elige el código; luego la cantidad y toca Registrar e imprimir.</span>':!it?'<span style="color:var(--bad)">Ese código no está en la lista de productos.</span>':
+    `<b>${esc(it.desc)}</b>${cv?` <span class="muted">· 1 ${esc(it.ce)} = ${fmt2(it.f)} ${esc(umTxt(it.um))}</span>`:""}${q>0&&cv?` <span class="pill p-info" style="margin-left:6px">${fmt2(q)} ${esc(q===1?it.ce:plural(it.ce))} = ${fmt2(q*(+it.f))} ${esc(umTxt(it.um))}</span>`:""}`;return it}
+async function ppEnter(){if(!$("#ppDia").value)$("#ppDia").value=ymd(new Date());
+  if(!nubeOn()){$("#ppNote").hidden=false;$("#ppNote").innerHTML="Para registrar pallets, conecta el envío automático (Supabase) en <b>2 · Permisos</b>.";return}
+  $("#ppNote").hidden=true;await pvCatalogo();const its=pvItems();
+  if($("#ppList").childElementCount!==its.length)$("#ppList").innerHTML=its.map(i=>`<option value="${esc(i.cod)}">${esc(i.desc)}</option>`).join("");
+  if(!its.length){$("#ppNote").hidden=false;$("#ppNote").textContent="Todavía no hay lista de productos en la nube: el administrador debe cargar el ERP."}
+  ppInfo();ppLoad();setTimeout(()=>$("#ppCod").focus(),50)}
+$("#ppCod").addEventListener("input",ppInfo);$("#ppQty").addEventListener("input",ppInfo);
+$("#ppCod").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();if(ppItem())$("#ppQty").focus()}});
+$("#ppQty").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#ppOk").click()}});
+$("#ppOk").onclick=async()=>{if(ppBusy)return;const it=ppInfo(),q=num($("#ppQty").value);
+  if(!it){toast("Elige un producto de la lista");return $("#ppCod").focus()}
+  if(q==null||q<=0){toast("Escribe la cantidad");return $("#ppQty").focus()}
+  if(!navigator.onLine)return toast("Sin conexión: el N° de pallet lo da el servidor. Vuelve a intentar cuando haya señal.");
+  const b=$("#ppOk");ppBusy=true;b.disabled=true;
+  try{const d=await rpc(SB,"cb_pt_prod_registrar",{p_clave:SB.admin,p_data:{code:it.cod,k:it.cod,desc:it.desc||"",um:umTxt(it.um),ce:conv(it)?it.ce:"",f:conv(it)?+it.f:1,qty:q}});
+    ppImprimir(ppEtiqueta(d,false));toast(`✓ Pallet ${d.pallet} registrado · imprimiendo etiqueta`);
+    $("#ppCod").value="";$("#ppQty").value="";ppInfo();$("#ppCod").focus();if($("#ppDia").value!==ymd(new Date()))$("#ppDia").value=ymd(new Date());ppLoad()}
+  catch(e){toast(ppMsg(e))}finally{ppBusy=false;b.disabled=false}};
+$("#ppTraer").onclick=()=>ppLoad();$("#ppDia").onchange=()=>ppLoad();
+async function ppLoad(){const dia=$("#ppDia").value,tb=$("#ppTbl");if(!dia||!nubeOn())return;
+  try{ppL=await rpc(SB,"cb_pt_prod_dia",{p_clave:SB.admin,p_dia:dia})||[]}catch(e){tb.innerHTML=`<tr><td class="muted">${esc(ppMsg(e))}</td></tr>`;return}
+  const vig=ppL.filter(d=>+d.qty>0);
+  $("#ppRes").textContent=`${fmt(vig.length)} pallet${vig.length===1?"":"s"} · ${fmt(new Set(vig.map(d=>key(d.k||d.code))).size)} productos${ppL.length>vig.length?` · ${fmt(ppL.length-vig.length)} anulado${ppL.length-vig.length===1?"":"s"}`:""}`;
+  tb.innerHTML=ppL.length?`<thead><tr><th>Pallet</th><th>Hora</th><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Conversión</th><th>Impresiones</th><th></th></tr></thead><tbody>`+
+    ppL.slice().reverse().map(d=>{const cv=ppCv(d),q=+d.qty||0,an=q===0,ed=Array.isArray(d.ed)&&d.ed.length,ni=Array.isArray(d.imp)?d.imp.length:0;
+      return `<tr${an?' style="opacity:.55"':""}><td class="code"><b>${esc(d.pallet)}</b></td><td>${hm24(d.rt||d.t)}</td><td class="code">${esc(d.k||d.code)}</td><td class="desc">${esc(d.desc||"")}${ed?`<span class="sub" style="color:var(--warn)">corregido: ${d.ed.map(x=>`${fmt2(+x.de)} → ${fmt2(+x.a)}`).join(" · ")}</span>`:""}</td>
+      <td class="num">${an?'<span class="pill p-bad">Anulado</span>':`${fmt2(q)} ${esc(cv?(q===1?d.ce:plural(d.ce)):umTxt(d.um))}`}</td><td class="num">${an?"":`${fmt2(cv?q*(+d.f):q)} ${esc(umTxt(d.um))}`}</td>
+      <td class="small" title="${esc((d.imp||[]).map(fmtDT).join("\n"))}">${ni?fmt(ni)+(ni===1?" vez":" veces"):"—"}</td>
+      <td style="white-space:nowrap">${an?"":`<button class="btn sm" data-ppre="${esc(d.lid)}" type="button">🖨 Reimprimir</button> `}<button class="btn sm" data-pped="${esc(d.lid)}" type="button">✎ Corregir</button></td></tr>`}).join("")+"</tbody>"
+    :'<tr><td class="muted">No hay pallets registrados desde el PC ese día.</td></tr>';
+  $$("#ppTbl [data-ppre]").forEach(b=>b.onclick=async()=>{const d=ppL.find(x=>x.lid===b.dataset.ppre);if(!d)return;b.disabled=true;
+    try{await rpc(SB,"cb_pt_prod_impreso",{p_clave:SB.admin,p_lid:d.lid});ppImprimir(ppEtiqueta(d,true));ppLoad()}catch(e){toast(ppMsg(e));b.disabled=false}});
+  $$("#ppTbl [data-pped]").forEach(b=>b.onclick=async()=>{const d=ppL.find(x=>x.lid===b.dataset.pped);if(!d)return;const u=ppCv(d)?plural(d.ce).toLowerCase():umTxt(d.um);
+    const v=prompt(`Pallet ${d.pallet} · ${d.desc||d.code}\nNueva cantidad (en ${u}). Escribe 0 para anular el pallet:`,fmt2(d.qty));if(v==null)return;const q=num(v);
+    if(q==null||q<0)return toast("Escribe una cantidad (0 o más)");if(q===0&&!confirm(`¿Anular el pallet ${d.pallet}?\nQueda en 0 (no cuenta) y se puede volver a corregir. Retira la etiqueta del pallet.`))return;
+    try{await rpc(SB,"cb_pt_prod_corregir",{p_clave:SB.admin,p_lid:d.lid,p_qty:q});toast(q===0?`Pallet ${d.pallet} anulado`:"Cantidad corregida · reimprime la etiqueta");ppLoad()}catch(e){toast(ppMsg(e))}})}
 /* ---------- Informe Word de Control de calidad (formato estándar, con fotos). Se arma en el navegador (.docx = zip de XML). ---------- */
 const xe=t=>String(t??"").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function docxRun(t,o){o=o||{};return `<w:r><w:rPr>${o.b?"<w:b/>":""}${o.c?`<w:color w:val="${o.c}"/>`:""}${o.sz?`<w:sz w:val="${o.sz}"/>`:""}</w:rPr>${String(t??"").split(/\r?\n/).map(l=>`<w:t xml:space="preserve">${xe(l)}</w:t>`).join("<w:br/>")}</w:r>`}
