@@ -49,7 +49,7 @@ const B='http://localhost:8811/index.html',SBU='https://test.supabase.co',ADMIN=
  // Bodega recibe con el celular "sin número" (como hoy): Recepción PT cuadra el pallet del PC por producto
  sql(`insert into cb_pt(lid,puesto,pallet,data,t,lado) values ('bod1','u_bod','SN-BOD1',jsonb_build_object('lid','bod1','sn',true,'k','140101','code','140101','desc','SACO HARINA 25KG','qty',5,'um','KG','ce','SACO','f',25,'pallet','SN-BOD1','user','FELIPE','t',to_char(now() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')),now(),'R')`);
  await s.click('nav.tabs button[data-v="pt"]');await s.waitForTimeout(2500);
- const pt=await s.textContent('#ptRes');check(/140101/.test(pt)&&/Recibido OK/.test(pt)&&!/En tránsito/.test(pt)&&!/Sin registro de producción/.test(pt),'Recepción PT: pallet del PC (5 sacos) cuadra con lo recibido sin N° → Recibido OK');
+ const pt=await s.textContent('#ptRes');check(/140101/.test(pt)&&/Recibido OK/.test(pt)&&!/En tránsito/.test(pt)&&!/Sin registro de producción/.test(pt)&&/P000001/.test(pt),'Recepción PT: pallet del PC (5 sacos) cuadra con lo recibido sin N° → Recibido OK y se ve su N° P000001');
  // Recepción PT del panel los ve como producción
  const L=JSON.parse(rpc('cb_pt_listar',{p_clave:ADMIN,p_desde:new Date(Date.now()-86400000).toISOString()}).body);
  check(L.pallets.length===3&&L.pallets.filter(p=>p.puesto==='produccion').length===2&&true,'Recepción PT: los pallets salen como "Producción entrega"');

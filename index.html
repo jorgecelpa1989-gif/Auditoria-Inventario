@@ -8424,7 +8424,7 @@ function ptTabla(){
   const {rows,ini,fin,snRows}=ptRows(),T=[];
   for(const r of rows)T.push({pallet:r.pallet,cod:r.cod,desc:r.desc,um:r.um,ce:r.ce,f:r.f,pe:r.pe,pr:r.pr,dif:r.dif,st:r.st,
     rec:r.r&&r.pr!=null?`✓ ${PTREC[r.r.puesto]||"Recibido"}${r.r.user?" · "+r.r.user:""}`:"",tE:r.e?r.e.t:null,tR:r.r?r.r.t:null,hE:r.e&&r.pe!=null?[r.e.t]:[],hR:r.r&&r.pr!=null?[r.r.t]:[],dE:r.e||null,dR:r.r||null,uE:r.e?r.e.user||"":"",otro:r.st==="otro"?(r.r.desc||r.r.code):"",t:r.t});
-  for(const o of snRows)T.push({sn:true,pallet:`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`,cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
+  for(const o of snRows)T.push({sn:true,pallet:ptSnPal(o),cod:o.cod,desc:o.desc,um:o.um,ce:o.ce,f:o.f,pe:o.np?o.p:null,pr:o.nr?o.rc:null,dif:o.np&&o.nr?o.dif:null,st:PTSN2ST[o.st]||o.st,
     recs:o.recs||[],hE:ptHoras(o.recs,true),hR:ptHoras(o.recs,false),rec:o.nr?`${fmt(o.nr)} pallet${o.nr===1?"":"s"}${o.nrr?` (bodega ${fmt(o.nrb)} · retail ${fmt(o.nrr)})`:""}`:"",tE:null,tR:null,uE:"",otro:"",t:0,np:o.np,nr:o.nr});
   return {T,ini,fin};
 }
@@ -8432,6 +8432,9 @@ const xF=t=>{const d=new Date(t);return isNaN(d)?"":fechaCL(ymd(d))},xH=t=>{cons
 const hm24=t=>new Date(t).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit",hour12:false});
 const ptBul=(base,r)=>base==null?"":(r.ce&&r.f!==1?`<b>${fmt2(base/r.f)}</b> <span class="small muted">${esc(plural(r.ce))}</span>`:`<b>${fmt2(base)}</b> <span class="small muted">${esc(umTxt(r.um))}</span>`);
 const ptConv=(base,r)=>base==null?"":(r.ce&&r.f!==1?`${fmt2(base)} <span class="small muted">${esc(umTxt(r.um))}</span><span class="sub">1 ${esc(r.ce)} = ${fmt2(r.f)} ${esc(umTxt(r.um))}</span>`:'<span class="muted">—</span>');
+/* Fila por producto: si producción etiquetó pallets en el PC (módulo 9), se ven sus N° (P000001…) aunque bodega los reciba sin número. */
+function ptSnPal(o){const N=(o.recs||[]).filter(d=>d.via==="pc"&&d.puesto==="produccion"&&+d.qty>0).map(d=>String(d.pallet)).sort(),r=o.np-N.length;
+  return N.length?(N.length>3?`${N.slice(0,3).join(", ")} y ${fmt(N.length-3)} más`:N.join(", "))+(r>0?` · ${fmt(r)} sin N°`:""):`Sin N° · ${fmt(o.np)} pallet${o.np===1?"":"s"}`}
 /* Filas "Sin N°": se abren para ver cada pallet registrado (producción y recepción) y corregir su cantidad. */
 var ptSnOpen=new Set();
 /* Horas de los registros sin número (sin contar los anulados en 0), en orden. */
@@ -8441,7 +8444,7 @@ function ptSnDet(r){const L=[...(r.recs||[])].sort((a,b)=>String(a.t||a.rt).loca
   const who=d=>d.puesto==="produccion"?"🏭 Producción entrega":d.puesto==="retail"?"🛒 Retail retira":"🏷️ Bodega recibe";
   return `<tr class="ptSnDet"><td colspan="10" style="background:var(--bg);padding:6px 12px"><div class="small" style="display:grid;grid-template-columns:max-content max-content max-content max-content 1fr;gap:6px 18px;align-items:baseline">`+
     L.map(d=>{const f=+d.f||+r.f||1,ce=d.ce||r.ce,um=umTxt(d.um||r.um),cv=ce&&f!==1;
-      return `<span>${who(d)}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap">${+d.qty>0?"":'<s class="muted">'}<b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}${+d.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div>`+
+      return `<span>${who(d)}${d.via==="pc"?` · <b>${esc(d.pallet)}</b>`:""}</span><span class="muted">${hm24(d.t||d.rt)}</span><span>${esc(d.user||"")}</span><span style="white-space:nowrap">${+d.qty>0?"":'<s class="muted">'}<b>${fmt2(+d.qty||0)}</b> ${esc(cv?plural(ce):um)}${cv?` <span class="muted">= ${fmt2((+d.qty||0)*f)} ${esc(um)}</span>`:""}${+d.qty>0?"":'</s> <span class="muted">anulado</span>'}</span><span style="white-space:nowrap">${ptEdBtn(d).replace('<span class="sub">','<span>')}</span>`}).join("")+`</div>`+
     (ptPuedeCorr()?`<div class="row" style="gap:6px;margin-top:6px"><span class="small muted">¿Falta un registro de este producto?</span><button class="btn sm" data-ptadd="E|${esc(r.cod)}">＋ Agregar entrega de producción</button><button class="btn sm" data-ptadd="R|${esc(r.cod)}">＋ Agregar recepción de bodega</button><button class="btn sm" data-ptadd="D|${esc(r.cod)}">＋ Agregar retiro de retail</button></div>`:"")+`</td></tr>`}
 /* Supervisor: corregir la cantidad de un registro de PT (de cualquier día). Queda anotado de → a. */
 function ptEdBtn(d){if(!d||!d.lid||!pvCan("pt_corregir"))return "";const ed=Array.isArray(d.ed)&&d.ed.length;
