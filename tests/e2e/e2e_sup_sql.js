@@ -85,7 +85,7 @@ check(rpc('cb_pt_listar',{p_clave:sB,p_desde:new Date().toISOString()}).err==='a
 
 
 // --- Matriz completa: un supervisor con UN solo permiso (más los que ese permiso exige) ---
-const FN={cb_listar:'inv_ver',cb_lecturas_de:'inv_ver',cb_conteo_codigos:'inv_ver',cb_catalogo_stock:'inv_ver',
+const FN={cb_listar:'inv_ver',cb_conteo_foto:'inv_operar',cb_conteo_fotos:'inv_ver',cb_lecturas_de:'inv_ver',cb_conteo_codigos:'inv_ver',cb_catalogo_stock:'inv_ver',
   cb_crear:'inv_operar',cb_conteo_editar:'inv_operar',cb_conteo_asignar:'inv_operar',cb_finalizar:'inv_operar',cb_bloquear:'inv_operar',cb_liberar:'inv_operar',cb_catalogo_subir:'inv_operar',
   cb_mov_listar:'mp_ver',cb_mov_lecturas:'mp_ver',cb_mov_crear:'mp_solicitar',cb_mov_agregar_panel:'mp_operar',cb_mov_corregir:'mp_operar',cb_mov_activar:'mp_operar',cb_mov_extender:'mp_operar',cb_mov_asignar:'mp_operar',cb_mov_bloquear:'mp_operar',cb_mov_liberar:'mp_operar',cb_mov_eliminar:'mp_eliminar',cb_mov_restaurar:'mp_eliminar',cb_mov_anulados:'mp_ver',
   cb_pt_listar:'pt_ver',cb_pt_editar_panel:'pt_corregir',cb_pt_agregar_panel:'pt_corregir',cb_pt_prod_registrar:'pt_producir',cb_pt_prod_dia:'pt_producir',cb_pt_prod_impreso:'pt_producir',cb_pt_prod_corregir:'pt_producir',
