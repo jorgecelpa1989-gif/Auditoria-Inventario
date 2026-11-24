@@ -6014,7 +6014,7 @@ const esReconteo=c=>!!(c&&c.reconteoDe);
 function conteoDeScan(s){if(s.nube)return conteos.find(c=>c.id===s.nube)||null;if(s.conteo)return conteos.find(c=>c.nombre===s.conteo)||null;return null}
 /* ---------- Foto del stock de un conteo cerrado: solo sus SKU (stock, disponible, reserva). Se guarda en Supabase al finalizarlo,
    así Resultados, el Excel y el reconteo de un conteo cerrado no cambian al cargar un stock nuevo. No se guarda en este equipo. ---------- */
-const fotoMem=new Map(), fotoPend=new Map();   // fotoPend: id → hora de la última consulta
+const fotoMem=new Map(), fotoPend=new Map(), fotoXls=new Set();   // fotoPend: id → hora de la última consulta
 function fotoDe(sc){const c=sc&&sc.c;if(!c||!cFin(c)||!erp)return null;   // sin ERP cargado no hay bulto ni lectura por EAN: se muestra el aviso de cargar el ERP
   const f=fotoMem.get(c.id);return f&&f.s?f:null}
 function fotoBod(c){const raiz=c.reconteoDe?conteos.find(y=>y.id===c.reconteoDe):null;return c.bodega||(raiz&&raiz.bodega)||null}
@@ -6034,7 +6034,7 @@ function fotoAviso(sc){const el=$("#resFoto"),c=sc&&sc.c;if(!el)return;if(!c||!c
   if(!erp){el.hidden=true;return}
   const puede=typeof pvCan!=="function"||pvCan("inv_operar"),E=fotoBod(c)?erpB[fotoBod(c)]:erp,cargado=E?`${E.file?esc(E.file):"stock"}${E.at?" · cargado el "+fmtDT(E.at):""}`:"";
   if(F&&F.s){el.innerHTML=`📷 <b>Stock congelado</b> del ${fmtDT(F.t)}${F.bod?" · Bodega "+esc(F.bod):""}${F.f?" · archivo "+esc(F.f):""}: este conteo está cerrado y no cambia al cargar un stock nuevo.`+
-      (puede&&E&&E.file!==F.f?` <button class="btn sm" id="resFotoOk" type="button">Reemplazar por el stock cargado ahora</button>`:"")}
+      (puede&&E&&(E.file!==F.f||(E.at&&F.t&&E.at>F.t))?` <button class="btn sm" id="resFotoOk" type="button">Reemplazar por el stock cargado ahora</button>`:"")}
   else el.innerHTML=`⚠ Este conteo se cerró <b>sin foto del stock</b>: se compara con el stock cargado ahora${E?" ("+cargado+")":""}.`+(puede&&E?` <button class="btn sm" id="resFotoOk" type="button">Guardar foto con este stock</button>`:"");
   if($("#resFotoOk"))$("#resFotoOk").onclick=()=>confirmBox(`${F&&F.s?`Reemplazar la foto del ${esc(fmtDT(F.t))}${F.f?" ("+esc(F.f)+")":""} por`:"Guardar como stock de \""+esc(c.nombre)+"\""} el stock cargado ahora (${cargado}). Úsalo solo si ese stock corresponde al día del conteo.`,async()=>{
       try{if(!(F&&F.s)){const d=await rpc(SB,"cb_conteo_fotos",{p_clave:SB.admin,p_ids:[c.id]})||{};if(d[c.id]){fotoMem.set(c.id,d[c.id]);toast("Otro equipo ya guardó la foto del stock");return renderResult()}}
@@ -6181,7 +6181,7 @@ $("#btnReconteo").onclick=async()=>{
 const detRow=r=>({"Código":r.cod,"Descripción":r.desc,"Subgrupo":r.sg||"","Unidad":r.um,"Disponible":r.disp??"","Reserva":r.res??"","Stock total":r.stock??"","1er conteo":r.c1??"","Reconteo":r.c2??"","Conteo final":r.fin??"","Diferencia":r.dif??"","Estado":STATES[r.st][0],"Validación":r.val?VALID[r.val][0]:"","N° ubicaciones":r.nub||"","N° lecturas":r.n});
 const lectRow=s=>{const it=erp&&findItem(s.code),c=conteoDeScan(s);return {"Conteo":c?c.nombre:(s.conteo||"Este equipo"),"Tipo":esReconteo(c)?"Reconteo":"Conteo","Fecha":new Date(s.t).toLocaleDateString("es-CL"),"Hora":new Date(s.t).toLocaleTimeString("es-CL"),"Contador":s.user||"","Ubicación":s.ubic||"","Código":s.code,"Descripción":it?it.desc:"","Cantidad contada":s.qty,"Unidad contada":s.ce||s.um||"","Factor":s.f||1,"Total (unidad ERP)":sq(s),"Unidad ERP":s.um||""}};
 $("#btnExpRes").onclick=()=>{
-  {const s0=scope(),c0=s0&&s0.c;if(c0&&c0.nube&&cFin(c0)&&erp&&!fotoMem.has(c0.id)){fotoTraer(c0,true);return toast("Cargando la foto del stock de este conteo: vuelve a tocar Excel en un segundo")}}
+  {const s0=scope(),c0=s0&&s0.c;if(c0&&c0.nube&&cFin(c0)&&erp&&!fotoMem.has(c0.id)){if(nubeOn()&&!fotoXls.has(c0.id)){fotoXls.add(c0.id);fotoTraer(c0,true);return toast("Cargando la foto del stock de este conteo: vuelve a tocar Excel en un segundo")}toast("⚠ Sin la foto del stock (sin conexión): el Excel sale con el stock cargado en este PC")}}
   const rows=compute(),k=kpis(rows),sc=scope(),wb=XLSX.utils.book_new();
   const ord={falta:0,sobra:1,nocont:2,noerp:3,contado:4,ok:5};const sorted=[...rows].sort((a,b)=>(ord[a.st]-ord[b.st])||Math.abs(b.dif||0)-Math.abs(a.dif||0));
   const res=[["Resultado de inventario · Grupo Vector"],[],["Conteo",sc.label],["Fecha exportación",fmtDT(new Date().toISOString())],...(()=>{const F=fotoDe(sc);return F?[["Informe ERP",(F.f||"—")+" · foto del stock al cerrar el conteo"],["Foto del stock",fmtDT(F.t)+(F.bod?" · Bodega "+F.bod:"")]]:[["Informe ERP",erp?erp.file:"—"]]})(),[],
