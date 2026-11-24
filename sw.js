@@ -1,5 +1,5 @@
 // Guarda la app y la lista de productos en el celular para que funcionen sin señal.
-const CACHE = "conteo-bodega-d08ea0e6d1";
+const CACHE = "conteo-bodega-b9294763e6";
 const FILES = ["./", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => {

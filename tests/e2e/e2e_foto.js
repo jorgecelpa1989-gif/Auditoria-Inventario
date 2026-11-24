@@ -39,5 +39,14 @@ const stock=(a,b)=>JSON.stringify({file:`stock_${a}.txt`,at:new Date().toISOStri
  // conteo en curso: sigue usando el stock cargado ahora
  const e2=mk('En curso');await s.reload();await s.waitForTimeout(3500);await s.selectOption('#rSel',e2.id);await s.waitForTimeout(1500);
  check(await s.evaluate(()=>compute().find(z=>z.cod==='221317').stock)===100&&await s.isHidden('#resFoto'),'Conteo en curso: usa el stock cargado ahora');
+ // foto con stock viejo: se puede reemplazar por el stock cargado ahora (con confirmación)
+ await s.selectOption('#rSel',a.id);await s.waitForTimeout(2000);
+ check(await s.isVisible('#resFotoOk')&&/Reemplazar/.test(await s.textContent('#resFotoOk')),'Conteo con foto: botón "Reemplazar por el stock cargado ahora"');
+ await s.click('#resFotoOk');await s.waitForTimeout(300);await s.click('#cYes');await s.waitForTimeout(2000);
+ check(sql(`select foto->'s'->'221317'->>0 from cb_conteos where id='${a.id}'`)==='100'&&await s.evaluate(()=>compute().find(z=>z.cod==='221317').stock)===100,'Reemplazar foto: queda el stock nuevo (100)');
+ // PC sin ERP cargado: no usa la foto (no pierde el bulto) y pide cargar el ERP
+ await s.evaluate(()=>{localStorage.removeItem('inv_erp');localStorage.removeItem('inv_erpb')});await s.reload();await s.waitForTimeout(3500);await s.selectOption('#rSel',a.id);await s.waitForTimeout(3500);
+ {const z=await s.evaluate(()=>({erp:!!erp,st:erp?(compute().find(r=>r.cod==='221317')||{}).stock:null,foto:!$('#resFoto').hidden,note:!$('#resNote').hidden}));
+  check(z.erp?(z.st===100&&z.foto):(!z.foto&&z.note),'PC sin ERP propio: con la lista de la nube usa la foto (con bulto); sin lista, pide cargar el ERP → '+JSON.stringify(z))}
  check(errs.length===0,'Sin errores JS '+errs.join(' | '));
  await b.close();console.log(fail?'FALLAS: '+fail:'TODO OK');process.exit(fail?1:0)})();
