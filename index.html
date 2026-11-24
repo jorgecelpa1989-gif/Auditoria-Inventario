@@ -571,7 +571,8 @@ body.op .menuBtn,body.mov .menuBtn,body.puesto .menuBtn,body.locked .menuBtn{dis
 
 <!-- ============ 4 RESULTADO ============ -->
 <section class="view" id="v-resultado" hidden>
-  <div class="notice" id="resNote" hidden>Para comparar contra el stock, carga el informe del ERP en <b>1 · Panel</b> en este computador.</div>
+  <div class="notice" id="resFoto" hidden></div>
+<div class="notice" id="resNote" hidden>Para comparar contra el stock, carga el informe del ERP en <b>1 · Panel</b> en este computador.</div>
  <div class="resGrid">
   <div class="resMain">
   <div class="card">
@@ -5228,6 +5229,39 @@ end $$;
 revoke all on function public.cb_ubic_inv_aplicar(text, uuid, jsonb, jsonb), public.cb_ubic_inv_hist(text) from public;
 grant execute on function public.cb_ubic_inv_aplicar(text, uuid, jsonb, jsonb), public.cb_ubic_inv_hist(text) to anon, authenticated;
 
+-- =====================================================================
+--  Foto del stock al finalizar un conteo: solo los SKU de ese conteo (stock, disponible, reserva),
+--  con el archivo y la hora del stock usado. Así Resultados de un conteo cerrado no cambia al cargar
+--  un stock nuevo. Solo agrega: columna nueva y 2 funciones; nada existente cambia.
+--  Formato: {"f": archivo, "at": carga del stock, "bod": bodega, "t": hora de la foto, "s": {"cod": [stock, disp, res]}}
+-- =====================================================================
+alter table public.cb_conteos add column if not exists foto jsonb;
+
+create or replace function public.cb_conteo_foto(p_clave text, p_id uuid, p_foto jsonb, p_forzar boolean default false) returns boolean
+language plpgsql security definer set search_path = public, extensions as $$
+declare v_items int;
+begin
+  perform cb_puede(p_clave, 'inv_operar');
+  if p_foto is null or jsonb_typeof(p_foto) <> 'object' or jsonb_typeof(p_foto->'s') <> 'object' or length(p_foto::text) > 3000000 then raise exception 'datos_invalidos'; end if;
+  select jsonb_array_length(items) into v_items from cb_conteos where id = p_id;
+  if not found then raise exception 'no_existe'; end if;
+  if (select count(*) from jsonb_object_keys(p_foto->'s')) > v_items then raise exception 'datos_invalidos'; end if;   -- solo SKU del conteo
+  update cb_conteos set foto = p_foto where id = p_id and (foto is null or coalesce(p_forzar, false));
+  return found;
+end $$;
+
+create or replace function public.cb_conteo_fotos(p_clave text, p_ids uuid[]) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform cb_puede(p_clave, 'inv_ver');
+  if p_ids is null or array_length(p_ids, 1) is null then return '{}'::jsonb; end if;
+  if array_length(p_ids, 1) > 100 then raise exception 'datos_invalidos'; end if;
+  return coalesce((select jsonb_object_agg(id::text, foto) from cb_conteos where id = any(p_ids) and foto is not null), '{}'::jsonb);
+end $$;
+
+revoke all on function public.cb_conteo_foto(text, uuid, jsonb, boolean), public.cb_conteo_fotos(text, uuid[]) from public;
+grant execute on function public.cb_conteo_foto(text, uuid, jsonb, boolean), public.cb_conteo_fotos(text, uuid[]) to anon, authenticated;
+
 </script>
   </div>
 
@@ -5978,6 +6012,28 @@ const STATES={ok:["Cuadra","p-ok"],falta:["Faltante","p-bad"],sobra:["Sobrante",
 const VALID={conf:["Confirmado","p-info"],corr:["Corregido","p-warn"]};
 const esReconteo=c=>!!(c&&c.reconteoDe);
 function conteoDeScan(s){if(s.nube)return conteos.find(c=>c.id===s.nube)||null;if(s.conteo)return conteos.find(c=>c.nombre===s.conteo)||null;return null}
+/* ---------- Foto del stock de un conteo cerrado: solo sus SKU (stock, disponible, reserva). Se guarda en Supabase al finalizarlo,
+   así Resultados, el Excel y el reconteo de un conteo cerrado no cambian al cargar un stock nuevo. No se guarda en este equipo. ---------- */
+const fotoMem=new Map(), fotoPend=new Set();
+function fotoDe(sc){const c=sc&&sc.c;if(!c||!cFin(c))return null;const f=fotoMem.get(c.id);return f&&f.s?f:null}
+function fotoBod(c){const raiz=c.reconteoDe?conteos.find(y=>y.id===c.reconteoDe):null;return c.bodega||(raiz&&raiz.bodega)||null}
+function fotoArmar(c){if(!c||!Array.isArray(c.codes)||!c.codes.length)return null;const bod=fotoBod(c),E=bod?erpB[bod]:erp;
+  if(!E||!Array.isArray(E.items)||E.maestro)return null;const m=new Map(E.items.map(i=>[key(i.cod),i])),S={};
+  for(const cod of c.codes){const it=m.get(key(cod));if(!it)continue;const v=[it.stock??null,it.disp??null,it.res??null];while(v.length&&v[v.length-1]==null)v.pop();S[it.cod]=v}
+  return {f:E.file||"",at:E.at||null,bod:bod||E.bod||null,t:new Date().toISOString(),s:S}}
+async function fotoGuardar(c,forzar){const f=fotoArmar(c);if(!f)return null;
+  const r=await rpc(SB,"cb_conteo_foto",{p_clave:SB.admin,p_id:c.id,p_foto:f,p_forzar:!!forzar});if(r)fotoMem.set(c.id,f);return !!r}
+function fotoTrasFin(id){const c=conteos.find(z=>z.id===id);if(!c)return;
+  fotoGuardar(c,false).then(r=>{if(r===null)toast(`⚠ No se guardó la foto del stock de "${c.nombre}": este PC no tiene cargado el stock${fotoBod(c)?" de la Bodega "+fotoBod(c):""}.`)}).catch(()=>{})}
+async function fotoTraer(c){if(fotoPend.has(c.id)||!nubeOn())return;fotoPend.add(c.id);
+  try{const d=await rpc(SB,"cb_conteo_fotos",{p_clave:SB.admin,p_ids:[c.id]})||{};fotoMem.set(c.id,d[c.id]||null);if(rSel===c.id&&!$("#v-resultado").hidden)renderResult()}catch(e){fotoPend.delete(c.id)}}
+function fotoAviso(sc){const el=$("#resFoto"),c=sc&&sc.c;if(!el)return;if(!c||!cFin(c)||!c.nube){el.hidden=true;return}
+  if(!fotoMem.has(c.id)){el.hidden=true;fotoTraer(c);return}
+  const F=fotoMem.get(c.id);el.hidden=false;
+  if(F&&F.s){el.innerHTML=`📷 <b>Stock congelado</b> del ${fmtDT(F.t)}${F.bod?" · Bodega "+esc(F.bod):""}${F.f?" · archivo "+esc(F.f):""}: este conteo está cerrado y no cambia al cargar un stock nuevo.`;return}
+  const puede=typeof pvCan!=="function"||pvCan("inv_operar"),E=fotoBod(c)?erpB[fotoBod(c)]:erp;
+  el.innerHTML=`⚠ Este conteo se cerró <b>sin foto del stock</b>: se compara con el stock cargado ahora${E&&E.file?" ("+esc(E.file)+")":""}.`+(puede&&E?` <button class="btn sm" id="resFotoOk" type="button">Guardar foto con este stock</button>`:"");
+  if($("#resFotoOk"))$("#resFotoOk").onclick=()=>confirmBox(`Guardar como stock de "${esc(c.nombre)}" el stock cargado ahora${E.file?" ("+esc(E.file)+")":""}. Úsalo solo si ese stock corresponde al día del conteo.`,async()=>{try{const r=await fotoGuardar(c,true);toast(r?"Foto del stock guardada":"No se pudo armar la foto: falta el stock de esa bodega");renderResult()}catch(e){toast(sbMsg(e))}},"#resFoto")}
 /* qué conteo(s) se están mirando */
 function scope(){
   const c=rSel&&rSel!=="*"&&rSel!=="local"?conteos.find(x=>x.id===rSel):null;
@@ -5991,10 +6047,12 @@ function scope(){
     codes:all.length&&all.length===conteos.filter(x=>!esReconteo(x)).length?new Set(all.flatMap(x=>x.codes.map(key))):null};
 }
 function compute(){
-  const sc=scope(), first=new Map(), re=new Map(), add=(m,s)=>{const it=erp&&findItem(s.code);const k=it?key(it.cod):"x"+key(s.code);const c=m.get(k)||{q:0,n:0,ub:new Set(),raw:s.code,it};c.q+=sq(s);c.n++;if(s.ubic)c.ub.add(s.ubic);m.set(k,c)};
+  const sc=scope(),FO=fotoDe(sc), first=new Map(), re=new Map(), add=(m,s)=>{const it=(erp&&findItem(s.code))||(FO&&FO.s[codeStr(s.code)]?{cod:codeStr(s.code)}:null);const k=it?key(it.cod):"x"+key(s.code);const c=m.get(k)||{q:0,n:0,ub:new Set(),raw:s.code,it};c.q+=sq(s);c.n++;if(s.ubic)c.ub.add(s.ubic);m.set(k,c)};
   for(const s of scans){if(sc.re(s))add(re,s);else if(sc.first(s))add(first,s)}
   let items=erp?erp.items:[];
-  if(sc.codes)items=items.filter(i=>sc.codes.has(key(i.cod)));
+  if(FO){const S=FO.s,cods=sc.c.codes&&sc.c.codes.length?sc.c.codes:Object.keys(S);   // conteo cerrado: stock de la foto (el del día), no el cargado ahora
+    items=cods.map(cod=>{const b=(erp&&findItem(cod))||{cod,desc:"",um:""},v=S[b.cod]||S[cod]||[];return Object.assign({},b,{stock:v[0]??null,disp:v[1]??null,res:v[2]??null})})}
+  else if(sc.codes)items=items.filter(i=>sc.codes.has(key(i.cod)));
   else if(rSel&&rSel!=="*")items=items.filter(i=>first.has(key(i.cod))||re.has(key(i.cod)));
   const rows=[];
   for(const it of items){const k=key(it.cod),a=first.get(k),b=re.get(k);
@@ -6035,6 +6093,7 @@ function renderResult(){
   renderLive();
   renderSel();
   const rows=compute(), k=kpis(rows), sc=scope();
+  fotoAviso(sc);
   $("#resNote").hidden=!(erp&&erp.maestro)&&!!erp;
   $("#kpis").innerHTML=[[`SKU contados / total${k.nocont?` · ${fmt(k.nocont)} pendientes`:""}`,`${fmt(k.contados)} / ${fmt(k.total)}`],["Cuadran / con diferencia",`${fmt(k.ok)} / ${fmt(k.dif)}`],["Exactitud (IRA)",k.exact==null?"—":fmt(k.exact*100,1)+"%"]]
     .map(([l,v])=>`<div class="kpi"><span class="v">${v}</span><span class="l">${l}</span></div>`).join("");
@@ -6119,7 +6178,7 @@ const lectRow=s=>{const it=erp&&findItem(s.code),c=conteoDeScan(s);return {"Cont
 $("#btnExpRes").onclick=()=>{
   const rows=compute(),k=kpis(rows),sc=scope(),wb=XLSX.utils.book_new();
   const ord={falta:0,sobra:1,nocont:2,noerp:3,contado:4,ok:5};const sorted=[...rows].sort((a,b)=>(ord[a.st]-ord[b.st])||Math.abs(b.dif||0)-Math.abs(a.dif||0));
-  const res=[["Resultado de inventario · Grupo Vector"],[],["Conteo",sc.label],["Fecha exportación",fmtDT(new Date().toISOString())],["Informe ERP",erp?erp.file:"—"],[],
+  const res=[["Resultado de inventario · Grupo Vector"],[],["Conteo",sc.label],["Fecha exportación",fmtDT(new Date().toISOString())],...(()=>{const F=fotoDe(sc);return F?[["Informe ERP",(F.f||"—")+" · foto del stock al cerrar el conteo"],["Foto del stock",fmtDT(F.t)+(F.bod?" · Bodega "+F.bod:"")]]:[["Informe ERP",erp?erp.file:"—"]]})(),[],
     ["Productos del conteo",k.total],["Contados",k.contados],["Pendientes (no contados)",k.nocont],["Cuadran",k.ok],["Con diferencia",k.dif],["  Faltantes",k.falta],["  Sobrantes",k.sobra],["Recontados",k.re],["Códigos no existentes en ERP",k.noerp],["Total stock SKU del conteo",k.stockTot],["Total contado",k.contTot],["Exactitud (IRA = contado ÷ stock)",k.exact==null?"":k.exact]];
   const ws0=XLSX.utils.aoa_to_sheet(res);ws0["!cols"]=[{wch:30},{wch:40}];{const ri=res.findIndex(r=>/^Exactitud/.test(String(r[0]||"")));const c=ri>=0&&ws0["B"+(ri+1)];if(k.exact!=null&&c)c.z="0.0%"}
   XLSX.utils.book_append_sheet(wb,ws0,"Resumen");
@@ -6361,7 +6420,7 @@ const sbLinkParams=()=>{const ref=sbRef(SB.url);return (ref?"&p="+ref:"&u="+enco
 const sbRef=u=>{const m=String(u||"").match(/^https:\/\/([a-z0-9]{10,40})\.supabase\.co\/?$/i);return m?m[1]:""};
 const sbUrl=u=>{u=norm(u).replace(/\/+$/,"").replace(/\/rest\/v1.*$/,"");if(/^[a-z0-9]{10,40}$/i.test(u))u="https://"+u+".supabase.co";return u};
 /* Permiso que exige cada función de panel (igual que en el servidor). "__admin" = solo el administrador. */
-const SUP_FN={cb_listar:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
+const SUP_FN={cb_listar:"inv_ver",cb_conteo_foto:"inv_operar",cb_conteo_fotos:"inv_ver",cb_lecturas_de:"inv_ver",cb_conteo_codigos:"inv_ver",cb_catalogo_stock:"inv_ver",cb_crear:"inv_operar",cb_conteo_editar:"inv_operar",cb_conteo_asignar:"inv_operar",cb_finalizar:"inv_operar",cb_bloquear:"inv_operar",cb_liberar:"inv_operar",cb_catalogo_subir:"inv_operar",
   cb_mov_listar:"mp_ver",cb_mov_lecturas:"mp_ver",cb_mov_crear:"mp_solicitar",cb_mov_agregar_panel:"mp_operar",cb_mov_corregir:"mp_operar",cb_mov_activar:"mp_operar",cb_mov_extender:"mp_operar",cb_mov_asignar:"mp_operar",cb_mov_bloquear:"mp_operar",cb_mov_liberar:"mp_operar",cb_mov_eliminar:"mp_eliminar",cb_mov_restaurar:"mp_eliminar",cb_mov_anulados:"mp_ver",
   cb_pt_listar:"pt_ver",cb_pt_prod_registrar:"pt_producir",cb_pt_prod_dia:"pt_producir",cb_pt_prod_impreso:"pt_producir",cb_pt_prod_corregir:"pt_producir",cb_pt_editar_panel:"pt_corregir",cb_pt_agregar_panel:"pt_corregir",cb_dev_listar:"dev_ver",cb_dev_crear_panel:"dev_crear",cb_dev_cerrar:"dev_cerrar",cb_dev_reabrir:"dev_cerrar",cb_dev_recibir_panel:"dev_cerrar",cb_dev_eliminar:"dev_eliminar",cb_dev_restaurar:"dev_eliminar",cb_dev_anulados:"dev_ver",
   cb_u_listar:"usr_admin|inv_operar|mp_operar",cb_puesto_estado:"usr_admin|inv_operar|mp_operar",cb_u_guardar:"usr_admin",cb_u_liberar:"usr_admin",cb_u_eliminar:"usr_admin",cb_puesto_link:"usr_admin",
@@ -6449,7 +6508,7 @@ async function conteosRecuperar(arr){
 }
 async function refreshNube(silent){
   if(!nubeOn()||nubeBusy)return;nubeBusy=true;
-  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();await conteosRecuperar(arr||[]);if(typeof catSync==="function")catSync(false);for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).catch(()=>{})}renderConteosOnly();renderLive()}
+  try{const arr=await rpc(SB,"cb_listar",{p_clave:SB.admin});nubeLive=new Map((arr||[]).map(x=>[x.id,x]));nubeAt=new Date();await conteosRecuperar(arr||[]);if(typeof catSync==="function")catSync(false);for(const x of nubeLive.values())if(x.terminado&&!x.finalizado&&conteos.some(c=>c.id===x.id)){x.finalizado=x.terminado;rpc(SB,"cb_finalizar",{p_clave:SB.admin,p_id:x.id}).then(()=>fotoTrasFin(x.id)).catch(()=>{})}renderConteosOnly();renderLive()}
   catch(e){if(!silent)toast(sbMsg(e))}
   finally{nubeBusy=false}
 }
@@ -7841,7 +7900,7 @@ function lbRender(){
     <h3 class="lbH">Entregas de materia prima</h3>${M.length?M.map(x=>{const L=x.lados||{};return `<div class="uRow"><div class="row" style="gap:8px"><b>${esc(x.nombre)}</b>${x.meta&&x.meta.ref?`<span class="small muted">${esc(x.meta.ref)}</span>`:""}</div>
       ${["E","R"].map(r=>{const l=L[r];return `<div class="row" style="gap:6px"><span class="small" style="min-width:130px">${ROLN[r]}</span>${l?(l.bloqueado?'<span class="pill p-bad">Bloqueado</span>':`<span class="small">${esc(l.persona||"sin nombre")} · ${fmt(l.n_lecturas||0)} lecturas${l.terminado?" · terminó":""}</span>`):'<span class="pill p-mut">Sin abrir</span>'}<span class="sep"></span>
         ${l&&!l.bloqueado&&!l.terminado?`<button class="btn sm" data-lbml="${esc(x.id)}|${r}">🔓 Liberar</button>`:""}<button class="btn sm ${l&&l.bloqueado?"primary":"danger"}" data-lbmb="${esc(x.id)}|${r}|${l&&l.bloqueado?0:1}">${l&&l.bloqueado?"Desbloquear":"⛔ Bloquear"}</button></div>`}).join("")}</div>`}).join(""):'<p class="muted small" style="margin:0">No hay entregas abiertas.</p>'}`;
-  const ok=async(fn,args,msg)=>{try{await rpc(SB,fn,Object.assign({p_clave:SB.admin},args));toast(msg);await lbRefresh()}catch(e){toast(LBMSG(e))}};
+  const ok=async(fn,args,msg)=>{try{await rpc(SB,fn,Object.assign({p_clave:SB.admin},args));toast(msg);await lbRefresh();return true}catch(e){toast(LBMSG(e));return false}};
   $$("#lbBox [data-lbu]").forEach(b=>b.onclick=()=>{const u=U.find(x=>x.id===b.dataset.lbu);confirmBox(`Liberar el equipo de ${esc(u.nombre||u.id)}: su mismo link se podrá abrir en otro equipo. El equipo actual queda desconectado.`,()=>ok("cb_u_liberar",{p_id:u.id},"Equipo liberado: el usuario abre su mismo link en el equipo nuevo"),"#lbConfirm")});
   $$("#lbBox [data-lbk]").forEach(b=>b.onclick=()=>{const u=U.find(x=>x.id===b.dataset.lbk);if(u.activo===false)return uGuardar(u,{activo:true}).then(lbRender);
     confirmBox(`Bloquear a ${esc(u.nombre||u.id)}: no podrá usar la app hasta que lo desbloquees.`,()=>uGuardar(u,{activo:false}).then(lbRender),"#lbConfirm")});
@@ -7850,7 +7909,7 @@ function lbRender(){
   $$("#lbBox [data-lbl]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbl);confirmBox(`Liberar el celular de "${esc(x.nombre)}": ese celular ya no podrá enviar. El próximo que abra el link quedará como dueño y recuperará las ${fmt(x.n_lecturas||0)} lecturas.`,()=>ok("cb_liberar",{p_id:x.id},"Celular liberado: reenvía el mismo link"),"#lbConfirm")});
   $$("#lbBox [data-lbb]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbb);if(x.bloqueado)return ok("cb_bloquear",{p_id:x.id,p_si:false},"Link desbloqueado: puede abrirse de nuevo");
     confirmBox(`Bloquear el link de "${esc(x.nombre)}": nadie podrá abrirlo ni enviar lecturas hasta que lo desbloquees. Las lecturas recibidas se mantienen.`,()=>ok("cb_bloquear",{p_id:x.id,p_si:true},"Link de conteo bloqueado"),"#lbConfirm")});
-  $$("#lbBox [data-lbf]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbf);confirmBox(`Finalizar "${esc(x.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,()=>ok("cb_finalizar",{p_id:x.id},"Conteo finalizado"),"#lbConfirm")});
+  $$("#lbBox [data-lbf]").forEach(b=>b.onclick=()=>{const x=nubeLive.get(b.dataset.lbf);confirmBox(`Finalizar "${esc(x.nombre)}": el celular ya no podrá enviar más lecturas. Las recibidas se mantienen.`,()=>ok("cb_finalizar",{p_id:x.id},"Conteo finalizado").then(r=>{if(r)fotoTrasFin(x.id)}),"#lbConfirm")});
   $$("#lbBox [data-lbml]").forEach(b=>b.onclick=()=>{const [id,r]=b.dataset.lbml.split("|"),x=movLive.get(id);confirmBox(`Liberar el celular de ${r==="E"?"quien entrega":"quien recibe"} en "${esc(x.nombre)}": el próximo que abra el link en ese rol lo toma y recupera sus lecturas.`,()=>ok("cb_mov_liberar",{p_id:id,p_rol:r},"Celular liberado"),"#lbConfirm")});
   $$("#lbBox [data-lbmb]").forEach(b=>b.onclick=()=>{const [id,r,si]=b.dataset.lbmb.split("|"),x=movLive.get(id);if(si==="0")return ok("cb_mov_bloquear",{p_id:id,p_rol:r,p_si:false},"Desbloqueado");
     confirmBox(`Bloquear a ${r==="E"?"quien entrega":"quien recibe"} en "${esc(x.nombre)}": nadie podrá abrir ese rol ni enviar hasta que lo desbloquees.`,()=>ok("cb_mov_bloquear",{p_id:id,p_rol:r,p_si:true},"Bloqueado"),"#lbConfirm")});
