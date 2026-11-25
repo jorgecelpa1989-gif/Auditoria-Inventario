@@ -83,7 +83,7 @@ td.desc{white-space:normal;min-width:180px;max-width:360px}
 .camWrap{display:flex;flex-direction:column;gap:8px}
 .camTarget{font:700 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:6px;background:var(--accent);color:var(--accent-ink)}
 .contarCard{max-width:720px;width:100%;margin:0 auto}
-body.expired .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}
+body.expired #v-contar .contarCard{opacity:.45;pointer-events:none;filter:grayscale(1)}   /* solo la pantalla de conteo: PT, MP, devoluciones y proveedores siguen funcionando */
 .nextUbic{justify-content:center;font-size:16px;padding:12px;border:2px solid var(--accent);color:var(--ink)}
 .done{background:var(--ok-bg)!important;border-color:var(--ok)!important}
 .conv{margin-top:4px;padding:6px 10px;border-radius:6px;background:var(--panel);border:1px dashed var(--primary);font-size:14px;color:var(--ink)}
@@ -6771,7 +6771,7 @@ function checkExpiry(){
     if(!$("#conteoBanner").dataset.exp){$("#conteoBanner").dataset.exp="1";
       $("#conteoBanner").innerHTML=`<div class="confirm" style="flex-direction:column;align-items:stretch"><b>El conteo venció el ${fmtDT(v)}</b><span class="small">Ya no se pueden registrar lecturas. Exporta tus conteos (abajo) y envíalos al supervisor.</span></div>`;}
     if(typeof stopCam==="function"&&cam)stopCam();
-    if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+    const a=document.activeElement;if(a&&a.blur&&a.closest&&a.closest("#v-contar"))a.blur();   // solo si el cursor está en el conteo vencido
   }
   return exp;
 }
