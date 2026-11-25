@@ -6195,7 +6195,7 @@ $("#btnExpRes").onclick=()=>{
 };
 function confirmBox(msg,fn,target){const b=$(target||"#confirmBox");b.innerHTML=`<div class="confirm"><span>${msg}</span><span class="sep"></span><button class="btn sm danger" id="cYes">Sí, continuar</button><button class="btn sm" id="cNo">Cancelar</button></div>`;$("#cNo").onclick=()=>b.innerHTML="";$("#cYes").onclick=()=>{fn();b.innerHTML=""}}
 $("#btnReset").onclick=()=>confirmBox(`Se borrarán ${fmt(scans.length)} lecturas guardadas en este equipo (las de la nube se pueden volver a traer).`,()=>{scans=[];saveScans();renderResult();toast("Lecturas borradas")});
-$("#btnResetAll").onclick=()=>confirmBox("Se borrarán lecturas y stock ERP de este equipo.",()=>{scans=[];erp=null;saveScans();try{localStorage.removeItem("inv_erp")}catch(e){}buildIndex();updStatus();renderResult();toast("Todo borrado")});
+$("#btnResetAll").onclick=()=>confirmBox("Se borrarán las lecturas y el stock ERP de todas las bodegas de este equipo.",()=>{scans=[];erp=null;erpB={};saveScans();try{localStorage.removeItem("inv_erp");localStorage.removeItem("inv_erpb")}catch(e){}if(typeof bodRender==="function")bodRender();buildIndex();updStatus();renderResult();toast("Todo borrado")});
 
 /* ================= Excel ================= */
 const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`};

@@ -18,7 +18,7 @@ const S=process.argv[2],B='http://localhost:8811/index.html',SBU='https://test.s
  await p.evaluate(([u,a])=>{localStorage.setItem('inv_sb',JSON.stringify({url:u,key:'anon',admin:a,ok:true}));localStorage.setItem('inv_cfg',JSON.stringify({sup:true,dev:'pc'}))},[SBU,ADMIN]);
  await p.goto(B+'#pt');await p.reload();await p.waitForTimeout(2500);
  const ops=await p.$$eval('#ptDesde option',o=>o.map(x=>x.textContent));console.log('OPS',ops.join(' | '));
- check(ops.length===8&&/^Hoy · [^ ]+ \d\d-\d\d-\d{4}$/.test(ops[0])&&/^Ayer · /.test(ops[1])&&/^[^ ]+ \d\d-\d\d-\d{4}$/.test(ops[6])&&!ops.some(o=>/horas|24|7 días/.test(o)),'Selector: Hoy, Ayer y 5 fechas más (sin "últimas N horas")');
+ check(ops.length===8&&/^Hoy · [^ ]+ \d\d-\d\d-\d{4}$/.test(ops[0])&&/^Ayer · /.test(ops[1])&&/^[^ ]+ \d\d-\d\d-\d{4}$/.test(ops[6])&&!ops.some(o=>/horas|últimas 24|7 días/.test(o)),'Selector: Hoy, Ayer y 5 fechas más (sin "últimas N horas")');
  const pal=async()=>(await p.$$eval('#ptRes tbody tr td.code b',x=>x.map(e=>e.textContent))).sort().join(',');
  check(await pal()==='HOY-1','Hoy: solo los pallets de hoy (no mezcla el de anoche) → '+await pal());
  await p.selectOption('#ptDesde','d1');await p.waitForTimeout(1500);
