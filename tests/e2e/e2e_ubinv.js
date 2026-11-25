@@ -35,10 +35,16 @@ const hay=(u,k)=>sql(`select cb_ubic_hay('${u}','${k}')::numeric(12,2)`);
  check(/33[.,]3 %/.test(t)&&/IRA por ubicación/.test(t),'IRA por ubicación = 1 de 3 líneas → 33,3 %');
  check(/C0101/.test(t)&&/PICKING RETAIL/.test(t)&&/Zona de piso/.test(t)&&/hilera C, posición 01, nivel 1/.test(t),'Propone crear C0101 (rack) y PICKING RETAIL (zona)');
  check(/1 lecturas sin ubicación no pasan/.test(t)&&!/SIN UBICACIÓN.*nueva/.test(t),'SIN UBICACIÓN no pasa');
- check(/Faltante/.test(t)&&/Diferencia/.test(t)&&!/999999/.test(t),'Faltante solo de SKU del conteo (999999 fuera de la lista no aparece)');
+ check(/Faltante/.test(t)&&/Diferencia/.test(t),'Faltante del SKU del conteo no contado en la ubicación');
+ check(/999999/.test(t)&&/Otro producto: no estaba en el conteo/.test(t)&&/1 producto que no estaba en el conteo/.test(t),'999999 (no estaba en el conteo) aparece como «Otro producto» y pide revisión');
+ check(/más de un producto: B0902/.test(t),'Avisa ubicaciones que quedarían con más de un producto');
+ check(await s.$eval('#ubInvRes [aria-label="Sacar B0902 999999"]',e=>!e.checked),'«Otro producto» viene sin marcar (no se saca solo)');
  check(/Total negativo/.test(t),'Total negativo (B0904) se muestra y no pasa');
  check(/B0903/.test(t)&&!/B 09 03/.test(t.replace(/En el conteo.*$/s,'')),'"B 09 03" se reconoce como B0903');
  check(await s.$eval('#ubInvRes [data-ubnv="PICKING RETAIL"]',e=>!e.checked)&&await s.$eval('#ubInvRes [data-ubnv="C0101"]',e=>e.checked),'Zona de piso nueva viene desmarcada; rack C-01-01 → C0101 marcado');
+ check(await s.isDisabled('#ubInvOk'),'Ajustar bloqueado hasta confirmar que se revisaron los otros productos');
+ await s.check('#ubInvOtroOk');await s.waitForTimeout(300);
+ check(await s.isEnabled('#ubInvOk'),'Con la confirmación se habilita Ajustar');
  const bt=await s.textContent('#ubInvOk');check(/Ajustar 3 líneas/.test(bt),'Marcadas: dif + faltante + C0101 = 3 líneas → '+bt);
  const [dl]=await Promise.all([s.waitForEvent('download'),s.click('#ubInvXls')]);check(/IRA_ubicaciones_Inventario_B/.test(dl.suggestedFilename()),'Excel de revisión e IRA');
  DQ.push('');await s.click('#ubInvOk');await s.waitForTimeout(3000);
@@ -50,6 +56,10 @@ const hay=(u,k)=>sql(`select cb_ubic_hay('${u}','${k}')::numeric(12,2)`);
  // segundo pase del mismo conteo: ya cuadra todo (idempotente)
  await s.click('#ubInvVer');await s.waitForTimeout(2500);
  check(/100 %/.test(await s.textContent('#ubInvRes')),'Segundo pase: IRA 100 % (ya ajustado, no duplica)');
+ // ahora se confirma que 999999 NO está en B0902: se marca para sacarlo
+ await s.check('#ubInvRes [aria-label="Sacar B0902 999999"]');await s.check('#ubInvOtroOk');await s.waitForTimeout(300);
+ DQ.push('');await s.click('#ubInvOk');await s.waitForTimeout(2500);
+ check(hay('B0902','999999')==='0.00'&&sql("select ira from cb_ubic_inv order by t desc limit 1")==='1.0000','Otro producto marcado: se saca (queda en 0) y no cuenta en el IRA');
  // permisos: supervisor solo con ubi_ver no puede aplicar
  const sv=JSON.parse(rpc('cb_sup_guardar',{p_clave:ADMIN,p_id:'',p_nombre:'Solo ver',p_permisos:['ubi_ver','inv_ver']}).body);
  check(!rpc('cb_ubic_inv_aplicar',{p_clave:'s_x.y',p_conteo:c.id,p_nuevas:[],p_lineas:[{u:'B0902',k:'140101',obj:0}]}).ok,'Sin permiso no ajusta');
