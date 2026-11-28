@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planificador</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--tx:#1d2733;--mut:#66727f;--bd:#d9dee5;--ac:#0b6bcb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c0392b}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:#12324f;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}
+header .info{font-size:12px;opacity:.85}
+main{padding:12px 16px;display:grid;gap:12px}
+main>*,.sum>div,.filters>*{min-width:0}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px}
+.card h2{font-size:14px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.drop{border:2px dashed var(--bd);border-radius:8px;padding:24px;text-align:center;cursor:pointer}
+.drop.over{border-color:var(--ac);background:#eaf3fc}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut);min-width:170px}
+select,input,button{font:inherit;padding:6px 8px;border:1px solid var(--bd);border-radius:6px;background:#fff;color:var(--tx)}
+button{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}
+button.sec{background:#fff;color:var(--ac)}
+button:disabled{opacity:.5;cursor:default}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.ms{border:1px solid var(--bd);border-radius:6px;padding:6px}
+.ms .hd{display:flex;justify-content:space-between;align-items:center;font-weight:600;margin-bottom:4px}
+.ms .hd small{font-weight:400;color:var(--mut)}
+.ms .acts{display:flex;gap:4px;margin-bottom:4px}
+.ms .acts button{padding:2px 6px;font-size:11px}
+.ms input.q{width:100%;margin-bottom:4px;padding:4px 6px;font-size:12px}
+.ms .lst{max-height:170px;overflow:auto;font-size:13px}
+.ms .lst label{display:flex;gap:6px;align-items:center;padding:1px 0;cursor:pointer}
+.ms .lst label span.n{margin-left:auto;color:var(--mut);font-size:11px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:10px}
+.kpi b{display:block;font-size:22px}
+.kpi span{font-size:12px;color:var(--mut)}
+.tw{overflow:auto;max-height:60vh;border:1px solid var(--bd);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:5px 8px;border-bottom:1px solid #eef1f4;white-space:nowrap;text-align:left}
+th{position:sticky;top:0;background:#eef2f7;cursor:pointer;user-select:none;z-index:1}
+td.num,th.num{text-align:right}
+tr:hover td{background:#f7fafd}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;background:#eef2f7}
+.mut{color:var(--mut);font-size:12px}
+.hidden{display:none!important}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+@media (max-width:600px){main{padding:8px}label.f{min-width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>📦 Planificador — Stock por canal / sucursal</h1>
+  <span class="info" id="hdrInfo">Sin archivo cargado · funciona sin internet</span>
+</header>
+<main>
+
+<section class="card" id="cardCarga">
+  <h2>1. Cargar Excel</h2>
+  <div class="drop" id="drop">Arrastra aquí el archivo <b>.xlsx / .xls / .csv</b> o haz clic para elegirlo
+    <input type="file" id="file" accept=".xlsx,.xls,.xlsm,.csv" class="hidden">
+  </div>
+  <div class="row" style="margin-top:10px" id="rowHoja">
+    <label class="f">Hoja<select id="selHoja"></select></label>
+    <label class="f">Fila de encabezados<input type="number" id="filaHdr" min="1" value="1" style="width:90px"></label>
+    <span class="mut" id="infoArchivo"></span>
+  </div>
+</section>
+
+<section class="card hidden" id="cardMap">
+  <h2>2. Columnas del archivo <small class="mut">(detectadas automáticamente; corrige si hace falta)</small></h2>
+  <div class="row" id="mapRow"></div>
+</section>
+
+<section class="card hidden" id="cardFil">
+  <h2>3. Filtros</h2>
+  <div class="row" style="margin-bottom:10px">
+    <label class="f">Vigencia sucursal
+      <select id="fVig"><option value="vig">Solo vigentes</option><option value="todas">Todas</option><option value="novig">Solo NO vigentes</option></select>
+    </label>
+    <label class="f">Stock CDL
+      <select id="fStock">
+        <option value="todos">Todos</option>
+        <option value="pos">Con stock (&gt; 0)</option>
+        <option value="cero">Sin stock (= 0)</option>
+        <option value="neg">Negativo (&lt; 0)</option>
+        <option value="rango">Rango…</option>
+      </select>
+    </label>
+    <label class="f rng hidden">Mín<input type="number" id="fMin" step="any" style="width:110px"></label>
+    <label class="f rng hidden">Máx<input type="number" id="fMax" step="any" style="width:110px"></label>
+    <label class="f" style="flex:1">Buscar texto (código, descripción…)<input type="search" id="fTxt" placeholder="Escribe para filtrar"></label>
+    <button class="sec" id="btnLimpiar">Limpiar filtros</button>
+  </div>
+  <div class="filters">
+    <div class="ms" id="msCanal"></div>
+    <div class="ms" id="msSuc"></div>
+    <div class="ms" id="msTipo"></div>
+  </div>
+</section>
+
+<section class="kpis hidden" id="kpis"></section>
+
+<section class="card hidden" id="cardSum">
+  <h2>Resumen</h2>
+  <div class="sum">
+    <div><div class="mut">Por canal</div><div class="tw" style="max-height:260px"><table id="tSumCanal"></table></div></div>
+    <div><div class="mut">Por tipo de material</div><div class="tw" style="max-height:260px"><table id="tSumTipo"></table></div></div>
+    <div><div class="mut">Por sucursal</div><div class="tw" style="max-height:260px"><table id="tSumSuc"></table></div></div>
+  </div>
+</section>
+
+<section class="card hidden" id="cardRes">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <h2 style="margin:0">Detalle</h2>
+    <div class="row">
+      <label class="f" style="min-width:auto">Columnas a mostrar<select id="selCols" style="min-width:160px"><option value="todas">Todas</option><option value="clave">Solo columnas clave</option></select></label>
+      <button id="btnExp">⬇ Exportar Excel (filtrado)</button>
+    </div>
+  </div>
+  <div class="tw"><table id="tRes"></table></div>
+  <div class="mut" id="pie" style="margin-top:6px"></div>
+</section>
+
+</main>
+
+<script>/*__SHEETJS__*/</script>
+<script>
+'use strict';
+// ===== Estado =====
+const S = { wb:null, nombre:'', hdr:[], filas:[], map:{}, sel:{canal:null,suc:null,tipo:null}, orden:{col:null,dir:1}, filtradas:[] };
+const LS = 'planificador.v1';
+const CAMPOS = [
+  {k:'canal', t:'Canal',            pat:[/^canal/i,/canal/i]},
+  {k:'suc',   t:'Sucursal',         pat:[/^sucursal$/i,/sucursal|tienda|local|bodega|almac/i]},
+  {k:'vig',   t:'Vigencia sucursal',pat:[/vigen/i,/estado.*suc|suc.*estado/i,/^estado$/i,/activ/i]},
+  {k:'stock', t:'Stock CDL',        pat:[/stock.*cdl|cdl.*stock/i,/^cdl$/i,/cdl/i]},
+  {k:'tipo',  t:'Tipo de material', pat:[/tipo.*mat/i,/tipo.*art|tipo.*prod/i,/^tipo$/i,/material/i]},
+];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase();
+const fmt = n => (Math.round(n*100)/100).toLocaleString('es-CL');
+function guardar(){ try{ localStorage.setItem(LS, JSON.stringify({map:S.map, vig:$('fVig').value, stock:$('fStock').value})); }catch(e){} }
+function leerLS(){ try{ return JSON.parse(localStorage.getItem(LS)||'{}'); }catch(e){ return {}; } }
+
+// Número robusto: 1234 | "1.234" | "1.234,5" | "1,234.5" | "-3" | ""
+function num(v){
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v ?? '').trim().replace(/\s|\$/g,'');
+  if (!s) return 0;
+  const c = s.lastIndexOf(','), p = s.lastIndexOf('.');
+  if (c > -1 && p > -1) s = c > p ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+  else if (c > -1) s = /,\d{3}$/.test(s) && s.split(',').length > 2 ? s.replace(/,/g,'') : s.replace(',','.');
+  else if (p > -1 && /^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g,'');
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+// Vigente: SI, S, VIGENTE, ACTIVO/A, 1, TRUE, X, V  — no vigente: NO, N, 0, INACTIVO, NO VIGENTE, BAJA, CERRADA
+function esVigente(v){
+  const s = norm(v);
+  if (!s) return false;
+  return /^(si|s|1|true|verdadero|x|v|vigente|activ[oa]?|abiert[oa]|habilitad[oa]|ok)$/.test(s);
+}
+
+// ===== Carga =====
+const drop = $('drop'), file = $('file');
+drop.onclick = () => file.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) cargar(e.dataTransfer.files[0]); };
+file.onchange = () => file.files[0] && cargar(file.files[0]);
+
+function cargar(f){
+  if (typeof XLSX === 'undefined'){ alert('No se cargó el lector de Excel.'); return; }
+  $('infoArchivo').textContent = 'Leyendo ' + f.name + '…';
+  const r = new FileReader();
+  r.onload = e => {
+    try{
+      S.wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true, raw:true});
+      S.nombre = f.name;
+      const sh = $('selHoja');
+      sh.innerHTML = S.wb.SheetNames.map((n,i)=>`<option value="${i}">${esc(n)}</option>`).join('');
+      // Elegir la hoja con más filas
+      let best = 0, bestN = -1;
+      S.wb.SheetNames.forEach((n,i)=>{ const ref = S.wb.Sheets[n]['!ref']; const rows = ref ? XLSX.utils.decode_range(ref).e.r : 0; if (rows > bestN){ bestN = rows; best = i; } });
+      sh.value = best;
+      $('filaHdr').value = detectarHdr(hojaAoA()) + 1;
+      procesar();
+    }catch(err){ console.error(err); $('infoArchivo').textContent = '❌ No se pudo leer el archivo: ' + err.message; }
+  };
+  r.readAsArrayBuffer(f);
+}
+$('selHoja').onchange = () => { $('filaHdr').value = detectarHdr(hojaAoA()) + 1; procesar(); };
+$('filaHdr').onchange = procesar;
+
+function hojaAoA(){
+  const ws = S.wb.Sheets[S.wb.SheetNames[+$('selHoja').value]];
+  if (!ws['!ref']) return [];
+  const rg = XLSX.utils.decode_range(ws['!ref']); rg.s.r = 0; rg.s.c = 0; // numeración = filas reales de Excel
+  return XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:true, blankrows:true, range:rg});
+}
+// Encabezado = primera fila (de las 30 primeras) con más celdas de texto no vacías
+function detectarHdr(aoa){
+  let best = 0, bestN = 0;
+  for (let i = 0; i < Math.min(30, aoa.length); i++){
+    const n = aoa[i].filter(c => typeof c === 'string' && c.trim()).length;
+    if (n > bestN){ bestN = n; best = i; }
+  }
+  return best;
+}
+function procesar(){
+  const aoa = hojaAoA();
+  const h = Math.max(0, (+$('filaHdr').value || 1) - 1);
+  const vistos = {};
+  S.hdr = (aoa[h] || []).map((c,i) => { let n = String(c).trim() || ('Col ' + (i+1)); if (vistos[n]) n += ' (' + (++vistos[n]) + ')'; else vistos[n] = 1; return n; });
+  S.filas = aoa.slice(h+1).filter(r => r.some(c => c !== '' && c != null)).map(r => { const o = {}; S.hdr.forEach((k,i) => o[k] = r[i] instanceof Date ? r[i].toLocaleDateString('es-CL') : (r[i] ?? '')); Object.defineProperty(o, '__q', {value: S.hdr.map(k => norm(o[k])).join('\u0001')}); return o; });
+  $('infoArchivo').textContent = `✅ ${S.nombre} · ${S.filas.length.toLocaleString('es-CL')} filas · ${S.hdr.length} columnas`;
+  $('hdrInfo').textContent = S.nombre + ' · cargado ' + new Date().toLocaleString('es-CL');
+  autoMap();
+  pintarMap();
+  S.sel = {canal:null, suc:null, tipo:null};
+  ['cardMap','cardFil','kpis','cardSum','cardRes'].forEach(id => $(id).classList.remove('hidden'));
+  construirFiltros();
+  aplicar();
+}
+
+// ===== Mapeo de columnas =====
+function autoMap(){
+  const prev = leerLS().map || {};
+  const usados = new Set();
+  S.map = {};
+  for (const c of CAMPOS){
+    if (prev[c.k] && S.hdr.includes(prev[c.k]) && !usados.has(prev[c.k])){ S.map[c.k] = prev[c.k]; usados.add(prev[c.k]); continue; }
+    let hit = '';
+    for (const p of c.pat){ hit = S.hdr.find(h => !usados.has(h) && p.test(norm(h))) || ''; if (hit) break; }
+    S.map[c.k] = hit; if (hit) usados.add(hit);
+  }
+}
+function pintarMap(){
+  $('mapRow').innerHTML = CAMPOS.map(c => `<label class="f">${esc(c.t)}${S.map[c.k] ? '' : ' <b style="color:var(--warn)">(no detectada)</b>'}
+    <select data-k="${c.k}"><option value="">— ninguna —</option>${S.hdr.map(h => `<option value="${esc(h)}"${h===S.map[c.k]?' selected':''}>${esc(h)}</option>`).join('')}</select></label>`).join('');
+  $('mapRow').querySelectorAll('select').forEach(s => s.onchange = () => { S.map[s.dataset.k] = s.value; guardar(); S.sel = {canal:null,suc:null,tipo:null}; pintarMap(); construirFiltros(); aplicar(); });
+}
+
+// ===== Filtros multi-selección =====
+const MS = [{k:'canal', el:'msCanal', t:'Canal'}, {k:'suc', el:'msSuc', t:'Sucursal'}, {k:'tipo', el:'msTipo', t:'Tipo de material'}];
+function construirFiltros(){
+  const ls = leerLS();
+  $('fVig').value = ls.vig || 'vig';
+  $('fStock').value = ls.stock || 'todos';
+  toggleRango();
+  for (const m of MS){
+    const col = S.map[m.k], box = $(m.el);
+    if (!col){ box.innerHTML = `<div class="hd">${m.t}</div><div class="mut">Asigna la columna arriba para filtrar.</div>`; S.sel[m.k] = null; continue; }
+    const cnt = new Map();
+    S.filas.forEach(r => { const v = String(r[col]).trim() || '(vacío)'; cnt.set(v, (cnt.get(v)||0) + 1); });
+    const vals = [...cnt.keys()].sort((a,b) => a.localeCompare(b,'es',{numeric:true}));
+    if (!S.sel[m.k]) S.sel[m.k] = new Set(vals);
+    box.innerHTML = `<div class="hd">${m.t} <small data-c></small></div>
+      <div class="acts"><button class="sec" data-a="all">Todos</button><button class="sec" data-a="none">Ninguno</button></div>
+      <input class="q" placeholder="Buscar ${m.t.toLowerCase()}…">
+      <div class="lst">${vals.map(v => `<label><input type="checkbox" value="${esc(v)}"${S.sel[m.k].has(v)?' checked':''}> ${esc(v)}<span class="n">${cnt.get(v)}</span></label>`).join('')}</div>`;
+    const upd = () => { box.querySelector('[data-c]').textContent = `${S.sel[m.k].size}/${vals.length}`; };
+    upd();
+    box.querySelector('.lst').onchange = e => { const v = e.target.value; e.target.checked ? S.sel[m.k].add(v) : S.sel[m.k].delete(v); upd(); aplicar(); };
+    box.querySelector('.q').oninput = e => { const q = norm(e.target.value); box.querySelectorAll('.lst label').forEach(l => l.classList.toggle('hidden', q && !norm(l.textContent).includes(q))); };
+    box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+      const visibles = [...box.querySelectorAll('.lst label:not(.hidden) input')];
+      visibles.forEach(i => { i.checked = b.dataset.a === 'all'; i.checked ? S.sel[m.k].add(i.value) : S.sel[m.k].delete(i.value); });
+      upd(); aplicar();
+    });
+  }
+}
+function toggleRango(){ document.querySelectorAll('.rng').forEach(e => e.classList.toggle('hidden', $('fStock').value !== 'rango')); }
+$('fVig').onchange = () => { guardar(); aplicar(); };
+$('fStock').onchange = () => { toggleRango(); guardar(); aplicar(); };
+let tTxt; $('fTxt').oninput = () => { clearTimeout(tTxt); tTxt = setTimeout(aplicar, 200); };
+$('fMin').oninput = $('fMax').oninput = () => { clearTimeout(tTxt); tTxt = setTimeout(aplicar, 200); };
+$('btnLimpiar').onclick = () => { S.sel = {canal:null,suc:null,tipo:null}; $('fTxt').value=''; $('fMin').value=''; $('fMax').value=''; try{ localStorage.setItem(LS, JSON.stringify({map:S.map})); }catch(e){} construirFiltros(); aplicar(); };
+$('selCols').onchange = pintarTabla;
+
+// ===== Aplicar filtros =====
+function aplicar(){
+  const m = S.map, vig = $('fVig').value, st = $('fStock').value, q = norm($('fTxt').value);
+  const min = $('fMin').value === '' ? -Infinity : +$('fMin').value, max = $('fMax').value === '' ? Infinity : +$('fMax').value;
+  S.filtradas = S.filas.filter(r => {
+    for (const x of MS){ const col = m[x.k]; if (col && S.sel[x.k] && !S.sel[x.k].has(String(r[col]).trim() || '(vacío)')) return false; }
+    if (m.vig && vig !== 'todas'){ const v = esVigente(r[m.vig]); if ((vig === 'vig') !== v) return false; }
+    if (m.stock && st !== 'todos'){
+      const n = num(r[m.stock]);
+      if (st === 'pos' && !(n > 0)) return false;
+      if (st === 'cero' && n !== 0) return false;
+      if (st === 'neg' && !(n < 0)) return false;
+      if (st === 'rango' && (n < min || n > max)) return false;
+    }
+    if (q && !r.__q.includes(q)) return false;
+    return true;
+  });
+  ordenar();
+  pintarKpis(); pintarResumen(); pintarTabla();
+}
+function ordenar(){
+  const {col, dir} = S.orden; if (!col) return;
+  const esN = v => typeof v === 'number' || /^-?[\d.,\s$]+$/.test(String(v).trim()) && /\d/.test(String(v));
+  S.filtradas.sort((a,b) => (esN(a[col]) && esN(b[col]) ? num(a[col]) - num(b[col]) : String(a[col]).localeCompare(String(b[col]),'es',{numeric:true})) * dir);
+}
+
+// ===== Render =====
+function pintarKpis(){
+  const m = S.map, f = S.filtradas;
+  const tot = m.stock ? f.reduce((s,r) => s + num(r[m.stock]), 0) : null;
+  const distinct = k => m[k] ? new Set(f.map(r => String(r[m[k]]).trim())).size : '—';
+  const sinStock = m.stock ? f.filter(r => num(r[m.stock]) <= 0).length : '—';
+  $('kpis').innerHTML = [
+    ['Filas filtradas', f.length.toLocaleString('es-CL') + ' / ' + S.filas.length.toLocaleString('es-CL')],
+    ['Total stock CDL', tot === null ? '—' : fmt(tot)],
+    ['Filas sin stock (≤0)', typeof sinStock === 'number' ? sinStock.toLocaleString('es-CL') : sinStock],
+    ['Canales', distinct('canal')], ['Sucursales', distinct('suc')], ['Tipos de material', distinct('tipo')],
+  ].map(([t,v]) => `<div class="kpi"><b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('');
+}
+function resumen(tabla, col){
+  const m = S.map;
+  if (!col){ $(tabla).innerHTML = '<tr><td class="mut">Columna no asignada</td></tr>'; return; }
+  const g = new Map();
+  S.filtradas.forEach(r => { const k = String(r[col]).trim() || '(vacío)'; const o = g.get(k) || {n:0, s:0}; o.n++; if (m.stock) o.s += num(r[m.stock]); g.set(k, o); });
+  const arr = [...g].sort((a,b) => b[1].s - a[1].s || b[1].n - a[1].n);
+  $(tabla).innerHTML = `<tr><th>${esc(col)}</th><th class="num">Filas</th><th class="num">Stock CDL</th></tr>` +
+    arr.map(([k,o]) => `<tr><td>${esc(k)}</td><td class="num">${o.n.toLocaleString('es-CL')}</td><td class="num">${m.stock ? fmt(o.s) : '—'}</td></tr>`).join('');
+}
+function pintarResumen(){ resumen('tSumCanal', S.map.canal); resumen('tSumTipo', S.map.tipo); resumen('tSumSuc', S.map.suc); }
+function columnasVisibles(){
+  if ($('selCols').value === 'todas') return S.hdr;
+  const clave = new Set(Object.values(S.map).filter(Boolean));
+  // Clave + columnas típicas de identificación del material
+  S.hdr.forEach(h => { if (/codigo|cod\.?|sku|material|descrip|articulo|producto|nombre/i.test(norm(h))) clave.add(h); });
+  return S.hdr.filter(h => clave.has(h));
+}
+const MAXF = 1000;
+function pintarTabla(){
+  const cols = columnasVisibles(), f = S.filtradas, stockCol = S.map.stock;
+  const flecha = c => S.orden.col === c ? (S.orden.dir > 0 ? ' ▲' : ' ▼') : '';
+  const isN = c => c === stockCol;
+  $('tRes').innerHTML = `<thead><tr>${cols.map(c => `<th data-c="${esc(c)}" class="${isN(c)?'num':''}">${esc(c)}${flecha(c)}</th>`).join('')}</tr></thead><tbody>` +
+    f.slice(0, MAXF).map(r => `<tr>${cols.map(c => { const v = r[c]; const n = isN(c); const esNum = n || typeof v === 'number'; return `<td class="${esNum?'num':''}">${esc(n && v !== '' ? fmt(num(v)) : typeof v === 'number' ? v.toLocaleString('es-CL') : v)}</td>`; }).join('')}</tr>`).join('') + '</tbody>';
+  $('tRes').querySelectorAll('th').forEach(th => th.onclick = () => { const c = th.dataset.c; S.orden = {col:c, dir: S.orden.col === c ? -S.orden.dir : 1}; ordenar(); pintarTabla(); });
+  $('pie').textContent = f.length > MAXF ? `Mostrando ${MAXF} de ${f.length.toLocaleString('es-CL')} filas. Exporta a Excel para verlas todas.` : `${f.length.toLocaleString('es-CL')} filas.`;
+}
+
+// ===== Exportar =====
+$('btnExp').onclick = () => {
+  if (!S.filtradas.length){ alert('No hay filas con los filtros actuales.'); return; }
+  const cols = columnasVisibles();
+  const wb = XLSX.utils.book_new();
+  const datos = S.filtradas.map(r => { const o = {}; cols.forEach(c => o[c] = c === S.map.stock ? num(r[c]) : r[c]); return o; });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(datos, {header:cols}), 'Filtrado');
+  const filtros = [
+    ['Archivo origen', S.nombre], ['Generado', new Date().toLocaleString('es-CL')],
+    ['Vigencia', $('fVig').selectedOptions[0].text], ['Stock CDL', $('fStock').selectedOptions[0].text + ($('fStock').value==='rango' ? ` [${$('fMin').value||'-∞'} … ${$('fMax').value||'∞'}]` : '')],
+    ['Texto', $('fTxt').value || '(ninguno)'],
+    ...MS.map(x => [x.t, S.map[x.k] && S.sel[x.k] ? [...S.sel[x.k]].join(', ').slice(0, 32000) : '(sin filtro)']),
+    ['Filas', S.filtradas.length],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filtros), 'Filtros');
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  XLSX.writeFile(wb, `planificacion_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`);
+};
+</script>
+</body>
+</html>
