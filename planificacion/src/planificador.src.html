@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planificador</title>
 <style>
-:root{--bg:#f4f6f9;--card:#fff;--tx:#1d2733;--mut:#66727f;--bd:#d9dee5;--ac:#0b6bcb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c0392b}
+:root{color-scheme:light;--bg:#f4f6f9;--card:#fff;--tx:#1d2733;--mut:#66727f;--bd:#d9dee5;--ac:#0b6bcb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c0392b}
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--tx)}
 header{background:#12324f;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -47,6 +47,8 @@ tr:hover td{background:#f7fafd}
 .mut{color:var(--mut);font-size:12px}
 .hidden{display:none!important}
 .sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+#toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#12324f;color:#fff;padding:10px 16px;border-radius:8px;max-width:calc(100% - 32px);box-shadow:0 4px 14px #0003;z-index:20}
+#toast.err{background:var(--bad)}
 @media (max-width:600px){main{padding:8px}label.f{min-width:100%}}
 </style>
 </head>
@@ -55,6 +57,7 @@ tr:hover td{background:#f7fafd}
   <h1>📦 Planificador — Stock por canal / sucursal</h1>
   <span class="info" id="hdrInfo">Sin archivo cargado · funciona sin internet</span>
 </header>
+<div id="toast" hidden role="status"></div>
 <main>
 
 <section class="card" id="cardCarga">
@@ -152,13 +155,14 @@ const S = { wb:null, nombre:'', hdr:[], filas:[], map:{}, sel:{canal:null,suc:nu
 const LS = 'planificador.v1';
 const CAMPOS = [
   {k:'canal', t:'Canal',            pat:[/^canal/i,/canal/i]},
-  {k:'suc',   t:'Sucursal',         pat:[/^sucursal$/i,/sucursal|tienda|local|bodega|almac/i]},
-  {k:'vig',   t:'Vigencia sucursal',pat:[/vigen/i,/estado.*suc|suc.*estado/i,/^estado$/i,/activ/i]},
-  {k:'stock', t:'Stock CDL',        pat:[/stock.*cdl|cdl.*stock/i,/^cdl$/i,/cdl/i]},
-  {k:'tipo',  t:'Tipo de material', pat:[/tipo.*mat/i,/tipo.*art|tipo.*prod/i,/^tipo$/i,/material/i]},
-  {k:'doi',   t:'DOI+AGEN',         pat:[/doi.*agen/i,/^doi/i]},
+  {k:'suc',   t:'Sucursal',         pat:[/^sucursal$/i,/denominacion.*almac/i,/sucursal|tienda|local|bodega|almac/i]},
+  {k:'vig',   t:'Vigencia sucursal',pat:[/^vig$/i,/vigen/i,/estado.*suc|suc.*estado/i,/^estado$/i,/activ/i]},
+  {k:'stock', t:'Stock CDL',        pat:[/stock.*cdl|cdl.*stock/i,/^stock.?cd$/i,/^cdl?$/i,/cdl/i]},
+  {k:'tipo',  t:'Tipo de material', pat:[/tipo.*mat/i,/tipo.*art|tipo.*prod/i,/^tipo$/i,/^mat$/i,/material/i]},
+  {k:'doi',   t:'DOI+AGEN',         pat:[/doi.*agen.*7/i,/doi.*agen/i,/^doi/i]},
   {k:'agen',  t:'AGEN',             pat:[/^agen/i,/agend/i]},
-  {k:'vta',   t:'Venta diaria (opcional)', pat:[/venta.*dia|vta.*dia|dia.*venta/i,/demanda/i,/venta.*prom|vta.*prom|^vpd$/i]},
+  {k:'real',  t:'Stock sucursal (REAL)', pat:[/^real$/i,/stock.*suc|suc.*stock/i]},
+  {k:'vta',   t:'Ventas (período)', pat:[/^ventas?_?7\s*d/i,/venta.*dia|vta.*dia|dia.*venta/i,/demanda/i,/venta.*prom|vta.*prom|^vpd$/i,/^ventas?/i]},
 ];
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -167,6 +171,18 @@ const fmt = n => (Math.round(n*100)/100).toLocaleString('es-CL');
 function guardar(){ try{ localStorage.setItem(LS, JSON.stringify({map:S.map, vig:$('fVig').value, stock:$('fStock').value})); }catch(e){} }
 function leerLS(){ try{ return JSON.parse(localStorage.getItem(LS)||'{}'); }catch(e){ return {}; } }
 
+// Avisos en pantalla (alert() no se muestra dentro de la página publicada)
+let tAviso;
+function avisar(msg, err){ const t = $('toast'); t.textContent = msg; t.className = err ? 'err' : ''; t.hidden = false; clearTimeout(tAviso); tAviso = setTimeout(() => t.hidden = true, 4000); }
+// Descarga: en el enlace de prueba (claude.ai) usa el permiso de descargas; en el PC (archivo local) descarga directa
+let DL = null;
+try { window.claude?.use?.('downloads')?.then(d => DL = d).catch(() => {}); } catch(e){}
+function descargar(wb, nombre){
+  if (!DL){ XLSX.writeFile(wb, nombre); return; }
+  const buf = XLSX.write(wb, {type:'array', bookType:'xlsx'});
+  DL.save({filename: nombre, data: new Blob([buf])}).then(() => avisar('Excel guardado: ' + nombre))
+    .catch(e => avisar(e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo descargar (' + (e && e.code || 'error') + ').', true));
+}
 // Número robusto: 1234 | "1.234" | "1.234,5" | "1,234.5" | "-3" | ""
 function num(v){
   if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -196,7 +212,7 @@ drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.da
 file.onchange = () => file.files[0] && cargar(file.files[0]);
 
 function cargar(f){
-  if (typeof XLSX === 'undefined'){ alert('No se cargó el lector de Excel.'); return; }
+  if (typeof XLSX === 'undefined'){ avisar('No se cargó el lector de Excel.', true); return; }
   $('infoArchivo').textContent = 'Leyendo ' + f.name + '…';
   const r = new FileReader();
   r.onload = e => {
@@ -241,7 +257,7 @@ function procesar(){
   S.filas = aoa.slice(h+1).filter(r => r.some(c => c !== '' && c != null)).map(r => { const o = {}; S.hdr.forEach((k,i) => o[k] = r[i] instanceof Date ? r[i].toLocaleDateString('es-CL') : (r[i] ?? '')); Object.defineProperty(o, '__q', {value: S.hdr.map(k => norm(o[k])).join('\u0001')}); return o; });
   $('infoArchivo').textContent = `✅ ${S.nombre} · ${S.filas.length.toLocaleString('es-CL')} filas · ${S.hdr.length} columnas`;
   $('hdrInfo').textContent = S.nombre + ' · cargado ' + new Date().toLocaleString('es-CL');
-  autoMap();
+  autoMap(); syncVta();
   pintarMap();
   S.sel = {canal:null, suc:null, tipo:null};
   ['cardMap','cardFil','kpis','cardSum','cardPlan','cardRes'].forEach(id => $(id).classList.remove('hidden'));
@@ -264,7 +280,7 @@ function autoMap(){
 function pintarMap(){
   $('mapRow').innerHTML = CAMPOS.map(c => `<label class="f">${esc(c.t)}${S.map[c.k] ? '' : ' <b style="color:var(--warn)">(no detectada)</b>'}
     <select data-k="${c.k}"><option value="">— ninguna —</option>${S.hdr.map(h => `<option value="${esc(h)}"${h===S.map[c.k]?' selected':''}>${esc(h)}</option>`).join('')}</select></label>`).join('');
-  $('mapRow').querySelectorAll('select').forEach(s => s.onchange = () => { S.map[s.dataset.k] = s.value; guardar(); S.sel = {canal:null,suc:null,tipo:null}; pintarMap(); construirFiltros(); aplicar(); });
+  $('mapRow').querySelectorAll('select').forEach(s => s.onchange = () => { S.map[s.dataset.k] = s.value; if (s.dataset.k === 'doi') syncVta(); guardar(); S.sel = {canal:null,suc:null,tipo:null}; pintarMap(); construirFiltros(); aplicar(); });
 }
 
 // ===== Filtros multi-selección =====
@@ -372,7 +388,7 @@ function pintarTabla(){
 
 // ===== Exportar =====
 $('btnExp').onclick = () => {
-  if (!S.filtradas.length){ alert('No hay filas con los filtros actuales.'); return; }
+  if (!S.filtradas.length){ avisar('No hay filas con los filtros actuales.', true); return; }
   const cols = columnasVisibles();
   const wb = XLSX.utils.book_new();
   const datos = S.filtradas.map(r => { const o = {}; cols.forEach(c => o[c] = c === S.map.stock ? num(r[c]) : r[c]); return o; });
@@ -386,12 +402,17 @@ $('btnExp').onclick = () => {
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filtros), 'Filtros');
   const d = new Date(), p = n => String(n).padStart(2,'0');
-  XLSX.writeFile(wb, `planificacion_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`);
+  descargar(wb, `planificacion_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`);
 };
 
+// Días de la ventana de ventas a partir del nombre: "Ventas_7D" → 7, "DOI+Agen_15D" → 15; sin número = ya es diaria (1)
+function diasDe(h){ const x = /(\d+)\s*d(ias?)?$/i.exec(String(h || '').trim()); return x ? +x[1] : 1; }
+// Si el DOI es de una ventana (7D/15D/28D), usar la columna de ventas de la misma ventana
+function syncVta(){ const d = diasDe(S.map.doi); if (d === 1) return; const h = S.hdr.find(x => /venta|vta/i.test(norm(x)) && diasDe(x) === d); if (h) S.map.vta = h; }
 // ===== Paso 4: reposición por DOI =====
 // Regla: si DOI+AGEN < DOI objetivo del tipo de material → unidades = ⌈(objetivo − DOI+AGEN) × venta diaria⌉ (redondeado al múltiplo),
-// se suman a AGEN y el DOI+AGEN nuevo queda ≥ objetivo. Venta diaria: columna propia o (Stock CDL + AGEN) ÷ DOI+AGEN.
+// se suman a AGEN y el DOI+AGEN nuevo queda ≥ objetivo. Venta diaria = Ventas del período ÷ días (Ventas_7D ÷ 7).
+// Con stock sucursal (REAL): unidades exactas = objetivo × venta diaria − (REAL + AGEN).
 const LSP = 'planificador.doi.v1';
 const P = (() => { try { return JSON.parse(localStorage.getItem(LSP) || '{}'); } catch(e){ return {}; } })();
 P.obj = P.obj || {};
@@ -401,15 +422,19 @@ const tipoDe = r => S.map.tipo ? (String(r[S.map.tipo]).trim() || '(vacío)') : 
 function objDe(t){ const v = Object.hasOwn(P.obj, t) ? P.obj[t] : ''; if (v !== '' && v != null) return +v; return (P.def !== undefined && P.def !== '') ? +P.def : null; }
 function calcFila(r){
   const m = S.map, doi = num(r[m.doi]), agen = m.agen ? num(r[m.agen]) : 0, obj = objDe(tipoDe(r));
-  const vta = m.vta ? num(r[m.vta]) : (m.stock && doi > 0 ? (num(r[m.stock]) + agen) / doi : 0);
+  const vta = m.vta ? num(r[m.vta]) / diasDe(m.vta) : 0;
   const o = {doi, agen, obj, vta, add:0, nuevoAgen:agen, nuevoDoi:doi, estado:''};
-  if (!esNumero(r[m.doi])){ o.estado = 'DOI inválido'; o.vta = 0; return o; }
+  if (!(vta > 0)){ o.estado = 'Sin venta'; return o; }
+  if (!esNumero(r[m.doi])){ o.estado = 'DOI inválido'; return o; }
   if (obj === null){ o.estado = 'Sin objetivo'; return o; }
   if (doi >= obj){ o.estado = 'OK'; return o; }
-  if (!(vta > 0)){ o.estado = 'Sin venta diaria'; return o; }
   const mult = Math.max(1, Math.round(+P.mult) || 1);
-  o.add = Math.ceil(Math.ceil((obj - doi) * vta - 1e-9) / mult) * mult;
-  o.nuevoAgen = agen + o.add; o.nuevoDoi = doi + o.add / vta; o.estado = 'Agregar';
+  // Con stock sucursal: unidades exactas (el DOI del archivo suele venir redondeado). Sin él: desde el DOI.
+  const base = m.real && esNumero(r[m.real]) ? num(r[m.real]) + agen : null;
+  const falta = base !== null ? obj * vta - base : (obj - doi) * vta;
+  if (falta <= 1e-9){ o.estado = 'OK'; return o; } // con REAL ya alcanza el objetivo (el DOI del archivo viene redondeado)
+  o.add = Math.ceil(Math.ceil(falta - 1e-9) / mult) * mult;
+  o.nuevoAgen = agen + o.add; o.nuevoDoi = base !== null ? (base + o.add) / vta : doi + o.add / vta; o.estado = 'Agregar';
   return o;
 }
 function pintarPlan(){
@@ -418,9 +443,8 @@ function pintarPlan(){
     $('tCrit').innerHTML = '<tr><td class="mut">Asigna la columna DOI+AGEN en el paso 2.</td></tr>'; $('tCrit').dataset.firma = '';
     ['tPlan','pKpis'].forEach(id => $(id).innerHTML = ''); $('pPie').textContent = ''; $('pVtaInfo').textContent = ''; return;
   }
-  $('pVtaInfo').textContent = m.vta ? `Venta diaria: columna «${m.vta}».`
-    : m.stock ? `Venta diaria calculada = (${m.stock} + ${m.agen || '0'}) ÷ ${m.doi}. Si tienes columna de venta diaria, asígnala en el paso 2.`
-    : '⚠ Falta columna de venta diaria (o Stock CDL) para calcular unidades.';
+  $('pVtaInfo').textContent = m.vta ? `Venta diaria = ${m.vta}${diasDe(m.vta) > 1 ? ' ÷ ' + diasDe(m.vta) : ''}. ${m.real ? `Unidades exactas = DOI objetivo × venta diaria − (${m.real} + ${m.agen || 'AGEN'}).` : `Unidades = (DOI objetivo − ${m.doi}) × venta diaria.`}`
+    : '⚠ Asigna la columna de Ventas en el paso 2 para calcular unidades.';
   S.plan = S.filtradas.map(r => ({r, c: calcFila(r)}));
   const g = new Map(), est = {};
   S.plan.forEach(({r, c}) => { est[c.estado] = (est[c.estado] || 0) + 1; const t = tipoDe(r); const o = g.get(t) || {n:0, sd:0, bajo:0, add:0}; o.n++; o.sd += c.doi; if (c.estado === 'Agregar'){ o.bajo++; o.add += c.add; } g.set(t, o); });
@@ -436,7 +460,7 @@ function pintarPlan(){
   $('tCrit').querySelectorAll('input[data-t]').forEach(inp => inp.placeholder = P.def !== undefined && P.def !== '' ? String(P.def) : '—');
   const cnt = e => est[e] || 0;
   const totAdd = [...g.values()].reduce((s,o) => s + o.add, 0);
-  $('pKpis').innerHTML = [['Filas a reponer', cnt('Agregar')], ['Unidades a agregar en AGEN', fmt(totAdd)], ['Filas OK (≥ objetivo)', cnt('OK')], ['Sin objetivo', cnt('Sin objetivo')], ['Sin venta diaria', cnt('Sin venta diaria')], ['DOI inválido', cnt('DOI inválido')]]
+  $('pKpis').innerHTML = [['Filas a reponer', cnt('Agregar')], ['Unidades a agregar en AGEN', fmt(totAdd)], ['Filas OK (≥ objetivo)', cnt('OK')], ['Sin objetivo', cnt('Sin objetivo')], ['Sin venta', cnt('Sin venta')], ['DOI inválido', cnt('DOI inválido')]]
     .map(([t,v]) => `<div class="kpi"><b>${esc(typeof v === 'number' ? v.toLocaleString('es-CL') : v)}</b><span>${esc(t)}</span></div>`).join('');
   pintarTablaPlan();
 }
@@ -454,7 +478,7 @@ $('pMult').onchange = () => { P.mult = Math.max(1, Math.round(+$('pMult').value)
 $('pSolo').onchange = pintarTablaPlan;
 $('pExp').onclick = () => {
   const m = S.map, f = (S.plan || []).slice().sort((a,b) => b.c.add - a.c.add); // siempre todas las filas filtradas
-  if (!m.doi || !f.length){ alert('No hay filas para exportar con el criterio actual.'); return; }
+  if (!m.doi || !f.length){ avisar('No hay filas para exportar con el criterio actual.', true); return; }
   const libre = n => { let k = n, i = 2; while (S.hdr.includes(k)) k = `${n} (${i++})`; return k; };
   const X = ['AGEN original', 'Unidades agregadas', 'DOI objetivo', 'Venta diaria usada', 'DOI+AGEN nuevo', 'Estado plan DOI'].map(libre);
   const cols = S.hdr.concat(X);
@@ -465,9 +489,9 @@ $('pExp').onclick = () => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(datos, {header:cols}), 'Plan DOI');
   const tipos = [...new Set(S.plan.map(x => tipoDe(x.r)))].sort();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Tipo de material', 'DOI objetivo'], ...tipos.map(t => [t, objDe(t) ?? '(sin objetivo)']), [], ['Columna AGEN', m.agen ? m.agen + ' (ya incluye las unidades agregadas)' : '(no asignada)'], ['Venta diaria', m.vta || `calculada (${m.stock} + AGEN) ÷ ${m.doi}`], ['Múltiplo', P.mult || 1], ['Archivo origen', S.nombre], ['Generado', new Date().toLocaleString('es-CL')]]), 'Criterio');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Tipo de material', 'DOI objetivo'], ...tipos.map(t => [t, objDe(t) ?? '(sin objetivo)']), [], ['Columna AGEN', m.agen ? m.agen + ' (ya incluye las unidades agregadas)' : '(no asignada)'], ['Venta diaria', m.vta ? m.vta + (diasDe(m.vta) > 1 ? ' ÷ ' + diasDe(m.vta) : '') : '(no asignada)'], ['DOI usado', m.doi], ['Múltiplo', P.mult || 1], ['Archivo origen', S.nombre], ['Generado', new Date().toLocaleString('es-CL')]]), 'Criterio');
   const d = new Date(), p = n => String(n).padStart(2,'0');
-  XLSX.writeFile(wb, `plan_doi_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`);
+  descargar(wb, `plan_doi_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.xlsx`);
 };
 </script>
 </body>
