@@ -180,6 +180,7 @@ const CAMPOS = [
   {k:'suc',   t:'Sucursal',         pat:[/^sucursal$/i,/denominacion.*almac/i,/sucursal|tienda|local|bodega|almac/i]},
   {k:'vig',   t:'Vigencia sucursal',pat:[/^vig$/i,/vigen/i,/estado.*suc|suc.*estado/i,/^estado$/i,/activ/i]},
   {k:'stock', t:'Stock CDL',        pat:[/stock.*cdl|cdl.*stock/i,/^stock.?cd$/i,/^cdl?$/i,/cdl/i]},
+  {k:'mat',   t:'Código material',  pat:[/^material$/i,/^sku$/i,/cod.*mat|mat.*cod/i,/^codigo$/i]},
   {k:'tipo',  t:'Tipo de material', pat:[/tipo.*mat/i,/tipo.*art|tipo.*prod/i,/^tipo$/i,/^mat$/i,/material/i]},
   {k:'doi',   t:'DOI+AGEN',         pat:[/doi.*agen.*7/i,/doi.*agen/i,/^doi/i]},
   {k:'agen',  t:'AGEN',             pat:[/^agen/i,/agend/i]},
@@ -370,23 +371,33 @@ function ordenar(){
 // ===== Render =====
 function pintarKpis(){
   const m = S.map, f = S.filtradas;
-  const tot = m.stock ? f.reduce((s,r) => s + num(r[m.stock]), 0) : null;
+  const tot = m.stock ? sumaCDL(f) : null;
   const distinct = k => m[k] ? new Set(f.map(r => String(r[m[k]]).trim())).size : '—';
   const sinStock = m.stock ? f.filter(r => num(r[m.stock]) <= 0).length : '—';
   $('kpis').innerHTML = [
     ['Filas filtradas', f.length.toLocaleString('es-CL') + ' / ' + S.filas.length.toLocaleString('es-CL')],
-    ['Total stock CDL', tot === null ? '—' : fmt(tot)],
+    [m.mat ? 'Total stock CDL (1 vez por material)' : 'Total stock CDL', tot === null ? '—' : fmt(tot)],
     ['Filas sin stock (≤0)', typeof sinStock === 'number' ? sinStock.toLocaleString('es-CL') : sinStock],
     ['Canales', distinct('canal')], ['Sucursales', distinct('suc')], ['Tipos de material', distinct('tipo')],
   ].map(([t,v]) => `<div class="kpi"><b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('');
+}
+// Stock CDL se repite en cada fila del mismo material (es el stock del CD): se suma una sola vez por material.
+// Sin columna de código material asignada, suma fila a fila.
+function sumaCDL(filas){
+  const m = S.map; if (!m.stock) return 0;
+  if (!m.mat) return filas.reduce((s,r) => s + num(r[m.stock]), 0);
+  const vistos = new Set(); let s = 0;
+  filas.forEach(r => { const k = String(r[m.mat]).trim(); if (!k) s += num(r[m.stock]); else if (!vistos.has(k)){ vistos.add(k); s += num(r[m.stock]); } });
+  return s;
 }
 function resumen(tabla, col){
   const m = S.map;
   if (!col){ $(tabla).innerHTML = '<tr><td class="mut">Columna no asignada</td></tr>'; return; }
   const g = new Map();
-  S.filtradas.forEach(r => { const k = String(r[col]).trim() || '(vacío)'; const o = g.get(k) || {n:0, s:0}; o.n++; if (m.stock) o.s += num(r[m.stock]); g.set(k, o); });
+  S.filtradas.forEach(r => { const k = String(r[col]).trim() || '(vacío)'; const o = g.get(k) || {n:0, f:[]}; o.n++; o.f.push(r); g.set(k, o); });
+  g.forEach(o => o.s = sumaCDL(o.f));
   const arr = [...g].sort((a,b) => b[1].s - a[1].s || b[1].n - a[1].n);
-  $(tabla).innerHTML = `<tr><th>${esc(col)}</th><th class="num">Filas</th><th class="num">Stock CDL</th></tr>` +
+  $(tabla).innerHTML = `<tr><th>${esc(col)}</th><th class="num">Filas</th><th class="num">Stock CDL${m.mat ? ' (1 vez por material)' : ''}</th></tr>` +
     arr.map(([k,o]) => `<tr><td>${esc(k)}</td><td class="num">${o.n.toLocaleString('es-CL')}</td><td class="num">${m.stock ? fmt(o.s) : '—'}</td></tr>`).join('');
 }
 function pintarResumen(){ resumen('tSumCanal', S.map.canal); resumen('tSumTipo', S.map.tipo); resumen('tSumSuc', S.map.suc); }
